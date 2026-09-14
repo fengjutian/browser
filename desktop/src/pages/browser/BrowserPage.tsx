@@ -13,7 +13,7 @@ export function BrowserPage() {
   const [tabs, setTabs] = useState<BrowserTab[]>([newTab('new')])
   const [activeTabId, setActiveTabId] = useState('new')
   const [address, setAddress] = useState('')
-  const [aiOpen, setAiOpen] = useState(true)
+  const [aiOpen, setAiOpen] = useState(false)
   const [nativeMode, setNativeMode] = useState(false)
   const [readerArticle, setReaderArticle] = useState<ReaderArticle | null>(null)
   const [messageApi, contextHolder] = message.useMessage()
