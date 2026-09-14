@@ -38,4 +38,14 @@ func TestSQLiteRepositoryPersistsAndSearches(t *testing.T) {
 	if len(found) != 1 || found[0].ID != created.ID || len(found[0].Tags) != 2 {
 		t.Fatalf("unexpected search result: %#v", found)
 	}
+	if err = repository.Delete(ctx, created.ID); err != nil {
+		t.Fatal(err)
+	}
+	found, err = repository.List(ctx, "capability")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(found) != 0 {
+		t.Fatalf("deleted document remains in FTS: %#v", found)
+	}
 }

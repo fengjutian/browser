@@ -52,7 +52,11 @@ func (s *Server) routes() {
 }
 
 func (s *Server) listDocuments(w http.ResponseWriter, r *http.Request) {
-	items, _ := s.documents.List(r.Context(), r.URL.Query().Get("q"))
+	items, err := s.documents.List(r.Context(), r.URL.Query().Get("q"))
+	if err != nil {
+		writeError(w, 500, "storage_error", "unable to list documents")
+		return
+	}
 	writeJSON(w, 200, map[string]any{"items": items, "total": len(items)})
 }
 func (s *Server) createDocument(w http.ResponseWriter, r *http.Request) {
@@ -78,6 +82,10 @@ func (s *Server) getDocument(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 404, "not_found", "document not found")
 		return
 	}
+	if err != nil {
+		writeError(w, 500, "storage_error", "unable to read document")
+		return
+	}
 	writeJSON(w, 200, item)
 }
 func (s *Server) updateDocument(w http.ResponseWriter, r *http.Request) {
@@ -91,11 +99,18 @@ func (s *Server) updateDocument(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 404, "not_found", "document not found")
 		return
 	}
+	if err != nil {
+		writeError(w, 500, "storage_error", "unable to update document")
+		return
+	}
 	writeJSON(w, 200, item)
 }
 func (s *Server) deleteDocument(w http.ResponseWriter, r *http.Request) {
 	if err := s.documents.Delete(r.Context(), r.PathValue("id")); errors.Is(err, document.ErrNotFound) {
 		writeError(w, 404, "not_found", "document not found")
+		return
+	} else if err != nil {
+		writeError(w, 500, "storage_error", "unable to delete document")
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -114,11 +129,19 @@ func (s *Server) searchPost(w http.ResponseWriter, r *http.Request) {
 	s.writeSearch(w, r, body.Query)
 }
 func (s *Server) writeSearch(w http.ResponseWriter, r *http.Request, q string) {
-	items, _ := s.documents.List(r.Context(), q)
+	items, err := s.documents.List(r.Context(), q)
+	if err != nil {
+		writeError(w, 500, "search_error", "unable to search documents")
+		return
+	}
 	writeJSON(w, 200, map[string]any{"query": q, "mode": "keyword", "items": items, "total": len(items)})
 }
 func (s *Server) knowledge(w http.ResponseWriter, r *http.Request) {
-	items, _ := s.documents.List(r.Context(), "")
+	items, err := s.documents.List(r.Context(), "")
+	if err != nil {
+		writeError(w, 500, "storage_error", "unable to read knowledge statistics")
+		return
+	}
 	tags := map[string]bool{}
 	for _, d := range items {
 		for _, t := range d.Tags {
