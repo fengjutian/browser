@@ -17,6 +17,21 @@ SQLite + FTS5 ── P1: vector index ── optional remote providers
 - Go 是领域逻辑与异步任务的唯一实现位置。
 - 本地 HTTP 服务仅监听 loopback，并在正式版本使用每次启动生成的 bearer token。
 
+## 前端工程结构
+
+```text
+desktop/src/
+├── app/            # 路由、Provider、全局启动逻辑
+├── layouts/        # 应用外壳和跨页面布局
+├── pages/          # 路由级页面，按业务域拆分
+├── features/       # 可复用业务功能（文档、搜索、AI 等）
+├── services/       # HTTP、Tauri command、配置与持久化适配器
+├── shared/         # 无业务依赖的通用组件和工具
+└── styles/         # SCSS 变量、主题和全局样式
+```
+
+UI 基础设施采用 Ant Design，图标统一来自 `@ant-design/icons`；品牌色、圆角等通过 `ConfigProvider` token 覆盖，布局细节使用 SCSS。页面不能直接依赖具体网络实现，应通过 feature/service 层访问数据。
+
 ## 模块依赖规则
 
 领域模块不依赖 HTTP；HTTP 只做校验、映射和错误响应。存储通过 Repository 接口注入。AI Provider、Embedding 和 Reranker 均为可替换接口。Reader 的浏览器侧提取与服务端标准化使用版本化 payload。

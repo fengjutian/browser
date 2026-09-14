@@ -4,7 +4,7 @@
 
 ## 当前进度
 
-- React + TypeScript 桌面端交互原型
+- React + TypeScript + Ant Design + SCSS 桌面端交互原型
 - Go REST API（健康检查、文档 CRUD、搜索、知识库统计、AI 占位接口、插件占位接口）
 - SQLite 数据结构迁移
 - Tauri 2 / Rust 工程与插件权限模型占位
