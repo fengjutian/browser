@@ -16,7 +16,16 @@ pub fn normalize_navigation(input: &str) -> Result<String, url::ParseError> {
 mod tests {
     use super::*;
     #[test]
-    fn adds_https_to_domains() { assert_eq!(normalize_navigation("example.com").unwrap(), "https://example.com/"); }
+    fn adds_https_to_domains() {
+        assert_eq!(
+            normalize_navigation("example.com").unwrap(),
+            "https://example.com/"
+        );
+    }
     #[test]
-    fn turns_words_into_search() { assert!(normalize_navigation("tauri browser").unwrap().contains("q=tauri+browser")); }
+    fn turns_words_into_search() {
+        assert!(normalize_navigation("tauri browser")
+            .unwrap()
+            .contains("q=tauri+browser"));
+    }
 }

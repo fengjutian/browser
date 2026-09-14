@@ -1,5 +1,5 @@
-use serde::{Deserialize, Serialize};
 use super::PluginPermission;
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct PluginManifest {
@@ -14,8 +14,12 @@ pub struct PluginManifest {
 
 impl PluginManifest {
     pub fn validate(&self) -> Result<(), &'static str> {
-        if self.id.trim().is_empty() || !self.id.contains('.') { return Err("plugin id must be reverse-domain style"); }
-        if self.name.trim().is_empty() || self.version.trim().is_empty() { return Err("plugin name and version are required"); }
+        if self.id.trim().is_empty() || !self.id.contains('.') {
+            return Err("plugin id must be reverse-domain style");
+        }
+        if self.name.trim().is_empty() || self.version.trim().is_empty() {
+            return Err("plugin name and version are required");
+        }
         Ok(())
     }
 }
