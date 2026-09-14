@@ -11,7 +11,8 @@ export function extractArticle(snapshot: PageSnapshot): ReaderArticle {
   base.href = snapshot.url
   document.head.prepend(base)
   const article = new Readability(document, { keepClasses: false }).parse()
-  if (!article?.content || !article.textContent.trim()) throw new Error('reader_content_not_found')
+  const textContent = article?.textContent?.trim() ?? ''
+  if (!article?.content || !textContent) throw new Error('reader_content_not_found')
   const content = new DOMParser().parseFromString(article.content, 'text/html')
   content.querySelectorAll<HTMLElement>('[src],[href]').forEach(element => {
     for (const attribute of ['src', 'href']) {
@@ -20,5 +21,5 @@ export function extractArticle(snapshot: PageSnapshot): ReaderArticle {
     }
   })
   const contentHtml = content.body.innerHTML
-  return { title: article.title.trim(), byline: article.byline?.trim() ?? '', excerpt: article.excerpt?.trim() ?? '', siteName: article.siteName?.trim() ?? '', language: article.lang?.trim() ?? '', contentHtml, markdown: turndown.turndown(contentHtml), textContent: article.textContent.trim(), wordCount: article.textContent.trim().split(/\s+/u).filter(Boolean).length }
+  return { title: article.title?.trim() ?? '', byline: article.byline?.trim() ?? '', excerpt: article.excerpt?.trim() ?? '', siteName: article.siteName?.trim() ?? '', language: article.lang?.trim() ?? '', contentHtml, markdown: turndown.turndown(contentHtml), textContent, wordCount: textContent.split(/\s+/u).filter(Boolean).length }
 }
