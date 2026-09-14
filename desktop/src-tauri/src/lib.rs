@@ -26,6 +26,12 @@ fn validate_navigation(url: String) -> Result<String, String> {
 }
 
 fn external_url(input: &str) -> Result<url::Url, String> {
+    if let Ok(explicit) = url::Url::parse(input.trim()) {
+        return match explicit.scheme() {
+            "http" | "https" => Ok(explicit),
+            _ => Err("only http and https navigation is allowed".into()),
+        };
+    }
     let normalized = browser::normalize_navigation(input).map_err(|error| error.to_string())?;
     let url = url::Url::parse(&normalized).map_err(|error| error.to_string())?;
     match url.scheme() {
