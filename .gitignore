@@ -8,6 +8,7 @@ target/
 *.log
 data/
 desktop/src-tauri/gen/
+desktop/src-tauri/icons/
 .env
 .env.*
 !.env.example

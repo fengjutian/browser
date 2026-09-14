@@ -1,7 +1,9 @@
 fn main() {
+    let icon_dir = std::path::PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").expect("manifest dir")).join("icons");
+    std::fs::create_dir_all(&icon_dir).expect("create icon directory");
     #[cfg(target_os = "windows")]
     {
-        let icon = std::path::PathBuf::from(std::env::var("OUT_DIR").expect("OUT_DIR")).join("app.ico");
+        let icon = icon_dir.join("icon.ico");
         // Minimal 1x1 32-bit ICO used for development builds; release artwork replaces it at packaging time.
         let bytes: [u8; 70] = [
             0,0,1,0,1,0, 1,1,0,0,1,0,32,0,48,0,0,0,22,0,0,0,
