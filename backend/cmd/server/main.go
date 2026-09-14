@@ -18,9 +18,13 @@ func main() {
 		addr = "127.0.0.1:8787"
 	}
 	dataDir := os.Getenv("AKB_DATA_DIR")
-	if dataDir == "" { dataDir = "data" }
+	if dataDir == "" {
+		dataDir = "data"
+	}
 	db, err := storage.Open(context.Background(), filepath.Join(dataDir, "knowledge.db"))
-	if err != nil { log.Fatal(err) }
+	if err != nil {
+		log.Fatal(err)
+	}
 	defer db.Close()
 	server := api.NewServer(document.NewSQLiteRepository(db))
 	log.Printf("AI Knowledge Browser API listening on http://%s", addr)
