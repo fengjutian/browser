@@ -73,19 +73,27 @@ async fn browser_create(
     let builder = tauri::webview::WebviewBuilder::new(&label, tauri::WebviewUrl::External(url))
         .on_new_window(move |url, _features| {
             if matches!(url.scheme(), "http" | "https") {
-                let _ = event_app.emit_to("main", "browser://new-tab", NewTabRequest {
-                    opener_label: opener_label.clone(),
-                    url: url.to_string(),
-                });
+                let _ = event_app.emit_to(
+                    "main",
+                    "browser://new-tab",
+                    NewTabRequest {
+                        opener_label: opener_label.clone(),
+                        url: url.to_string(),
+                    },
+                );
             }
             tauri::webview::NewWindowResponse::Deny
         });
-    let window = app.get_window("main").ok_or_else(|| "main window not found".to_string())?;
-    window.add_child(
-        builder,
-        tauri::LogicalPosition::new(bounds.x, bounds.y),
-        tauri::LogicalSize::new(bounds.width.max(1.0), bounds.height.max(1.0)),
-    ).map_err(|error| error.to_string())?;
+    let window = app
+        .get_window("main")
+        .ok_or_else(|| "main window not found".to_string())?;
+    window
+        .add_child(
+            builder,
+            tauri::LogicalPosition::new(bounds.x, bounds.y),
+            tauri::LogicalSize::new(bounds.width.max(1.0), bounds.height.max(1.0)),
+        )
+        .map_err(|error| error.to_string())?;
     Ok(())
 }
 
