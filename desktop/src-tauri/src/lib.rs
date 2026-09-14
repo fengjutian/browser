@@ -28,6 +28,7 @@ struct NewTabRequest {
 struct BrowserState {
     url: String,
     title: String,
+    favicon: Option<String>,
     loading: bool,
 }
 
@@ -120,6 +121,14 @@ async fn browser_reload(app: tauri::AppHandle, label: String) -> Result<(), Stri
 }
 
 #[tauri::command]
+async fn browser_stop(app: tauri::AppHandle, label: String) -> Result<(), String> {
+    app.get_webview(&label)
+        .ok_or_else(|| "browser tab webview not found".to_string())?
+        .eval("window.stop()")
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
 async fn browser_history(app: tauri::AppHandle, label: String, delta: i32) -> Result<(), String> {
     if !(-1..=1).contains(&delta) || delta == 0 {
         return Err("history delta must be -1 or 1".into());
@@ -155,7 +164,7 @@ async fn browser_state(app: tauri::AppHandle, label: String) -> Result<BrowserSt
         .ok_or_else(|| "browser tab webview not found".to_string())?;
     eval_json(
         webview,
-        "({url:location.href,title:document.title,loading:document.readyState!=='complete'})",
+        "({url:location.href,title:document.title,favicon:(document.querySelector('link[rel~=icon]')?.href??null),loading:document.readyState!=='complete'})",
     )
     .await
 }
@@ -193,6 +202,7 @@ pub fn run() {
             browser_create,
             browser_navigate,
             browser_reload,
+            browser_stop,
             browser_history,
             browser_state,
             browser_snapshot

@@ -1,9 +1,9 @@
 import { FormEvent, useEffect, useRef, useState } from 'react'
-import { Button, Card, Input, Segmented, Space, Tabs, Tag, Typography, message } from 'antd'
-import { ArrowLeftOutlined, ArrowRightOutlined, BookOutlined, CloseOutlined, GlobalOutlined, PlusOutlined, ReloadOutlined, RobotOutlined, SafetyCertificateOutlined, SaveOutlined, SearchOutlined, StarOutlined, ThunderboltOutlined, TranslationOutlined } from '@ant-design/icons'
+import { Button, Card, Input, Segmented, Space, Tabs, Tag, Tooltip, Typography, message, type InputRef } from 'antd'
+import { ArrowLeftOutlined, ArrowRightOutlined, BookOutlined, CloseOutlined, GlobalOutlined, LoadingOutlined, PlusOutlined, ReloadOutlined, RobotOutlined, SafetyCertificateOutlined, SaveOutlined, SearchOutlined, StarOutlined, ThunderboltOutlined, TranslationOutlined } from '@ant-design/icons'
 import type { BrowserTab } from '../../types'
 import { getDocument, saveDocument } from '../../api'
-import { captureNativePage, closeNativeTab, hasNativeTab, hideNativeTab, navigateHistory, onNativeNewTab, openNativeTab, readNativeState, reloadNativeTab, resizeNativeTab, showNativeTab } from '../../services/nativeBrowser'
+import { captureNativePage, closeNativeTab, hasNativeTab, hideNativeTab, navigateHistory, onNativeNewTab, openNativeTab, readNativeState, reloadNativeTab, resizeNativeTab, showNativeTab, stopNativeTab } from '../../services/nativeBrowser'
 import { extractArticle } from '../../features/reader/extractArticle'
 import type { ReaderArticle } from '../../features/reader/types'
 
@@ -18,6 +18,7 @@ export function BrowserPage() {
   const [readerArticle, setReaderArticle] = useState<ReaderArticle | null>(null)
   const [messageApi, contextHolder] = message.useMessage()
   const surfaceRef = useRef<HTMLDivElement>(null)
+  const addressRef = useRef<InputRef>(null)
   const previousTab = useRef<string | undefined>(undefined)
   const activeTabIdRef = useRef(activeTabId)
   const tabsRef = useRef(tabs)
@@ -43,7 +44,8 @@ export function BrowserPage() {
       try {
         const state = await readNativeState(active.id)
         if (!state) return
-        setTabs(current => current.map(tab => tab.id === active.id ? { ...tab, url: state.url, title: state.title || state.url, loading: state.loading } : tab))
+        const fallbackTitle = (() => { try { return new URL(state.url).hostname } catch { return '新标签页' } })()
+        setTabs(current => current.map(tab => tab.id === active.id ? { ...tab, url: state.url, title: state.title || fallbackTitle, favicon: state.favicon, loading: state.loading } : tab))
         setAddress(state.url)
       } catch { /* the page may be navigating between documents */ }
     }
@@ -69,6 +71,46 @@ export function BrowserPage() {
       else unlisten = stop
     })
     return () => { disposed = true; unlisten?.() }
+  }, [])
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      const modifier = event.ctrlKey || event.metaKey
+      if (modifier && event.key.toLowerCase() === 'l') {
+        event.preventDefault()
+        addressRef.current?.focus({ cursor: 'all' })
+      } else if (modifier && event.key.toLowerCase() === 't') {
+        event.preventDefault()
+        openNewTab()
+      } else if (modifier && event.key.toLowerCase() === 'w') {
+        event.preventDefault()
+        closeTab(activeTabIdRef.current)
+      } else if (modifier && event.key === 'Tab') {
+        event.preventDefault()
+        const current = tabsRef.current.findIndex(tab => tab.id === activeTabIdRef.current)
+        const direction = event.shiftKey ? -1 : 1
+        const next = (current + direction + tabsRef.current.length) % tabsRef.current.length
+        activateTab(tabsRef.current[next].id)
+      } else if (modifier && /^[1-9]$/.test(event.key)) {
+        event.preventDefault()
+        const requested = event.key === '9' ? tabsRef.current.length - 1 : Number(event.key) - 1
+        const selected = tabsRef.current[Math.min(requested, tabsRef.current.length - 1)]
+        if (selected) activateTab(selected.id)
+      } else if (event.altKey && event.key === 'ArrowLeft') {
+        event.preventDefault()
+        void navigateHistory(activeTabIdRef.current, -1)
+      } else if (event.altKey && event.key === 'ArrowRight') {
+        event.preventDefault()
+        void navigateHistory(activeTabIdRef.current, 1)
+      } else if (event.key === 'Escape' && hasNativeTab(activeTabIdRef.current)) {
+        void stopNativeTab(activeTabIdRef.current)
+      } else if ((event.key === 'F5' || (modifier && event.key.toLowerCase() === 'r')) && hasNativeTab(activeTabIdRef.current)) {
+        event.preventDefault()
+        void reloadNativeTab(activeTabIdRef.current)
+      }
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
   }, [])
 
   async function navigate(event: FormEvent) {
@@ -123,6 +165,7 @@ export function BrowserPage() {
     const selected = tabs.find(tab => tab.id === id)
     setTabs(current => current.map(tab => ({ ...tab, active: tab.id === id })))
     setActiveTabId(id)
+    activeTabIdRef.current = id
     setAddress(selected?.url ?? '')
     setReaderArticle(null)
     setNativeMode(hasNativeTab(id))
@@ -136,6 +179,7 @@ export function BrowserPage() {
       const replacement = newTab()
       setTabs([replacement])
       setActiveTabId(replacement.id)
+      activeTabIdRef.current = replacement.id
       setAddress('')
       setNativeMode(false)
       return
@@ -144,6 +188,7 @@ export function BrowserPage() {
       const next = remaining[Math.min(closedIndex, remaining.length - 1)]
       setTabs(remaining.map(tab => ({ ...tab, active: tab.id === next.id })))
       setActiveTabId(next.id)
+      activeTabIdRef.current = next.id
       setAddress(next.url)
       setNativeMode(hasNativeTab(next.id))
       return
@@ -183,8 +228,8 @@ export function BrowserPage() {
   }
 
   return <div className="browser-page">{contextHolder}
-    <div className="browser-tabs"><Tabs type="editable-card" hideAdd items={tabs.map(tab => ({ key: tab.id, label: <Space size={6}><GlobalOutlined/>{tab.title}</Space>, closable: tabs.length > 1 }))} activeKey={activeTabId} onChange={activateTab} onEdit={(target, action) => action === 'remove' && closeTab(String(target))}/><Button type="text" aria-label="新建标签页" title="新建标签页" icon={<PlusOutlined/>} onClick={() => openNewTab()}/></div>
-    <div className="browser-toolbar"><Space><Button type="text" icon={<ArrowLeftOutlined/>} onClick={() => void navigateHistory(active.id,-1)}/><Button type="text" icon={<ArrowRightOutlined/>} onClick={() => void navigateHistory(active.id,1)}/><Button type="text" loading={active.loading} icon={<ReloadOutlined/>} onClick={() => void reloadNativeTab(active.id)}/><Button type="text" icon={<BookOutlined/>} onClick={() => void openReader()}>阅读模式</Button></Space><form onSubmit={event => void navigate(event)}><Input prefix={<SafetyCertificateOutlined/>} suffix={<StarOutlined/>} value={address} onChange={event=>setAddress(event.target.value)} placeholder="搜索或输入网址"/></form><Tag icon={<SafetyCertificateOutlined/>} color="green">43</Tag><Button type={aiOpen?'primary':'text'} ghost={aiOpen} icon={<RobotOutlined/>} onClick={()=>setAiOpen(value=>!value)}/></div>
+    <div className="browser-tabs"><Tabs type="editable-card" hideAdd items={tabs.map(tab => ({ key: tab.id, label: <Tooltip title={tab.url || '新标签页'} mouseEnterDelay={0.6}><span className="browser-tab-title">{tab.loading ? <LoadingOutlined spin/> : tab.favicon ? <img src={tab.favicon} alt=""/> : <GlobalOutlined/>}<span>{tab.title}</span></span></Tooltip>, closable: tabs.length > 1 }))} activeKey={activeTabId} onChange={activateTab} onEdit={(target, action) => action === 'remove' && closeTab(String(target))}/><Button type="text" aria-label="新建标签页" title="新建标签页 (Ctrl+T)" icon={<PlusOutlined/>} onClick={() => openNewTab()}/></div>
+    <div className="browser-toolbar"><Space><Button type="text" aria-label="后退" title="后退 (Alt+←)" icon={<ArrowLeftOutlined/>} onClick={() => void navigateHistory(active.id,-1)}/><Button type="text" aria-label="前进" title="前进 (Alt+→)" icon={<ArrowRightOutlined/>} onClick={() => void navigateHistory(active.id,1)}/><Button type="text" aria-label={active.loading?'停止加载':'重新加载'} title={active.loading?'停止加载 (Esc)':'重新加载 (F5)'} icon={active.loading?<CloseOutlined/>:<ReloadOutlined/>} onClick={() => void (active.loading ? stopNativeTab(active.id) : reloadNativeTab(active.id))}/><Button type="text" icon={<BookOutlined/>} onClick={() => void openReader()}>阅读模式</Button></Space><form onSubmit={event => void navigate(event)}><Input ref={addressRef} prefix={<SafetyCertificateOutlined/>} suffix={<StarOutlined/>} value={address} onFocus={event=>event.currentTarget.select()} onChange={event=>setAddress(event.target.value)} placeholder="搜索或输入网址"/></form><Tag icon={<SafetyCertificateOutlined/>} color="green">43</Tag><Button type={aiOpen?'primary':'text'} ghost={aiOpen} icon={<RobotOutlined/>} onClick={()=>setAiOpen(value=>!value)}/></div>
     <div className="browser-content"><div className="web-surface" ref={surfaceRef}>{readerArticle ? <ReaderArticleView article={readerArticle}/> : !nativeMode && (active.url ? <ReaderPreview/> : <NewTab address={address} setAddress={setAddress} navigate={navigate}/>)}</div>{aiOpen&&<AssistantPanel close={()=>setAiOpen(false)} save={save}/>}</div>
   </div>
 }

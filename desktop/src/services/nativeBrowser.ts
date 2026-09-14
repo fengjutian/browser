@@ -4,7 +4,7 @@ import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 import { Webview } from '@tauri-apps/api/webview'
 
 export interface BrowserBounds { x: number; y: number; width: number; height: number }
-export interface NativeBrowserState { url: string; title: string; loading: boolean }
+export interface NativeBrowserState { url: string; title: string; favicon?: string; loading: boolean }
 export interface NativePageSnapshot { url: string; html: string }
 interface NativeNewTabRequest { openerLabel: string; url: string }
 const labels = new Map<string, string>()
@@ -33,6 +33,7 @@ export async function hideNativeTab(tabId: string): Promise<void> { const label=
 export async function closeNativeTab(tabId: string): Promise<void> { const label=labels.get(tabId); if(label) await (await Webview.getByLabel(label))?.close(); labels.delete(tabId) }
 export async function resizeNativeTab(tabId: string, bounds: BrowserBounds): Promise<void> { const label=labels.get(tabId); if(!label)return;const view=await Webview.getByLabel(label);if(!view)return;await view.setPosition(new LogicalPosition(bounds.x,bounds.y));await view.setSize(new LogicalSize(Math.max(1,bounds.width),Math.max(1,bounds.height))) }
 export async function reloadNativeTab(tabId: string): Promise<void> { const label=labels.get(tabId);if(label)await invoke('browser_reload',{label}) }
+export async function stopNativeTab(tabId: string): Promise<void> { const label=labels.get(tabId);if(label)await invoke('browser_stop',{label}) }
 export async function navigateHistory(tabId: string, delta: -1|1): Promise<void> { const label=labels.get(tabId);if(label)await invoke('browser_history',{label,delta}) }
 export async function readNativeState(tabId: string): Promise<NativeBrowserState | null> { const label=labels.get(tabId);return label ? invoke<NativeBrowserState>('browser_state',{label}) : null }
 export async function captureNativePage(tabId: string): Promise<NativePageSnapshot> { const label=labels.get(tabId);if(!label)throw new Error('native webview is not available');return invoke<NativePageSnapshot>('browser_snapshot',{label}) }
