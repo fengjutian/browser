@@ -1,5 +1,7 @@
 @use 'variables' as *;
 
+.route-loading{height:100vh;display:grid;place-items:center}
+
 .search-result-clickable{cursor:pointer;transition:border-color .2s,box-shadow .2s;&:hover{border-color:#8eb99c!important;box-shadow:0 8px 24px rgba(30,64,45,.08)}}.document-reader{max-width:760px;margin:0 auto;.document-reader__summary{margin:18px 0;padding:16px 18px;border-left:4px solid $brand;background:#eef5f0;font-size:16px}.ant-descriptions{margin:24px 0}.markdown-body{margin:36px 0;font-family:Georgia,'Times New Roman',serif;font-size:17px;line-height:1.8;color:#303a34;overflow-wrap:anywhere;h1,h2,h3{font-family:Inter,system-ui,sans-serif;margin-top:1.6em}img{max-width:100%;height:auto;border-radius:10px}pre{overflow:auto;padding:18px;border-radius:10px;background:#17241f;color:#dce8e1;font-size:14px}blockquote{margin:24px 0;padding:4px 20px;border-left:4px solid $brand;color:#657169}table{display:block;max-width:100%;overflow:auto;border-collapse:collapse}th,td{padding:8px 12px;border:1px solid $border}}}
 
 // Compact desktop chrome: keep more room available for the page itself.

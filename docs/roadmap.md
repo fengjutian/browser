@@ -25,6 +25,8 @@
 - [x] SQLite Repository、迁移器、事务与 FTS5
 - [x] 进程内后台 Worker 与 `PENDING → PROCESSING → READY/FAILED` 状态流
 - [x] 前端保存状态轮询与失败反馈
+- [x] 本地 Markdown 文档阅读、来源跳转、导出和删除确认
+- [x] 页面懒加载与 vendor 分包
 - [ ] 持久化任务表、多 Worker、退避重试与崩溃恢复
 
 ## Iteration 3：AI 与隐私
