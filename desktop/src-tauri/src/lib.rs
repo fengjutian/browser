@@ -4,6 +4,7 @@ pub mod plugins;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
+use tauri::image::Image;
 use tauri::Manager;
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -122,6 +123,15 @@ async fn browser_snapshot(app: tauri::AppHandle, label: String) -> Result<PageSn
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .setup(|app| {
+            // Set the runtime window icon explicitly as well as the bundled executable
+            // icon. This keeps `tauri dev` and packaged Windows builds consistent.
+            let icon = Image::from_bytes(include_bytes!("../icons/128x128.png"))?;
+            if let Some(window) = app.get_webview_window("main") {
+                window.set_icon(icon)?;
+            }
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             validate_navigation,
             browser_navigate,

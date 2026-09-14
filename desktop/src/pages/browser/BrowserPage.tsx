@@ -11,6 +11,7 @@ const newTab = (id: string = crypto.randomUUID()): BrowserTab => ({ id, url: '',
 
 export function BrowserPage() {
   const [tabs, setTabs] = useState<BrowserTab[]>([newTab('new')])
+  const [activeTabId, setActiveTabId] = useState('new')
   const [address, setAddress] = useState('')
   const [aiOpen, setAiOpen] = useState(true)
   const [nativeMode, setNativeMode] = useState(false)
@@ -18,7 +19,12 @@ export function BrowserPage() {
   const [messageApi, contextHolder] = message.useMessage()
   const surfaceRef = useRef<HTMLDivElement>(null)
   const previousTab = useRef<string | undefined>(undefined)
-  const active = tabs.find(tab => tab.active) ?? tabs[0]
+  const activeTabIdRef = useRef(activeTabId)
+  const tabsRef = useRef(tabs)
+  const active = tabs.find(tab => tab.id === activeTabId) ?? tabs[0]
+
+  useEffect(() => { activeTabIdRef.current = activeTabId }, [activeTabId])
+  useEffect(() => { tabsRef.current = tabs }, [tabs])
 
   const bounds = () => {
     const rect = surfaceRef.current?.getBoundingClientRect()
@@ -53,30 +59,34 @@ export function BrowserPage() {
     return () => observer.disconnect()
   }, [active.id, aiOpen])
 
-  useEffect(() => () => { tabs.forEach(tab => { void closeNativeTab(tab.id) }) }, [])
+  useEffect(() => () => { tabsRef.current.forEach(tab => { void closeNativeTab(tab.id) }) }, [])
 
   async function navigate(event: FormEvent) {
     event.preventDefault()
     if (!address.trim()) return
     const url = /^https?:\/\//.test(address) ? address : `https://www.google.com/search?q=${encodeURIComponent(address)}`
+    const tabId = active.id
     setReaderArticle(null)
-    setTabs(current => current.map(tab => tab.active ? { ...tab, url, title: address, loading: true } : tab))
+    setTabs(current => current.map(tab => tab.id === tabId ? { ...tab, url, title: address, loading: true } : tab))
     await new Promise(resolve => requestAnimationFrame(resolve))
     const nextBounds = bounds()
     if (!nextBounds) return
     try {
-      const opened = await openNativeTab(active.id, url, nextBounds)
-      setNativeMode(opened)
-      setTabs(current => current.map(tab => tab.id === active.id ? { ...tab, loading: false } : tab))
+      const opened = await openNativeTab(tabId, url, nextBounds)
+      if (activeTabIdRef.current === tabId) setNativeMode(opened)
+      setTabs(current => current.map(tab => tab.id === tabId ? { ...tab, loading: false } : tab))
     } catch (error) {
-      setNativeMode(false)
+      if (activeTabIdRef.current === tabId) setNativeMode(false)
+      setTabs(current => current.map(tab => tab.id === tabId ? { ...tab, loading: false } : tab))
       messageApi.error(`网页打开失败：${String(error)}`)
     }
   }
 
   function addTab() {
+    const tab = newTab()
     if (active) void hideNativeTab(active.id)
-    setTabs(current => [...current.map(tab => ({ ...tab, active: false })), newTab()])
+    setTabs(current => [...current.map(item => ({ ...item, active: false })), tab])
+    setActiveTabId(tab.id)
     setAddress('')
     setNativeMode(false)
     setReaderArticle(null)
@@ -85,6 +95,7 @@ export function BrowserPage() {
   function activateTab(id: string) {
     const selected = tabs.find(tab => tab.id === id)
     setTabs(current => current.map(tab => ({ ...tab, active: tab.id === id })))
+    setActiveTabId(id)
     setAddress(selected?.url ?? '')
     setReaderArticle(null)
     setNativeMode(hasNativeTab(id))
@@ -92,12 +103,25 @@ export function BrowserPage() {
 
   function closeTab(id: string) {
     void closeNativeTab(id)
-    setTabs(current => {
-      const remaining = current.filter(tab => tab.id !== id)
-      if (!remaining.length) return [newTab('new')]
-      if (current.find(tab => tab.id === id)?.active) remaining[remaining.length - 1] = { ...remaining[remaining.length - 1], active: true }
-      return remaining
-    })
+    const closedIndex = tabs.findIndex(tab => tab.id === id)
+    const remaining = tabs.filter(tab => tab.id !== id)
+    if (!remaining.length) {
+      const replacement = newTab()
+      setTabs([replacement])
+      setActiveTabId(replacement.id)
+      setAddress('')
+      setNativeMode(false)
+      return
+    }
+    if (id === activeTabIdRef.current) {
+      const next = remaining[Math.min(closedIndex, remaining.length - 1)]
+      setTabs(remaining.map(tab => ({ ...tab, active: tab.id === next.id })))
+      setActiveTabId(next.id)
+      setAddress(next.url)
+      setNativeMode(hasNativeTab(next.id))
+      return
+    }
+    setTabs(remaining)
   }
 
   async function save() {
@@ -132,7 +156,7 @@ export function BrowserPage() {
   }
 
   return <div className="browser-page">{contextHolder}
-    <div className="browser-tabs"><Tabs type="editable-card" hideAdd items={tabs.map(tab => ({ key: tab.id, label: <Space size={6}><GlobalOutlined/>{tab.title}</Space>, closable: tabs.length > 1 }))} activeKey={active.id} onChange={activateTab} onEdit={(target, action) => action === 'remove' && closeTab(String(target))}/><Button type="text" icon={<PlusOutlined/>} onClick={addTab}/></div>
+    <div className="browser-tabs"><Tabs type="editable-card" hideAdd items={tabs.map(tab => ({ key: tab.id, label: <Space size={6}><GlobalOutlined/>{tab.title}</Space>, closable: tabs.length > 1 }))} activeKey={activeTabId} onChange={activateTab} onEdit={(target, action) => action === 'remove' && closeTab(String(target))}/><Button type="text" aria-label="新建标签页" title="新建标签页" icon={<PlusOutlined/>} onClick={addTab}/></div>
     <div className="browser-toolbar"><Space><Button type="text" icon={<ArrowLeftOutlined/>} onClick={() => void navigateHistory(active.id,-1)}/><Button type="text" icon={<ArrowRightOutlined/>} onClick={() => void navigateHistory(active.id,1)}/><Button type="text" loading={active.loading} icon={<ReloadOutlined/>} onClick={() => void reloadNativeTab(active.id)}/><Button type="text" icon={<BookOutlined/>} onClick={() => void openReader()}>阅读模式</Button></Space><form onSubmit={event => void navigate(event)}><Input prefix={<SafetyCertificateOutlined/>} suffix={<StarOutlined/>} value={address} onChange={event=>setAddress(event.target.value)} placeholder="搜索或输入网址"/></form><Tag icon={<SafetyCertificateOutlined/>} color="green">43</Tag><Button type={aiOpen?'primary':'text'} ghost={aiOpen} icon={<RobotOutlined/>} onClick={()=>setAiOpen(value=>!value)}/></div>
     <div className="browser-content"><div className="web-surface" ref={surfaceRef}>{readerArticle ? <ReaderArticleView article={readerArticle}/> : !nativeMode && (active.url ? <ReaderPreview/> : <NewTab address={address} setAddress={setAddress} navigate={navigate}/>)}</div>{aiOpen&&<AssistantPanel close={()=>setAiOpen(false)} save={save}/>}</div>
   </div>
