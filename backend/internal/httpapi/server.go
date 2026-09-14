@@ -12,6 +12,7 @@ import (
 
 type Server struct {
 	documents document.Repository
+	processor *document.Processor
 	mux       *http.ServeMux
 }
 
@@ -19,6 +20,12 @@ func NewServer(repo document.Repository) *Server {
 	s := &Server{documents: repo, mux: http.NewServeMux()}
 	s.routes()
 	return s
+}
+
+func NewServerWithProcessor(repo document.Repository, processor *document.Processor) *Server {
+	server := NewServer(repo)
+	server.processor = processor
+	return server
 }
 
 func (s *Server) Handler() http.Handler { return cors(s.mux) }
@@ -57,6 +64,10 @@ func (s *Server) createDocument(w http.ResponseWriter, r *http.Request) {
 	item, err := s.documents.Create(r.Context(), in)
 	if err != nil {
 		writeError(w, 500, "internal_error", "unable to create document")
+		return
+	}
+	if s.processor != nil && !s.processor.Enqueue(item.ID) {
+		writeError(w, 503, "queue_full", "document was saved but processing queue is full")
 		return
 	}
 	writeJSON(w, 201, item)
