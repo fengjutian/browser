@@ -8,10 +8,17 @@ use tauri::Manager;
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct BrowserState { url: String, title: String, loading: bool }
+struct BrowserState {
+    url: String,
+    title: String,
+    loading: bool,
+}
 
 #[derive(Debug, Serialize, Deserialize)]
-struct PageSnapshot { url: String, html: String }
+struct PageSnapshot {
+    url: String,
+    html: String,
+}
 
 #[tauri::command]
 fn validate_navigation(url: String) -> Result<String, String> {
@@ -60,25 +67,49 @@ async fn browser_history(app: tauri::AppHandle, label: String, delta: i32) -> Re
         .map_err(|error| error.to_string())
 }
 
-async fn eval_json<T: DeserializeOwned + Send + 'static>(webview: tauri::Webview, script: &str) -> Result<T, String> {
+async fn eval_json<T: DeserializeOwned + Send + 'static>(
+    webview: tauri::Webview,
+    script: &str,
+) -> Result<T, String> {
     let (sender, receiver) = std::sync::mpsc::sync_channel(1);
-    webview.eval_with_callback(script, move |result| { let _ = sender.send(result); }).map_err(|error| error.to_string())?;
-    let result = tauri::async_runtime::spawn_blocking(move || receiver.recv_timeout(Duration::from_secs(5)))
-        .await.map_err(|error| error.to_string())?.map_err(|_| "page script timed out".to_string())?;
+    webview
+        .eval_with_callback(script, move |result| {
+            let _ = sender.send(result);
+        })
+        .map_err(|error| error.to_string())?;
+    let result =
+        tauri::async_runtime::spawn_blocking(move || receiver.recv_timeout(Duration::from_secs(5)))
+            .await
+            .map_err(|error| error.to_string())?
+            .map_err(|_| "page script timed out".to_string())?;
     serde_json::from_str(&result).map_err(|error| format!("invalid page response: {error}"))
 }
 
 #[tauri::command]
 async fn browser_state(app: tauri::AppHandle, label: String) -> Result<BrowserState, String> {
-    let webview = app.get_webview(&label).ok_or_else(|| "browser tab webview not found".to_string())?;
-    eval_json(webview, "({url:location.href,title:document.title,loading:document.readyState!=='complete'})").await
+    let webview = app
+        .get_webview(&label)
+        .ok_or_else(|| "browser tab webview not found".to_string())?;
+    eval_json(
+        webview,
+        "({url:location.href,title:document.title,loading:document.readyState!=='complete'})",
+    )
+    .await
 }
 
 #[tauri::command]
 async fn browser_snapshot(app: tauri::AppHandle, label: String) -> Result<PageSnapshot, String> {
-    let webview = app.get_webview(&label).ok_or_else(|| "browser tab webview not found".to_string())?;
-    let snapshot: PageSnapshot = eval_json(webview, "({url:location.href,html:document.documentElement.outerHTML})").await?;
-    if snapshot.html.len() > 8 * 1024 * 1024 { return Err("page snapshot exceeds 8 MiB limit".into()) }
+    let webview = app
+        .get_webview(&label)
+        .ok_or_else(|| "browser tab webview not found".to_string())?;
+    let snapshot: PageSnapshot = eval_json(
+        webview,
+        "({url:location.href,html:document.documentElement.outerHTML})",
+    )
+    .await?;
+    if snapshot.html.len() > 8 * 1024 * 1024 {
+        return Err("page snapshot exceeds 8 MiB limit".into());
+    }
     Ok(snapshot)
 }
 
@@ -95,4 +126,15 @@ pub fn run() {
         ])
         .run(tauri::generate_context!())
         .expect("error while running AI Knowledge Browser");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn external_navigation_rejects_privileged_protocols() {
+        assert!(external_url("file:///C:/Windows/System32").is_err());
+        assert!(external_url("javascript:alert(1)").is_err());
+    }
 }
