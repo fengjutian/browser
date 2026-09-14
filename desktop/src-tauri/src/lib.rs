@@ -1,4 +1,5 @@
 pub mod browser;
+pub mod local_store;
 pub mod plugins;
 
 use serde::de::DeserializeOwned;
@@ -206,6 +207,10 @@ pub fn run() {
             browser_history,
             browser_state,
             browser_snapshot
+            ,local_store::local_list_documents
+            ,local_store::local_save_document
+            ,local_store::local_get_document
+            ,local_store::local_delete_document
         ])
         .run(tauri::generate_context!())
         .expect("error while running AI Knowledge Browser");
