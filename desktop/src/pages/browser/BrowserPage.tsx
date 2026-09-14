@@ -96,7 +96,7 @@ export function BrowserPage() {
     const tab = newTab()
     const currentId = activeTabIdRef.current
     if (currentId) void hideNativeTab(currentId)
-    if (url) { tab.url = url; tab.title = url; tab.loading = true }
+    if (url) { tab.url = url; tab.title = '正在加载…'; tab.loading = true }
     setTabs(current => [...current.map(item => ({ ...item, active: false })), tab])
     activeTabIdRef.current = tab.id
     setActiveTabId(tab.id)
