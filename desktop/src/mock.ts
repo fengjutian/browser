@@ -1,5 +1,0 @@
-import type { Document } from './types'
-export const demoDocuments:Document[]=[
- {id:'1',title:'Building reliable AI agents',url:'https://example.com/agents',source:'Example Research',author:'Maya Chen',summary:'可靠的 Agent 需要可观测计划、受限工具和明确的高风险操作确认。',markdown:'Agent systems need observable plans, bounded tools, and explicit approval.',wordCount:1840,status:'READY',tags:['AI Agent','Architecture'],createdAt:'2026-09-13T08:00:00Z'},
- {id:'2',title:'Tauri 2 security architecture',url:'https://example.com/tauri',source:'Engineering Notes',author:'Alex Lin',summary:'Tauri capability 模型将网页内容与高权限 Rust 命令隔离。',markdown:'Tauri capabilities isolate WebView content from privileged commands.',wordCount:1210,status:'READY',tags:['Rust','Tauri','Security'],createdAt:'2026-09-12T08:00:00Z'},
- {id:'3',title:'The Model Context Protocol ecosystem',url:'https://example.com/mcp',source:'Protocol Weekly',author:'Jamie Wu',summary:'MCP 为 Agent 与外部服务提供统一的工具和资源协议。',markdown:'MCP connects AI agents with tools and external services.',wordCount:2350,status:'READY',tags:['MCP','AI'],createdAt:'2026-09-10T08:00:00Z'}]

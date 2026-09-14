@@ -27,16 +27,7 @@ type MemoryRepository struct {
 }
 
 func NewMemoryRepository() *MemoryRepository {
-	r := &MemoryRepository{items: make(map[string]Document)}
-	for _, input := range []CreateInput{
-		{Title: "Building reliable AI agents", URL: "https://example.com/agents", Source: "Example Research", Author: "Maya Chen", Language: "en", Markdown: "Agent systems need observable plans, bounded tools, and explicit approval for high-risk actions.", Tags: []string{"AI Agent", "Architecture"}},
-		{Title: "Tauri 2 security architecture", URL: "https://example.com/tauri", Source: "Engineering Notes", Author: "Alex Lin", Language: "en", Markdown: "Tauri capabilities isolate WebView content from privileged Rust commands.", Tags: []string{"Rust", "Tauri", "Security"}},
-	} {
-		doc, _ := r.Create(context.Background(), input)
-		doc.Status = StatusReady
-		r.items[doc.ID] = doc
-	}
-	return r
+    return &MemoryRepository{items: make(map[string]Document)}
 }
 
 func (r *MemoryRepository) Create(_ context.Context, in CreateInput) (Document, error) {
