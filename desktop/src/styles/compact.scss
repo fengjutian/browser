@@ -63,7 +63,12 @@
 }
 
 .document-cover { height: 88px; }
-.document-card .ant-card-body { padding: 12px 14px; }
+.document-card {
+  .ant-card-body { min-height: 126px; padding: 12px 14px; }
+  .ant-card-meta-title { margin-bottom: 4px; font-size: 17px; }
+  .ant-card-meta-description { line-height: 1.55; }
+  .ant-card-actions > li { margin: 8px 0; }
+}
 .page > h3.ant-typography { margin: 12px 0 8px; font-size: 20px; }
 
 .browser-content > .ai-panel {
