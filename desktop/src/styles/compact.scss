@@ -62,7 +62,31 @@
   p.ant-typography { margin-bottom: 10px; }
 }
 
-.document-cover { height: 88px; }
+.document-cover {
+  height: 52px;
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 9px;
+  padding: 0 14px;
+  font-size: 16px;
+
+  &__icon {
+    display: grid;
+    place-items: center;
+    width: 28px;
+    height: 28px;
+    border: 1px solid #afd0ba;
+    border-radius: 7px;
+    background: rgba(255, 255, 255, .55);
+  }
+
+  small {
+    position: static;
+    color: #47745a;
+    font-size: 12px;
+  }
+}
 .document-card {
   .ant-card-body { min-height: 126px; padding: 12px 14px; }
   .ant-card-meta-title { margin-bottom: 4px; font-size: 17px; }
