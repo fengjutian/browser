@@ -5,7 +5,23 @@ use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
 use tauri::image::Image;
-use tauri::Manager;
+use tauri::{Emitter, Manager};
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct BrowserBounds {
+    x: f64,
+    y: f64,
+    width: f64,
+    height: f64,
+}
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct NewTabRequest {
+    opener_label: String,
+    url: String,
+}
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -39,6 +55,38 @@ fn external_url(input: &str) -> Result<url::Url, String> {
         "http" | "https" => Ok(url),
         _ => Err("only http and https navigation is allowed".into()),
     }
+}
+
+#[tauri::command]
+async fn browser_create(
+    app: tauri::AppHandle,
+    label: String,
+    url: String,
+    bounds: BrowserBounds,
+) -> Result<(), String> {
+    if app.get_webview(&label).is_some() {
+        return Ok(());
+    }
+    let url = external_url(&url)?;
+    let opener_label = label.clone();
+    let event_app = app.clone();
+    let builder = tauri::webview::WebviewBuilder::new(&label, tauri::WebviewUrl::External(url))
+        .on_new_window(move |url, _features| {
+            if matches!(url.scheme(), "http" | "https") {
+                let _ = event_app.emit_to("main", "browser://new-tab", NewTabRequest {
+                    opener_label: opener_label.clone(),
+                    url: url.to_string(),
+                });
+            }
+            tauri::webview::NewWindowResponse::Deny
+        });
+    let window = app.get_window("main").ok_or_else(|| "main window not found".to_string())?;
+    window.add_child(
+        builder,
+        tauri::LogicalPosition::new(bounds.x, bounds.y),
+        tauri::LogicalSize::new(bounds.width.max(1.0), bounds.height.max(1.0)),
+    ).map_err(|error| error.to_string())?;
+    Ok(())
 }
 
 #[tauri::command]
@@ -134,6 +182,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             validate_navigation,
+            browser_create,
             browser_navigate,
             browser_reload,
             browser_history,

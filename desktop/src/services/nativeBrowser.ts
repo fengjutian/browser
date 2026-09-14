@@ -1,11 +1,12 @@
 import { invoke } from '@tauri-apps/api/core'
 import { LogicalPosition, LogicalSize } from '@tauri-apps/api/dpi'
+import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 import { Webview } from '@tauri-apps/api/webview'
-import { getCurrentWindow } from '@tauri-apps/api/window'
 
 export interface BrowserBounds { x: number; y: number; width: number; height: number }
 export interface NativeBrowserState { url: string; title: string; loading: boolean }
 export interface NativePageSnapshot { url: string; html: string }
+interface NativeNewTabRequest { openerLabel: string; url: string }
 const labels = new Map<string, string>()
 const isTauri = () => '__TAURI_INTERNALS__' in window
 const labelFor = (tabId: string) => `browser-${tabId.replace(/[^a-zA-Z0-9-]/g, '-')}`
@@ -15,11 +16,9 @@ export async function openNativeTab(tabId: string, url: string, bounds: BrowserB
   const label = labelFor(tabId)
   let webview = await Webview.getByLabel(label)
   if (!webview) {
-    webview = new Webview(getCurrentWindow(), label, { url, ...bounds })
-    await new Promise<void>((resolve, reject) => {
-      void webview!.once('tauri://created', () => resolve())
-      void webview!.once('tauri://error', event => reject(new Error(String(event.payload))))
-    })
+    await invoke('browser_create', { label, url, bounds })
+    webview = await Webview.getByLabel(label)
+    if (!webview) throw new Error('browser tab webview was not created')
   } else {
     await invoke<string>('browser_navigate', { label, url })
     await webview.show()
@@ -38,3 +37,7 @@ export async function navigateHistory(tabId: string, delta: -1|1): Promise<void>
 export async function readNativeState(tabId: string): Promise<NativeBrowserState | null> { const label=labels.get(tabId);return label ? invoke<NativeBrowserState>('browser_state',{label}) : null }
 export async function captureNativePage(tabId: string): Promise<NativePageSnapshot> { const label=labels.get(tabId);if(!label)throw new Error('native webview is not available');return invoke<NativePageSnapshot>('browser_snapshot',{label}) }
 export function hasNativeTab(tabId: string): boolean { return labels.has(tabId) }
+export async function onNativeNewTab(handler: (url: string) => void): Promise<UnlistenFn> {
+  if (!isTauri()) return () => undefined
+  return listen<NativeNewTabRequest>('browser://new-tab', event => handler(event.payload.url))
+}

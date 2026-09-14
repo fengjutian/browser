@@ -3,7 +3,7 @@ import { Button, Card, Input, Segmented, Space, Tabs, Tag, Typography, message }
 import { ArrowLeftOutlined, ArrowRightOutlined, BookOutlined, CloseOutlined, GlobalOutlined, PlusOutlined, ReloadOutlined, RobotOutlined, SafetyCertificateOutlined, SaveOutlined, SearchOutlined, StarOutlined, ThunderboltOutlined, TranslationOutlined } from '@ant-design/icons'
 import type { BrowserTab } from '../../types'
 import { getDocument, saveDocument } from '../../api'
-import { captureNativePage, closeNativeTab, hasNativeTab, hideNativeTab, navigateHistory, openNativeTab, readNativeState, reloadNativeTab, resizeNativeTab, showNativeTab } from '../../services/nativeBrowser'
+import { captureNativePage, closeNativeTab, hasNativeTab, hideNativeTab, navigateHistory, onNativeNewTab, openNativeTab, readNativeState, reloadNativeTab, resizeNativeTab, showNativeTab } from '../../services/nativeBrowser'
 import { extractArticle } from '../../features/reader/extractArticle'
 import type { ReaderArticle } from '../../features/reader/types'
 
@@ -61,6 +61,16 @@ export function BrowserPage() {
 
   useEffect(() => () => { tabsRef.current.forEach(tab => { void closeNativeTab(tab.id) }) }, [])
 
+  useEffect(() => {
+    let disposed = false
+    let unlisten: (() => void) | undefined
+    void onNativeNewTab(url => openNewTab(url)).then(stop => {
+      if (disposed) stop()
+      else unlisten = stop
+    })
+    return () => { disposed = true; unlisten?.() }
+  }, [])
+
   async function navigate(event: FormEvent) {
     event.preventDefault()
     if (!address.trim()) return
@@ -82,14 +92,31 @@ export function BrowserPage() {
     }
   }
 
-  function addTab() {
+  function openNewTab(url?: string) {
     const tab = newTab()
-    if (active) void hideNativeTab(active.id)
+    const currentId = activeTabIdRef.current
+    if (currentId) void hideNativeTab(currentId)
+    if (url) { tab.url = url; tab.title = url; tab.loading = true }
     setTabs(current => [...current.map(item => ({ ...item, active: false })), tab])
+    activeTabIdRef.current = tab.id
     setActiveTabId(tab.id)
-    setAddress('')
+    setAddress(url ?? '')
     setNativeMode(false)
     setReaderArticle(null)
+    if (url) {
+      void new Promise(resolve => requestAnimationFrame(resolve)).then(async () => {
+        const nextBounds = bounds()
+        if (!nextBounds) return
+        try {
+          const opened = await openNativeTab(tab.id, url, nextBounds)
+          if (activeTabIdRef.current === tab.id) setNativeMode(opened)
+        } catch (error) {
+          messageApi.error(`网页打开失败：${String(error)}`)
+        } finally {
+          setTabs(current => current.map(item => item.id === tab.id ? { ...item, loading: false } : item))
+        }
+      })
+    }
   }
 
   function activateTab(id: string) {
