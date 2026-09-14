@@ -20,7 +20,9 @@
 - [ ] 集成 Mozilla Readability 并建立抽取 fixture
 - [ ] Turndown HTML → Markdown 与资源地址规范化
 - [x] SQLite Repository、迁移器、事务与 FTS5
-- [ ] 后台任务表、worker、重试和 UI 状态流
+- [x] 进程内后台 Worker 与 `PENDING → PROCESSING → READY/FAILED` 状态流
+- [x] 前端保存状态轮询与失败反馈
+- [ ] 持久化任务表、多 Worker、退避重试与崩溃恢复
 
 ## Iteration 3：AI 与隐私
 

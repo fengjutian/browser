@@ -1,1 +1,1 @@
-{"identifier":"default","description":"Permissions for the trusted application UI","windows":["main"],"permissions":["core:default"]}
+{"identifier":"default","description":"Permissions for the trusted application UI","windows":["main"],"permissions":["core:default","core:webview:default"]}
