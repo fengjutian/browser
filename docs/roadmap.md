@@ -19,7 +19,7 @@
 
 - [ ] 集成 Mozilla Readability 并建立抽取 fixture
 - [ ] Turndown HTML → Markdown 与资源地址规范化
-- [ ] SQLite Repository、迁移器、事务与 FTS5
+- [x] SQLite Repository、迁移器、事务与 FTS5
 - [ ] 后台任务表、worker、重试和 UI 状态流
 
 ## Iteration 3：AI 与隐私
