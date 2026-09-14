@@ -10,7 +10,8 @@
 
 ## Iteration 1：可浏览
 
-- [ ] 为每个 Tab 创建/销毁独立 WebView
+- [x] 为每个 Tab 创建/销毁独立 WebView
+- [x] WebView 切换、尺寸同步、导航、刷新和历史控制
 - [ ] 同步导航、title、favicon、loading 与 history 状态
 - [ ] 新窗口、下载、外部协议和证书错误处理
 - [ ] 启动/监管 Go sidecar，加入随机端口与会话 token

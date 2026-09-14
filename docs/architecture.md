@@ -32,6 +32,8 @@ desktop/src/
 
 UI 基础设施采用 Ant Design，图标统一来自 `@ant-design/icons`；品牌色、圆角等通过 `ConfigProvider` token 覆盖，布局细节使用 SCSS。页面不能直接依赖具体网络实现，应通过 feature/service 层访问数据。
 
+浏览器页面通过 `services/nativeBrowser.ts` 管理 Tauri 子 WebView。React 负责计算内容区域的逻辑坐标、Tab 生命周期与显示状态；Rust command 负责协议校验、导航、刷新和历史操作。非 Tauri 开发环境自动使用内置预览，不会因缺少原生 API 崩溃。
+
 ## 模块依赖规则
 
 领域模块不依赖 HTTP；HTTP 只做校验、映射和错误响应。存储通过 Repository 接口注入。AI Provider、Embedding 和 Reranker 均为可替换接口。Reader 的浏览器侧提取与服务端标准化使用版本化 payload。
