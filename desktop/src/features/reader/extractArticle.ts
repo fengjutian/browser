@@ -14,10 +14,16 @@ export function extractArticle(snapshot: PageSnapshot): ReaderArticle {
   const textContent = article?.textContent?.trim() ?? ''
   if (!article?.content || !textContent) throw new Error('reader_content_not_found')
   const content = new DOMParser().parseFromString(article.content, 'text/html')
+  content.querySelectorAll('script,style,noscript,iframe,object,embed,form').forEach(element => element.remove())
+  content.querySelectorAll<HTMLElement>('*').forEach(element => {
+    for (const attribute of Array.from(element.attributes)) {
+      if (attribute.name.toLowerCase().startsWith('on')) element.removeAttribute(attribute.name)
+    }
+  })
   content.querySelectorAll<HTMLElement>('[src],[href]').forEach(element => {
     for (const attribute of ['src', 'href']) {
       const value = element.getAttribute(attribute)
-      if (value) try { element.setAttribute(attribute, new URL(value, snapshot.url).toString()) } catch { /* preserve invalid source value */ }
+      if (value) try { const resolved=new URL(value,snapshot.url);if(['http:','https:'].includes(resolved.protocol))element.setAttribute(attribute,resolved.toString());else element.removeAttribute(attribute) } catch { element.removeAttribute(attribute) }
     }
   })
   const contentHtml = content.body.innerHTML
