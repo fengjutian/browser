@@ -110,3 +110,49 @@
   > .ant-btn { height: 36px; }
   .ask-input { height: 36px; }
 }
+
+// The navigation rail is user-resizable; these late overrides replace the
+// fixed widths in the base density rules without changing the visual spacing.
+.app-sider.ant-layout-sider {
+  position: relative;
+  flex: 0 0 var(--sider-width) !important;
+  width: var(--sider-width) !important;
+  min-width: var(--sider-width) !important;
+  max-width: var(--sider-width) !important;
+
+  .ant-layout-sider-children { min-width: 0; }
+  .ant-menu { min-width: 0; }
+}
+
+.sider-resizer {
+  position: absolute;
+  z-index: 20;
+  top: 0;
+  right: -4px;
+  width: 8px;
+  height: 100%;
+  cursor: col-resize;
+  touch-action: none;
+
+  &::after {
+    content: '';
+    position: absolute;
+    inset: 0 auto 0 3px;
+    width: 2px;
+    background: transparent;
+    transition: background .15s;
+  }
+
+  &:hover::after { background: #65c98b; }
+}
+
+.app-sider--collapsed {
+  .brand { justify-content: center; padding-inline: 0; }
+  .brand > b,
+  .privacy-status,
+  .user-card > span { display: none; }
+  .user-card { justify-content: center; padding-inline: 0; }
+  .ant-menu-inline-collapsed { width: 100%; }
+}
+
+.app-content { min-width: 0; }

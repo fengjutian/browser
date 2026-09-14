@@ -1,4 +1,4 @@
-import { useState, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react'
+import { useEffect, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react'
 import { Avatar, Badge, Layout, Menu, Space, Typography } from 'antd'
 import { BookOutlined, GlobalOutlined, RobotOutlined, SafetyCertificateOutlined, SearchOutlined, SettingOutlined, ThunderboltOutlined } from '@ant-design/icons'
 import type { View } from '../types'
@@ -12,6 +12,11 @@ const DEFAULT_SIDER_WIDTH = 190
 export function AppLayout({ view, onViewChange, children }: { view: View; onViewChange: (view: View) => void; children: ReactNode }) {
   const [siderWidth, setSiderWidth] = useState(DEFAULT_SIDER_WIDTH)
   const collapsed = siderWidth === MIN_SIDER_WIDTH
+
+  useEffect(() => {
+    document.documentElement.style.setProperty('--sider-width', `${siderWidth}px`)
+    return () => { document.documentElement.style.removeProperty('--sider-width') }
+  }, [siderWidth])
 
   function startResize(event: ReactPointerEvent<HTMLDivElement>) {
     event.preventDefault()
