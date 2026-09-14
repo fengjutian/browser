@@ -12,14 +12,16 @@
 
 - [x] 为每个 Tab 创建/销毁独立 WebView
 - [x] WebView 切换、尺寸同步、导航、刷新和历史控制
-- [ ] 同步导航、title、favicon、loading 与 history 状态
+- [x] 页面 URL、标题与加载状态同步
+- [ ] 同步 favicon 与精确 history 可用状态
 - [ ] 新窗口、下载、外部协议和证书错误处理
 - [ ] 启动/监管 Go sidecar，加入随机端口与会话 token
 
 ## Iteration 2：Reader 与持久化
 
-- [ ] 集成 Mozilla Readability 并建立抽取 fixture
-- [ ] Turndown HTML → Markdown 与资源地址规范化
+- [x] 集成 Mozilla Readability 正文提取
+- [x] Turndown HTML → Markdown、危险内容清理与资源地址规范化
+- [x] 从原生 WebView 按需获取 DOM 并展示 Reader Mode
 - [x] SQLite Repository、迁移器、事务与 FTS5
 - [x] 进程内后台 Worker 与 `PENDING → PROCESSING → READY/FAILED` 状态流
 - [x] 前端保存状态轮询与失败反馈
