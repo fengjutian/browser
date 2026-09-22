@@ -550,7 +550,11 @@ body[data-theme='dark'] { --accent:#65a77d; --accent-soft:#24372c; --accent-bord
 }
 
 .app-sider--collapsed .nav-menu .ant-menu-item-selected .nav-glyph {
-  background: transparent;
+  background: var(--accent-soft);
+}
+
+.app-sider--collapsed .nav-menu .ant-menu-item-selected {
+  background: transparent !important;
 }
 
 .library-stats {
@@ -664,6 +668,49 @@ body[data-theme='dark'] {
 
 @media (max-width: 1200px) {
   .page { padding-inline: 28px; }
+}
+
+// Browser chrome uses one compact control size across native and Ant controls.
+.browser-star {
+  width: 28px;
+  height: 28px;
+  display: inline-grid;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: 8px;
+  color: #68736c;
+  background: transparent;
+  cursor: pointer;
+
+  &:hover { color: var(--accent); background: var(--accent-soft); }
+  &.is-active { color: #a56e1c; background: #fbf0d9; }
+}
+
+.browser-toolbar > .ant-btn {
+  width: 34px;
+  height: 34px;
+  display: inline-grid;
+  place-items: center;
+  padding: 0;
+  border-radius: 9px;
+}
+
+.quick-actions .ant-card-body {
+  align-items: flex-start;
+  gap: 6px !important;
+}
+
+.quick-actions .ant-card-body > .anticon {
+  width: 34px;
+  height: 34px;
+  display: inline-grid;
+  place-items: center;
+  margin-bottom: 2px;
+  border-radius: 10px;
+  color: var(--accent);
+  background: var(--accent-soft);
+  font-size: 17px;
 }
 
 .address-suggestion {

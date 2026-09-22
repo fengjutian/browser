@@ -528,6 +528,130 @@ async fn browser_snapshot(app: tauri::AppHandle, label: String) -> Result<PageSn
     Ok(snapshot)
 }
 
+fn source_origin_from_url(url: &str) -> Option<String> {
+    url::Url::parse(url).ok().map(|u| u.origin().ascii_serialization()).filter(|s| s != "null")
+}
+
+async fn handle_download_started(
+    app: tauri::AppHandle,
+    tab_label: String,
+    url: String,
+    destination: String,
+    file_name: String,
+) {
+    let id = uuid::Uuid::new_v4().to_string();
+    let origin = source_origin_from_url(&url);
+    let database = match local_store::connection(&app) {
+        Ok(db) => db,
+        Err(error) => {
+            eprintln!("downloads: cannot open database: {error}");
+            return;
+        }
+    };
+    let record_input = downloads::RecordDownloadInput {
+        id: id.clone(),
+        url: url.clone(),
+        file_name: file_name.clone(),
+        target_path: Some(destination.clone()),
+        mime_type: None,
+        source_origin: origin.clone(),
+        source_tab_label: Some(tab_label.clone()),
+        private: false,
+        danger_type: None,
+    };
+    if let Err(error) = downloads::insert_download(&database, record_input) {
+        eprintln!("downloads: insert_download failed: {error}");
+        return;
+    }
+    let index = app.state::<DownloadIndex>();
+    index.remember(&url, &id);
+    let progress = DownloadProgress {
+        version: EVENT_PAYLOAD_VERSION,
+        kind: DOWNLOAD_EVENT_KIND_STARTED.into(),
+        id,
+        tab_label,
+        url,
+        file_name,
+        target_path: Some(destination),
+        mime_type: None,
+        received_bytes: 0,
+        total_bytes: None,
+        progress_known: false,
+        status: "downloading".into(),
+        danger_type: "none".into(),
+        error_message: None,
+        private: false,
+        source_origin: origin,
+    };
+    let _ = app.emit_to("main", "browser://download", progress);
+}
+
+async fn handle_download_finished(
+    app: tauri::AppHandle,
+    tab_label: String,
+    url: String,
+    final_path: Option<String>,
+    success: bool,
+) {
+    let index = app.state::<DownloadIndex>();
+    let id = match index.get(&url) {
+        Some(id) => id,
+        None => return, // finished without a Requested; rare but harmless
+    };
+    index.forget(&url);
+    let database = match local_store::connection(&app) {
+        Ok(db) => db,
+        Err(error) => {
+            eprintln!("downloads: cannot open database: {error}");
+            return;
+        }
+    };
+    let status = if success {
+        downloads::DownloadStatus::Completed
+    } else {
+        downloads::DownloadStatus::Failed
+    };
+    let progress_input = downloads::DownloadProgressInput {
+        id: id.clone(),
+        received_bytes: -1, // unknown on Finished events
+        total_bytes: None,
+        status,
+        error_message: if success { None } else { Some("download failed".into()) },
+    };
+    if let Err(error) = downloads::update_progress(&database, progress_input) {
+        eprintln!("downloads: update_progress failed: {error}");
+    }
+    if let Some(path) = final_path.as_ref() {
+        // Patch the target_path in case WebView resolved a redirected filename.
+        if let Err(error) = database.execute(
+            "UPDATE downloads SET target_path=? WHERE id=?",
+            rusqlite::params![path, id],
+        ) {
+            eprintln!("downloads: target_path update failed: {error}");
+        }
+    }
+    let origin = source_origin_from_url(&url);
+    let progress = DownloadProgress {
+        version: EVENT_PAYLOAD_VERSION,
+        kind: if success { DOWNLOAD_EVENT_KIND_FINISHED.into() } else { DOWNLOAD_EVENT_KIND_FAILED.into() },
+        id,
+        tab_label,
+        url,
+        file_name: String::new(),
+        target_path: final_path,
+        mime_type: None,
+        received_bytes: 0,
+        total_bytes: None,
+        progress_known: false,
+        status: if success { "completed".into() } else { "failed".into() },
+        danger_type: "none".into(),
+        error_message: if success { None } else { Some("download failed".into()) },
+        private: false,
+        source_origin: origin,
+    };
+    let _ = app.emit_to("main", "browser://download", progress);
+}
+
 #[tauri::command]
 async fn ai_chat(
     app: tauri::AppHandle,
@@ -632,6 +756,7 @@ async fn ai_test_provider(
 pub fn run() {
     tauri::Builder::default()
         .manage(NavStacks::default())
+        .manage(DownloadIndex::default())
         .setup(|app| {
             // Set the runtime window icon explicitly as well as the bundled executable
             // icon. This keeps `tauri dev` and packaged Windows builds consistent.
@@ -655,6 +780,11 @@ pub fn run() {
             browser_restore_scroll,
             browser_snapshot,
             browser_capabilities,
+            downloads::download_list,
+            downloads::download_get,
+            downloads::download_remove_record,
+            downloads::download_open_file,
+            downloads::download_show_in_folder,
             local_store::local_list_documents,
             local_store::local_save_document,
             local_store::local_get_document,
