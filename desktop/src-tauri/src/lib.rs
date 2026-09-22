@@ -39,7 +39,9 @@ struct BrowserState {
     title: String,
     favicon: Option<String>,
     loading: bool,
+    #[serde(default)]
     can_go_back: bool,
+    #[serde(default)]
     can_go_forward: bool,
 }
 

@@ -307,7 +307,7 @@ export function BrowserPage() {
         setTabs(current => current.map(tab => tab.id === tabId ? { ...tab, loading: false, error: { kind: 'web-mode-required', message: '网页浏览仅在 Tauri 桌面应用中可用。' } } : tab))
         return
       }
-      setTabs(current => current.map(tab => tab.id === tabId ? { ...tab, loading: false, error: undefined } : tab))
+      setTabs(current => current.map(tab => tab.id === tabId ? { ...tab, error: undefined } : tab))
     } catch (error) {
       setTabs(current => current.map(tab => tab.id === tabId ? { ...tab, loading: false, error: classifyNavigationError(error) } : tab))
     }
@@ -335,7 +335,12 @@ export function BrowserPage() {
     const currentId = activeTabIdRef.current
     if (currentId) void hideNativeTab(currentId)
     if (url) { tab.url = url; tab.title = '正在加载…'; tab.loading = true }
-    setTabs(current => [...current.map(item => ({ ...item, active: false })), tab])
+    setTabs(current => {
+      const next = current.map(item => ({ ...item, active: false }))
+      const activeIndex = next.findIndex(item => item.id === currentId)
+      next.splice(activeIndex < 0 ? next.length : activeIndex + 1, 0, tab)
+      return next
+    })
     activeTabIdRef.current = tab.id
     setActiveTabId(tab.id)
     setAddress(url ?? '')
@@ -350,7 +355,7 @@ export function BrowserPage() {
             setTabs(current => current.map(item => item.id === tab.id ? { ...item, loading: false, error: { kind: 'web-mode-required', message: '网页浏览仅在 Tauri 桌面应用中可用。' } } : item))
             return
           }
-          setTabs(current => current.map(item => item.id === tab.id ? { ...item, loading: false, error: undefined } : item))
+          setTabs(current => current.map(item => item.id === tab.id ? { ...item, error: undefined } : item))
         } catch (error) {
           setTabs(current => current.map(item => item.id === tab.id ? { ...item, loading: false, error: { kind: 'load-failed', message: String(error) } } : item))
         }
@@ -483,7 +488,13 @@ export function BrowserPage() {
       active: true,
       pinned: false,
     }
-    setTabs(current => [...current.map(item => ({ ...item, active: false })), tab])
+    const currentId = activeTabIdRef.current
+    setTabs(current => {
+      const next = current.map(item => ({ ...item, active: false }))
+      const activeIndex = next.findIndex(item => item.id === currentId)
+      next.splice(activeIndex < 0 ? next.length : activeIndex + 1, 0, tab)
+      return next
+    })
     activeTabIdRef.current = tab.id
     setActiveTabId(tab.id)
     setAddress(restored.url)
@@ -494,10 +505,9 @@ export function BrowserPage() {
       try {
         await ensureNativeTab(tab.id, restored.url, nextBounds)
         if (activeTabIdRef.current === tab.id) await showNativeTab(tab.id)
+        setTabs(current => current.map(item => item.id === tab.id ? { ...item, error: undefined } : item))
       } catch (error) {
         setTabs(current => current.map(item => item.id === tab.id ? { ...item, loading: false, error: { kind: 'load-failed', message: String(error) } } : item))
-      } finally {
-        setTabs(current => current.map(item => item.id === tab.id ? { ...item, loading: false } : item))
       }
     })
   }
