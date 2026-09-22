@@ -445,7 +445,7 @@ export function BrowserPage({ visible = true }: { visible?: boolean }) {
   ]
 
   const downloadPanel = <div className="browser-downloads">
-    <div className="browser-downloads__head"><b>下载</b>{downloads.length > 0&&<Button type="link" size="small" onClick={()=>setDownloads([])}>清除记录</Button>}</div>
+    <div className="browser-downloads__head"><b>下载</b>{downloads.length > 0&&<Button type="link" size="small" onClick={clearDownloads}>清除记录</Button>}</div>
     {downloads.length===0?<Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无下载"/>:<List size="small" dataSource={downloads} renderItem={item=>{
       const name = item.path?.split(/[\\/]/).pop() || (()=>{try{return new URL(item.url).pathname.split('/').pop()}catch{return item.url}})() || '下载文件'
       const icon = item.status==='downloading'?<LoadingOutlined spin/>:item.status==='completed'?<CheckCircleOutlined className="is-success"/>:<CloseCircleOutlined className="is-error"/>

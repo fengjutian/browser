@@ -522,8 +522,30 @@ body[data-theme='dark'] { --accent:#65a77d; --accent-soft:#24372c; --accent-bord
 .nav-menu--utility { margin-top: 10px; padding-top: 10px; border-top: 1px solid rgba(100,115,106,.14) !important; }
 
 .app-sider--collapsed {
-  .ant-menu-item { padding-inline: 10px !important; }
-  .ant-menu-item .ant-menu-item-icon { margin-inline: 0 !important; }
+  .brand {
+    width: 100%;
+    justify-content: center;
+    padding-inline: 0 !important;
+  }
+
+  .nav-menu.ant-menu-inline-collapsed {
+    width: 100%;
+  }
+
+  .nav-menu.ant-menu-inline-collapsed > .ant-menu-item {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin-inline: 0 !important;
+    padding-inline: 0 !important;
+  }
+
+  .nav-menu .ant-menu-item-icon,
+  .nav-menu .ant-menu-item .nav-glyph {
+    min-width: 32px !important;
+    margin: 0 !important;
+  }
 }
 
 .library-stats {
