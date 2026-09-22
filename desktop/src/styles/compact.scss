@@ -202,6 +202,46 @@
   small { color: #718078; }
 }
 
+.theme-settings .ant-segmented {
+  max-width: 520px;
+}
+
+body[data-theme='dark'] {
+  background: #111714;
+  color: #d8e0db;
+
+  .app-content { background: #111714; }
+  .app-sider.ant-layout-sider {
+    border-right-color: #2a352f;
+    color: #d2ddd6;
+  }
+  .privacy-status {
+    border-color: #334239;
+    background: #202a25;
+
+    .ant-typography { color: #99a89f; }
+  }
+  .user-card {
+    border-top-color: #334039;
+
+    small { color: #99a89f; }
+  }
+  .browser-tabs { background: #1b2420; }
+  .browser-toolbar,
+  .ai-panel { background: #171e1a; }
+  .web-surface { background: #111714; }
+  .new-tab { background: radial-gradient(circle at 50% 30%, #20372a, #111714 44%); }
+  .quick-site {
+    border-color: #354139;
+    background: #1a221e;
+
+    &__name { color: #cbd5ce; }
+  }
+  .search-results .ant-list-item { background: #181f1b; }
+  .document-cover { background: linear-gradient(145deg, #25372c, #1b2821); }
+  .ai-preview { background: #1d2b23; }
+}
+
 .route-view:not(.is-hidden) {
   min-height: 100%;
   height: auto;

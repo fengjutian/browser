@@ -1,10 +1,11 @@
-import { Alert, Button, Card, Form, Input, InputNumber, List, Select, Space, Switch, Tabs, Tag, Typography, message } from 'antd'
-import { DeleteOutlined, KeyOutlined, SafetyCertificateOutlined, SaveOutlined, ThunderboltOutlined } from '@ant-design/icons'
+import { Alert, Button, Card, Form, Input, InputNumber, List, Segmented, Select, Space, Switch, Tabs, Tag, Typography, message } from 'antd'
+import { BgColorsOutlined, DeleteOutlined, KeyOutlined, MoonOutlined, SafetyCertificateOutlined, SaveOutlined, SunOutlined, ThunderboltOutlined } from '@ant-design/icons'
 import { useEffect, useState } from 'react'
 import { PageHeader } from '../../shared/components/PageHeader'
 import { deleteAIProvider, exportBackup, getAIProvider, importBackup, listAIProviders, saveAIProvider, aiTestProvider, type AIProviderInput } from '../../api'
 import type { AIProvider, AIProviderType } from '../../types'
 import { normalizeOrigin, readSitePermissions, writeSitePermissions, type SitePermissionKind, type SitePermissionRule } from '../../features/browser/sitePermissions'
+import { readThemePreference, writeThemePreference, type ThemePreference } from '../../features/settings/theme'
 
 const PROVIDER_OPTIONS: { label: string; value: AIProviderType }[] = [
   { label: 'OpenAI 兼容（API Key）', value: 'openai-compatible' },
@@ -19,6 +20,27 @@ interface ProviderFormValues {
   embeddingModel?: string
   timeoutSeconds: number
   apiKey?: string
+}
+
+function GeneralSettings() {
+  const [theme, setTheme] = useState<ThemePreference>(readThemePreference)
+
+  function changeTheme(next: string | number) {
+    const preference = next as ThemePreference
+    setTheme(preference)
+    writeThemePreference(preference)
+  }
+
+  return <Card title="外观" className="settings-card theme-settings">
+    <Typography.Title level={5}>主题</Typography.Title>
+    <Typography.Paragraph type="secondary">选择应用的显示主题。更改会立即生效，并自动保存。</Typography.Paragraph>
+    <Segmented block value={theme} onChange={changeTheme} options={[
+      { label: <Space><BgColorsOutlined/>绿色</Space>, value: 'green' },
+      { label: <Space><BgColorsOutlined/>米色</Space>, value: 'beige' },
+      { label: <Space><SunOutlined/>浅色</Space>, value: 'light' },
+      { label: <Space><MoonOutlined/>深色</Space>, value: 'dark' },
+    ]}/>
+  </Card>
 }
 
 function AIProviderSettings() {
@@ -207,7 +229,7 @@ export function SettingsPage() {
   const items = ['通用','浏览器','隐私','AI Provider','知识库','插件','高级'].map((label, index) => ({
     key: label,
     label,
-    children: index === 2 ? <SitePermissionSettings/> : index === 3 ? <AIProviderSettings/> : index === 4 ? <KnowledgeBaseSettings/> : <Card><Typography.Title level={4}>{label}</Typography.Title><Typography.Paragraph type="secondary">该设置模块将在对应开发阶段开放。</Typography.Paragraph></Card>,
+    children: index === 0 ? <GeneralSettings/> : index === 2 ? <SitePermissionSettings/> : index === 3 ? <AIProviderSettings/> : index === 4 ? <KnowledgeBaseSettings/> : <Card><Typography.Title level={4}>{label}</Typography.Title><Typography.Paragraph type="secondary">该设置模块将在对应开发阶段开放。</Typography.Paragraph></Card>,
   }))
-  return <section className="page"><PageHeader eyebrow="PREFERENCES" title="设置" description="调整浏览器、隐私、AI Provider 与知识库工作流。"/><Tabs tabPosition="left" items={items} defaultActiveKey="AI Provider"/></section>
+  return <section className="page"><PageHeader eyebrow="PREFERENCES" title="设置" description="调整浏览器、隐私、AI Provider 与知识库工作流。"/><Tabs tabPosition="left" items={items} defaultActiveKey="通用"/></section>
 }
