@@ -27,7 +27,11 @@ export interface CrossAskParse {
   notFound: boolean
 }
 
-export function buildCrossAskPrompt(documents: readonly Document[], question: string): ChatRequest {
+export function buildCrossAskPrompt(
+  documents: readonly Document[],
+  question: string,
+  history?: readonly { role: 'user' | 'assistant'; content: string }[],
+): ChatRequest {
   const cited: CrossAskDoc[] = []
   documents.forEach((doc, position) => {
     const raw = (doc.markdown && doc.markdown.trim()) || (doc.summary && doc.summary.trim()) || ''
@@ -59,13 +63,13 @@ export function buildCrossAskPrompt(documents: readonly Document[], question: st
     'Cite documents inline using [doc-N] tags. Reply in the question’s language.',
   ].join('\n')
 
-  return {
-    messages: [
-      { role: 'system', content: SYSTEM_PROMPT },
-      { role: 'user', content: userMessage },
-    ],
-    temperature: 0.2,
+  const messages: ChatRequest['messages'] = [{ role: 'system', content: SYSTEM_PROMPT }]
+  if (history && history.length > 0) {
+    messages.push(...history.map(entry => ({ role: entry.role, content: entry.content })))
   }
+  messages.push({ role: 'user', content: userMessage })
+
+  return { messages, temperature: 0.2 }
 }
 
 export function parseCrossAnswer(raw: string): CrossAskParse {

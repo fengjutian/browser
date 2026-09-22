@@ -70,4 +70,26 @@ describe('crossAsk helpers', () => {
     expect(parsed.notFound).toBe(true)
     expect(parsed.docIds).toEqual([])
   })
+
+  it('threads prior conversation history between system and current question', () => {
+    const docs = [makeDoc({ id: 'a', title: 'Alpha', markdown: 'alpha body' })]
+    const history = [
+      { role: 'user' as const, content: 'first question' },
+      { role: 'assistant' as const, content: 'first answer [doc-1]' },
+    ]
+    const request = buildCrossAskPrompt(docs, 'follow up', history)
+    expect(request.messages).toHaveLength(4)
+    expect(request.messages[0].role).toBe('system')
+    expect(request.messages[1]).toEqual({ role: 'user', content: 'first question' })
+    expect(request.messages[2]).toEqual({ role: 'assistant', content: 'first answer [doc-1]' })
+    expect(request.messages[3].role).toBe('user')
+    expect(request.messages[3].content).toContain('Question: follow up')
+  })
+
+  it('omits empty history without leaving a hole', () => {
+    const request = buildCrossAskPrompt([makeDoc({ id: 'a' })], 'Q', [])
+    expect(request.messages).toHaveLength(2)
+    expect(request.messages[0].role).toBe('system')
+    expect(request.messages[1].role).toBe('user')
+  })
 })

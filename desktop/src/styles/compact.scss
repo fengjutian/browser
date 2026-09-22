@@ -185,7 +185,6 @@
 
 // Keep the navigation rail visually connected to the soft page canvas.
 .app-sider.ant-layout-sider {
-  border-right: 1px solid #dce4de;
   color: #31483a;
 }
 
@@ -203,7 +202,41 @@
 }
 
 .theme-settings .ant-segmented {
-  max-width: 520px;
+  max-width: 640px;
+}
+
+body[data-theme='green'] {
+  .app-content { background: #f5f7f4; }
+}
+
+body[data-theme='beige'] {
+  background: #f7f2e9;
+  color: #302a24;
+
+  .app-content { background: #f7f2e9; }
+  .app-sider.ant-layout-sider { color: #55493e; }
+  .privacy-status { border-color: #dfd1bf; background: #f8f3eb; }
+  .privacy-status .ant-typography,
+  .user-card small { color: #817366; }
+  .user-card { border-top-color: #ded2c3; }
+  .browser-tabs { background: #e9e1d6; }
+  .browser-toolbar,
+  .ai-panel { background: #fcfaf6; }
+  .new-tab { background: radial-gradient(circle at 50% 30%, #f0e4d2, #faf7f1 44%); }
+  .quick-site { border-color: #e2d7c8; background: #fdfbf7; }
+}
+
+body[data-theme='light'] {
+  background: #f7f8f7;
+
+  .app-content { background: #f7f8f7; }
+  .app-sider.ant-layout-sider { color: #39443e; }
+  .privacy-status { border-color: #dfe4e1; background: #fafbfa; }
+  .privacy-status .ant-typography,
+  .user-card small { color: #747d78; }
+  .user-card { border-top-color: #dde2df; }
+  .browser-tabs { background: #e9ecea; }
+  .new-tab { background: radial-gradient(circle at 50% 30%, #edf1ee, #fafbfa 44%); }
 }
 
 body[data-theme='dark'] {
@@ -212,7 +245,6 @@ body[data-theme='dark'] {
 
   .app-content { background: #111714; }
   .app-sider.ant-layout-sider {
-    border-right-color: #2a352f;
     color: #d2ddd6;
   }
   .privacy-status {
