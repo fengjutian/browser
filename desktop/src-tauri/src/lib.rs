@@ -194,6 +194,49 @@ async fn browser_stop(app: tauri::AppHandle, label: String) -> Result<(), String
 }
 
 #[tauri::command]
+async fn browser_find(
+    app: tauri::AppHandle,
+    label: String,
+    query: String,
+    backwards: bool,
+) -> Result<bool, String> {
+    let webview = app
+        .get_webview(&label)
+        .ok_or_else(|| "browser tab webview not found".to_string())?;
+    if query.is_empty() {
+        webview
+            .eval("window.getSelection()?.removeAllRanges()")
+            .map_err(|error| error.to_string())?;
+        return Ok(false);
+    }
+    let query = serde_json::to_string(&query).map_err(|error| error.to_string())?;
+    eval_json(
+        webview,
+        &format!("window.find({query},false,{backwards},true,false,true,false)"),
+    )
+    .await
+}
+
+#[tauri::command]
+async fn browser_zoom(app: tauri::AppHandle, label: String, scale: f64) -> Result<(), String> {
+    if !(0.5..=3.0).contains(&scale) {
+        return Err("zoom scale must be between 0.5 and 3.0".into());
+    }
+    app.get_webview(&label)
+        .ok_or_else(|| "browser tab webview not found".to_string())?
+        .eval(format!("document.documentElement.style.zoom={scale}"))
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+async fn browser_print(app: tauri::AppHandle, label: String) -> Result<(), String> {
+    app.get_webview(&label)
+        .ok_or_else(|| "browser tab webview not found".to_string())?
+        .eval("window.print()")
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
 async fn browser_history(app: tauri::AppHandle, label: String, delta: i32) -> Result<(), String> {
     if !(-1..=1).contains(&delta) || delta == 0 {
         return Err("history delta must be -1 or 1".into());
@@ -392,6 +435,9 @@ pub fn run() {
             browser_navigate,
             browser_reload,
             browser_stop,
+            browser_find,
+            browser_zoom,
+            browser_print,
             browser_history,
             browser_state,
             browser_snapshot,

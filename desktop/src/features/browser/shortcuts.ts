@@ -15,6 +15,11 @@ export type ShortcutAction =
   | 'forward'
   | 'reload'
   | 'stop'
+  | 'find'
+  | 'zoomIn'
+  | 'zoomOut'
+  | 'zoomReset'
+  | 'print'
 
 export interface ShortcutEvent {
   ctrlKey: boolean
@@ -29,6 +34,11 @@ export function interpretShortcut(event: ShortcutEvent): ShortcutAction | null {
   const key = event.key
   const lower = key.toLowerCase()
   if (modifier && lower === 'l') return 'focusAddress'
+  if (modifier && lower === 'f') return 'find'
+  if (modifier && lower === 'p') return 'print'
+  if (modifier && (key === '+' || key === '=')) return 'zoomIn'
+  if (modifier && key === '-') return 'zoomOut'
+  if (modifier && key === '0') return 'zoomReset'
   if (modifier && event.shiftKey && lower === 't') return 'reopenClosedTab'
   if (modifier && lower === 't') return 'newTab'
   if (modifier && lower === 'w') return 'closeTab'

@@ -165,6 +165,28 @@
 
 .app-content { min-width: 0; }
 
+.browser-find {
+  z-index: 5;
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 3px;
+  padding: 5px 12px;
+  border-bottom: 1px solid #d8ded9;
+  background: #fafbf9;
+
+  > .ant-input-affix-wrapper { width: min(360px, 42vw); }
+  > .ant-typography { min-width: 48px; font-size: 12px; text-align: center; }
+}
+
+.browser-zoom-value {
+  display: inline-block;
+  width: 48px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
 // Browser-style tab strip: the new-tab action follows the last tab; when the
 // row fills, tabs shrink and Ant's overflow control takes over.
 .browser-tabs {
