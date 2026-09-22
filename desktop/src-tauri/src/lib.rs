@@ -5,6 +5,7 @@ pub mod providers;
 
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
+use rusqlite::params;
 use std::collections::HashMap;
 use std::sync::Mutex;
 use std::time::Duration;

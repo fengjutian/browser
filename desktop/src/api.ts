@@ -1,5 +1,5 @@
 import { invoke } from '@tauri-apps/api/core'
-import type { AIProvider, AIProviderType, Document, Task } from './types'
+import type { AIProvider, AIProviderType, ChatRequest, ChatResponse, Document, Task } from './types'
 
 const isTauri = () => '__TAURI_INTERNALS__' in window
 
@@ -163,6 +163,11 @@ export async function getAIProvider(id: string): Promise<AIProvider | null> {
 export async function deleteAIProvider(id: string): Promise<void> {
   if (!isTauri()) return
   await invoke('local_delete_ai_provider', { id })
+}
+
+export async function aiChat(providerId: string, request: ChatRequest): Promise<ChatResponse> {
+  if (!isTauri()) throw new Error('Document unavailable')
+  return invoke<ChatResponse>('ai_chat', { providerId, request })
 }
 
 export async function findDocumentByUrl(url: string): Promise<Document | null> {

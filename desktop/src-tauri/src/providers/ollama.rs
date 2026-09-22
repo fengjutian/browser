@@ -10,16 +10,16 @@ pub struct OllamaProvider {
 }
 
 #[derive(Debug, Serialize)]
-struct OllamaRequest<'a> {
-    model: &'a str,
-    messages: &'a [OllamaMessage],
+struct OllamaRequest {
+    model: String,
+    messages: Vec<OllamaMessage>,
     stream: bool,
 }
 
 #[derive(Debug, Serialize)]
-struct OllamaMessage<'a> {
-    role: &'a str,
-    content: &'a str,
+struct OllamaMessage {
+    role: String,
+    content: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -42,8 +42,8 @@ impl AiProvider for OllamaProvider {
         let client = reqwest::Client::builder()
             .timeout(self.timeout)
             .build()?;
-        let messages: Vec<OllamaMessage> = request.messages.iter().map(message_to_wire).collect();
-        let body = OllamaRequest { model: &self.model, messages: &messages, stream: false };
+        let messages: Vec<OllamaMessage> = request.messages.into_iter().map(message_to_wire).collect();
+        let body = OllamaRequest { model: self.model.clone(), messages, stream: false };
         let url = format!("{}/api/chat", self.base_url.trim_end_matches('/'));
         let response = client.post(url).json(&body).send().await?;
         let status = response.status();
@@ -60,8 +60,8 @@ impl AiProvider for OllamaProvider {
     }
 }
 
-fn message_to_wire(message: &ChatMessage) -> OllamaMessage<'_> {
-    OllamaMessage { role: &message.role, content: &message.content }
+fn message_to_wire(message: ChatMessage) -> OllamaMessage {
+    OllamaMessage { role: message.role, content: message.content }
 }
 
 fn sanitize_body(body: &str) -> String {

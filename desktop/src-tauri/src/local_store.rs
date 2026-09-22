@@ -157,7 +157,7 @@ pub struct LocalAIProvider {
     updated_at: String,
 }
 
-fn connection(app: &tauri::AppHandle) -> Result<Connection, String> {
+pub fn connection(app: &tauri::AppHandle) -> Result<Connection, String> {
     let directory = app
         .path()
         .app_data_dir()

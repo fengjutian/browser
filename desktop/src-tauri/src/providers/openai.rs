@@ -11,9 +11,9 @@ pub struct OpenAICompatibleProvider {
 }
 
 #[derive(Debug, Serialize)]
-struct OpenAIRequest<'a> {
-    model: &'a str,
-    messages: &'a [OpenAIMessage],
+struct OpenAIRequest {
+    model: String,
+    messages: Vec<OpenAIMessage>,
     #[serde(skip_serializing_if = "Option::is_none")]
     temperature: Option<f32>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -22,9 +22,9 @@ struct OpenAIRequest<'a> {
 }
 
 #[derive(Debug, Serialize)]
-struct OpenAIMessage<'a> {
-    role: &'a str,
-    content: &'a str,
+struct OpenAIMessage {
+    role: String,
+    content: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -62,10 +62,10 @@ impl AiProvider for OpenAICompatibleProvider {
         let client = reqwest::Client::builder()
             .timeout(self.timeout)
             .build()?;
-        let messages: Vec<OpenAIMessage> = request.messages.iter().map(message_to_wire).collect();
+        let messages: Vec<OpenAIMessage> = request.messages.into_iter().map(message_to_wire).collect();
         let body = OpenAIRequest {
-            model: &self.model,
-            messages: &messages,
+            model: self.model.clone(),
+            messages,
             temperature: request.temperature,
             max_tokens: request.max_tokens,
             stream: false,
@@ -103,8 +103,8 @@ impl AiProvider for OpenAICompatibleProvider {
     }
 }
 
-fn message_to_wire(message: &ChatMessage) -> OpenAIMessage<'_> {
-    OpenAIMessage { role: &message.role, content: &message.content }
+fn message_to_wire(message: ChatMessage) -> OpenAIMessage {
+    OpenAIMessage { role: message.role, content: message.content }
 }
 
 fn sanitize_body(body: &str) -> String {

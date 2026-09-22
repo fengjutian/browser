@@ -6,3 +6,6 @@ export type TaskStatus = 'PENDING' | 'PROCESSING' | 'COMPLETED' | 'FAILED'
 export interface Task { id:string; kind:string; documentId?:string; payload:string; status:TaskStatus; attempts:number; maxAttempts:number; availableAt:string; startedAt?:string; finishedAt?:string; lastError?:string }
 export type AIProviderType = 'openai-compatible' | 'ollama'
 export interface AIProvider { id:string; type:AIProviderType; baseUrl:string; model:string; embeddingModel?:string; timeoutSeconds:number; hasApiKey:boolean; createdAt:string; updatedAt:string }
+export interface ChatMessage { role: string; content: string }
+export interface ChatRequest { messages: ChatMessage[]; temperature?: number; maxTokens?: number }
+export interface ChatResponse { content: string; promptTokens?: number; completionTokens?: number }
