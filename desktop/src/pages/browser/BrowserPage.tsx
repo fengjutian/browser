@@ -3,7 +3,7 @@ import { AutoComplete, Badge, Button, Card, Dropdown, Empty, Input, List, Popove
 import { ArrowDownOutlined, ArrowLeftOutlined, ArrowRightOutlined, ArrowUpOutlined, BookOutlined, CheckCircleOutlined, CloseCircleOutlined, CloseOutlined, CopyOutlined, DownloadOutlined, GlobalOutlined, LoadingOutlined, MoreOutlined, PlusOutlined, PrinterOutlined, ReloadOutlined, RobotOutlined, SafetyCertificateOutlined, SaveOutlined, SearchOutlined, StarOutlined, ThunderboltOutlined, TranslationOutlined } from '@ant-design/icons'
 import type { BrowserTab, BrowserTabError } from '../../types'
 import { findDocumentByUrl, getBrowserShortcutsEnabled, getDocument, getSession, saveDocument, setSession, toggleStarred } from '../../api'
-import { captureNativePage, closeNativeTab, ensureNativeTab, findInNativeTab, hasNativeTab, hideNativeTab, navigateHistory, onNativeNewTab, openNativeTab, printNativeTab, reloadNativeTab, resizeNativeTab, showNativeTab, stopNativeTab, zoomNativeTab } from '../../services/nativeBrowser'
+import { captureNativePage, closeNativeTab, ensureNativeTab, findInNativeTab, hasNativeTab, hideNativeTab, navigateHistory, onNativeNewTab, openNativeTab, printNativeTab, readNativeState, reloadNativeTab, resizeNativeTab, showNativeTab, stopNativeTab, zoomNativeTab } from '../../services/nativeBrowser'
 import { extractArticle } from '../../features/reader/extractArticle'
 import type { ReaderArticle } from '../../features/reader/types'
 import { classifySaveError } from '../../features/documents/saveClassifier'
@@ -121,8 +121,6 @@ export function BrowserPage({ visible = true }: { visible?: boolean }) {
   const closedTabsRef = useRef(closedTabs)
   const visibleRef = useRef(visible)
   const lastActiveAtRef = useRef(new Map<string, number>([['new', Date.now()]]))
-  const pendingScrollRestoreRef = useRef(new Map<string, { x: number; y: number }>())
-  const stateFailureCountRef = useRef(new Map<string, number>())
   const lastHistoryUrl = useRef<string>('')
   const shortcutsEnabledRef = useRef(getBrowserShortcutsEnabled())
   const active = tabs.find(tab => tab.id === activeTabId) ?? tabs[0]
@@ -236,41 +234,24 @@ export function BrowserPage({ visible = true }: { visible?: boolean }) {
     }
   }, [active.id, visible])
 
-  useEffect(() => {
-    if (!nativeMode || !hasNativeTab(active.id)) return
-    const sync = async () => {
-      try {
-        const state = await readNativeState(active.id)
-        if (!state) return
-        stateFailureCountRef.current.delete(active.id)
-        const fallbackTitle = (() => { try { return new URL(state.url).hostname } catch { return '新标签页' } })()
-        setTabs(current => current.map(tab => tab.id === active.id ? { ...tab, url: state.url, title: state.title || fallbackTitle, favicon: state.favicon, loading: state.loading, scrollX: Math.round(state.scrollX), scrollY: Math.round(state.scrollY), canGoBack: state.canGoBack, canGoForward: state.canGoForward } : tab))
-        setAddress(state.url)
-        const pending = pendingScrollRestoreRef.current.get(active.id)
-        if (pending && !state.loading) {
-          pendingScrollRestoreRef.current.delete(active.id)
-          await restoreNativeScroll(active.id, pending.x, pending.y)
-        }
-      } catch {
-        const failures = (stateFailureCountRef.current.get(active.id) ?? 0) + 1
-        stateFailureCountRef.current.set(active.id, failures)
-        if (failures < 3 || await isNativeTabAlive(active.id)) return
-        stateFailureCountRef.current.delete(active.id)
-        const tab = tabsRef.current.find(item => item.id === active.id)
-        const nextBounds = bounds()
-        if (!tab?.url || !nextBounds) return
-        try {
-          await openNativeTab(tab.id, tab.url, nextBounds)
-          pendingScrollRestoreRef.current.set(tab.id, { x: tab.scrollX ?? 0, y: tab.scrollY ?? 0 })
-        } catch (error) {
-          setTabs(current => current.map(item => item.id === tab.id ? { ...item, loading: false, error: classifyNavigationError(error) } : item))
-        }
-      }
-    }
-    void sync()
-    const timer = window.setInterval(() => void sync(), 750)
-    return () => window.clearInterval(timer)
-  }, [active.id, nativeMode])
+  const tabRuntime = useTabRuntime({
+    tab: active,
+    visible,
+    enabled: nativeMode && hasNativeTab(active.id),
+    onApply: (patch) => {
+      setTabs(current => current.map(tab => tab.id === active.id ? { ...tab, ...patch } : tab))
+      if (typeof patch.url === 'string') setAddress(patch.url)
+    },
+    onReopen: () => {
+      const tab = tabsRef.current.find(item => item.id === active.id)
+      const nextBounds = bounds()
+      if (!tab?.url || !nextBounds) return
+      tabRuntime.enqueueScroll(tab.id, { x: tab.scrollX ?? 0, y: tab.scrollY ?? 0 })
+      void openNativeTab(tab.id, tab.url, nextBounds).catch(error => {
+        setTabs(current => current.map(item => item.id === tab.id ? { ...item, loading: false, error: classifyNavigationError(error) } : item))
+      })
+    },
+  })
 
   useEffect(() => {
     if (!surfaceRef.current || !visible) return
@@ -415,14 +396,13 @@ export function BrowserPage({ visible = true }: { visible?: boolean }) {
     if (!nextBounds) return
     setTabs(current => current.map(item => item.id === tab.id ? { ...item, suspended: false, loading: true, error: undefined } : item))
     try {
-      pendingScrollRestoreRef.current.set(tab.id, { x: tab.scrollX ?? 0, y: tab.scrollY ?? 0 })
+      tabRuntime.enqueueScroll(tab.id, { x: tab.scrollX ?? 0, y: tab.scrollY ?? 0 })
       const opened = await ensureNativeTab(tab.id, tab.url, nextBounds)
       if (!opened) throw new Error('网页浏览仅在 Tauri 桌面应用中可用。')
       if (visibleRef.current && activeTabIdRef.current === tab.id) await showNativeTab(tab.id)
       setTabs(current => current.map(item => item.id === tab.id ? { ...item, suspended: false, error: undefined } : item))
       await enforceLiveTabLimit(tab.id)
     } catch (error) {
-      pendingScrollRestoreRef.current.delete(tab.id)
       setTabs(current => current.map(item => item.id === tab.id ? { ...item, loading: false, error: { kind: 'load-failed', message: String(error) } } : item))
     }
   }

@@ -516,6 +516,7 @@ body[data-theme='dark'] { --accent:#65a77d; --accent-soft:#24372c; --accent-bord
   }
 
   .ant-menu-item-selected .nav-glyph { background: rgba(255,255,255,.48); }
+  .ant-menu-item-selected .nav-glyph { color: inherit; }
 }
 
 .nav-menu--utility { margin-top: 10px; padding-top: 10px; border-top: 1px solid rgba(100,115,106,.14) !important; }
