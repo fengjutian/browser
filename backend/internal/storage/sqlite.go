@@ -34,7 +34,9 @@ func migrate(ctx context.Context, db *sql.DB) error {
 CREATE TABLE IF NOT EXISTS tags (id INTEGER PRIMARY KEY AUTOINCREMENT,name TEXT NOT NULL UNIQUE,created_at TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS document_tags (document_id TEXT NOT NULL REFERENCES documents(id) ON DELETE CASCADE,tag_id INTEGER NOT NULL REFERENCES tags(id) ON DELETE CASCADE,PRIMARY KEY(document_id,tag_id));
 CREATE VIRTUAL TABLE IF NOT EXISTS documents_fts USING fts5(document_id UNINDEXED,title,markdown,summary,tags,tokenize='unicode61');
-CREATE INDEX IF NOT EXISTS idx_documents_created_at ON documents(created_at DESC);`
+CREATE INDEX IF NOT EXISTS idx_documents_created_at ON documents(created_at DESC);
+    CREATE TABLE IF NOT EXISTS processor_queue (document_id TEXT PRIMARY KEY,enqueued_at TEXT NOT NULL,updated_at TEXT NOT NULL);
+    CREATE INDEX IF NOT EXISTS idx_processor_queue_enqueued_at ON processor_queue (enqueued_at ASC);`
 	_, err := db.ExecContext(ctx, schema)
 	return err
 }

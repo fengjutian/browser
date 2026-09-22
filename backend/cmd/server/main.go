@@ -31,7 +31,13 @@ func main() {
 	}
 	defer db.Close()
 	repository := document.NewSQLiteRepository(db)
-	processor := document.NewProcessor(repository, 128)
+	queueStore := document.NewSQLiteQueuePersistence(db)
+	processor := document.NewProcessorWithPersistence(repository, 128, queueStore)
+	if restored, err := processor.RestorePending(ctx); err != nil {
+		log.Printf("restore pending queue: %v", err)
+	} else if restored > 0 {
+		log.Printf("restored %d pending documents from previous run", restored)
+	}
 	go processor.Run(ctx)
 	server := api.NewServerWithProcessor(repository, processor)
 	log.Printf("AI Knowledge Browser API listening on http://%s", addr)
