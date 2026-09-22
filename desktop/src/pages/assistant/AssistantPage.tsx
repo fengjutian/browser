@@ -150,7 +150,7 @@ export function AssistantPage({ onNavigate }: { onNavigate?: (view: View) => voi
   return (
     <>
       {contextHolder}
-      <section className="page">
+      <section className="page assistant-page">
         <PageHeader
           eyebrow="KNOWLEDGE ASSISTANT"
           title="向整个知识库提问"

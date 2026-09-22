@@ -495,12 +495,12 @@ body[data-theme='dark'] { --accent:#65a77d; --accent-soft:#24372c; --accent-bord
   }
 
   .nav-glyph {
-    width: 32px;
-    height: 32px;
+    width: 38px;
+    height: 38px;
     display: inline-grid;
     place-items: center;
     flex: none;
-    border-radius: 10px;
+    border-radius: 12px;
     color: currentColor;
     transition: background-color .16s ease, color .16s ease;
   }
@@ -544,17 +544,25 @@ body[data-theme='dark'] { --accent:#65a77d; --accent-soft:#24372c; --accent-bord
 
   .nav-menu .ant-menu-item-icon,
   .nav-menu .ant-menu-item .nav-glyph {
-    min-width: 32px !important;
+    min-width: 38px !important;
     margin: 0 !important;
   }
 }
 
-.app-sider--collapsed .nav-menu .ant-menu-item-selected .nav-glyph {
-  background: var(--accent-soft);
+.nav-menu .ant-menu-item-selected {
+  background: transparent !important;
 }
 
-.app-sider--collapsed .nav-menu .ant-menu-item-selected {
+.nav-menu .ant-menu-item-selected .nav-glyph {
+  color: #fff !important;
+  background: var(--accent);
+  box-shadow: 0 3px 9px color-mix(in srgb, var(--accent) 20%, transparent);
+}
+
+.nav-menu .ant-menu-item:not(.ant-menu-item-selected):hover {
   background: transparent !important;
+
+  .nav-glyph { background: var(--accent-soft); }
 }
 
 .library-stats {
@@ -694,23 +702,82 @@ body[data-theme='dark'] {
   place-items: center;
   padding: 0;
   border-radius: 9px;
+
+  svg { width: 18px; height: 18px; stroke-width: 1.8; }
+}
+
+.quick-actions {
+  width: min(700px, 78%) !important;
+  margin-top: 14px !important;
+  gap: 12px !important;
+}
+
+.quick-actions > .ant-card {
+  min-height: 0;
+  height: 116px;
+  border-color: color-mix(in srgb, var(--accent-border) 65%, transparent);
+  box-shadow: none;
 }
 
 .quick-actions .ant-card-body {
+  height: 100%;
+  justify-content: center;
   align-items: flex-start;
-  gap: 6px !important;
+  gap: 4px !important;
+  padding: 12px 16px !important;
 }
 
-.quick-actions .ant-card-body > .anticon {
-  width: 34px;
-  height: 34px;
+.quick-actions .ant-card-body > .anticon,
+.quick-actions .ant-card-body > svg {
+  width: 30px;
+  height: 30px;
   display: inline-grid;
   place-items: center;
-  margin-bottom: 2px;
-  border-radius: 10px;
+  margin-bottom: 1px;
+  padding: 7px;
+  border-radius: 9px;
   color: var(--accent);
   background: var(--accent-soft);
-  font-size: 17px;
+  font-size: 16px;
+  stroke-width: 1.8;
+}
+
+.quick-actions b { font-size: 14px; line-height: 20px; }
+.quick-actions small { font-size: 12px; line-height: 18px; }
+
+// The assistant is an application workspace, not a scrolling document.
+.assistant-page {
+  height: 100vh;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+
+  .page-header { flex: none; }
+
+  .assistant-grid {
+    flex: 1;
+    height: auto;
+    min-height: 0;
+  }
+
+  .assistant-grid > .ant-card {
+    height: 100%;
+    min-height: 0;
+    overflow: hidden;
+  }
+
+  .assistant-grid > .ant-card > .ant-card-body {
+    min-height: 0;
+    overflow: auto;
+    scrollbar-width: none;
+
+    &::-webkit-scrollbar { display: none; }
+  }
+
+  .assistant-chat > .ant-card-body { overflow: hidden; }
+  .assistant-conversation { min-height: 0; overflow: auto; scrollbar-width: none; }
+  .assistant-conversation::-webkit-scrollbar { display: none; }
 }
 
 .address-suggestion {

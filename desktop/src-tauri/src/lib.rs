@@ -156,6 +156,79 @@ struct SitePermissionRule {
     clipboard: bool,
 }
 
+/// Initialization script that intercepts the WebView's `contextmenu` event
+/// and forwards a structured payload to the host. The host (BrowserPage)
+/// renders the menu in window coordinates so the WebView never gets to
+/// display its own context menu. URLs from `link` / `image` regions are
+/// left as raw strings here; the frontend re-runs the navigation validator
+/// before opening anything.
+fn context_menu_script() -> String {
+    r#"(() => {
+      if (window.__arcadiaContextMenuInstalled) return;
+      window.__arcadiaContextMenuInstalled = true;
+      const emit = (payload) => {
+        try {
+          const internals = window.__TAURI_INTERNALS__;
+          if (internals && typeof internals.invoke === 'function') {
+            internals.invoke('tauri://emit', { event: 'browser://context-menu', payload }).catch(() => undefined);
+          }
+        } catch (error) { /* ignore */ }
+      };
+      document.addEventListener('contextmenu', event => {
+        try {
+          event.preventDefault();
+          const target = event.target;
+          if (!(target instanceof Element)) {
+            emit({ kind: 'page', clientX: event.clientX, clientY: event.clientY, selectionText: '', linkUrl: null, imageUrl: null, editable: false });
+            return;
+          }
+          const editable = target instanceof HTMLInputElement
+            || target instanceof HTMLTextAreaElement
+            || (target instanceof HTMLElement && target.isContentEditable);
+          if (editable) {
+            emit({ kind: 'input', clientX: event.clientX, clientY: event.clientY, selectionText: '', linkUrl: null, imageUrl: null, editable: true });
+            return;
+          }
+          // Walk up to find a link or image ancestor. Image wins over link
+          // when an <img> is wrapped in an <a>.
+          let node = target;
+          let linkUrl = null;
+          let imageUrl = null;
+          while (node && node !== document.body) {
+            if (!linkUrl && node instanceof HTMLAnchorElement && node.href) {
+              linkUrl = node.href;
+            }
+            if (!imageUrl && node instanceof HTMLImageElement && node.src) {
+              imageUrl = node.src;
+            }
+            if (linkUrl && imageUrl) break;
+            node = node.parentElement;
+          }
+          const selectionText = window.getSelection ? String(window.getSelection() || '') : '';
+          let kind;
+          if (imageUrl) kind = 'image';
+          else if (linkUrl) kind = 'link';
+          else if (selectionText && selectionText.length > 0) kind = 'selection';
+          else kind = 'page';
+          emit({ kind, clientX: event.clientX, clientY: event.clientY, selectionText, linkUrl, imageUrl, editable: false });
+        } catch (error) {
+          emit({ kind: 'page', clientX: event.clientX, clientY: event.clientY, selectionText: '', linkUrl: null, imageUrl: null, editable: false });
+        }
+      }, true);
+    })()"#
+        .into()
+}
+
+#[cfg(test)]
+mod context_menu_tests {
+    #[test]
+    fn context_menu_script_is_a_single_expression() {
+        let script = super::context_menu_script();
+        assert!(script.starts_with("(() =>"), "script must be an IIFE");
+        assert!(script.contains("contextmenu"), "script must intercept contextmenu events");
+    }
+}
+
 fn permission_guard_script(rules: &[SitePermissionRule]) -> String {
     let rules = serde_json::to_string(rules).unwrap_or_else(|_| "[]".into());
     format!(r#"(()=>{{
@@ -310,6 +383,7 @@ async fn browser_create(
     let download_label = label.clone();
     let builder = tauri::webview::WebviewBuilder::new(&label, tauri::WebviewUrl::External(url))
         .initialization_script(permission_guard_script(permissions.as_deref().unwrap_or(&[])))
+        .initialization_script(context_menu_script())
         .on_new_window(move |url, _features| {
             if matches!(url.scheme(), "http" | "https") {
                 let _ = event_app.emit_to(

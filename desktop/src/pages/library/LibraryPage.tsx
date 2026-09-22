@@ -9,6 +9,8 @@ import { loadDocuments } from '../../features/documents/documentService'
 import { createCollection, deleteCollection, getSession, listCollections, toggleStarred, type Collection } from '../../api'
 import { parseHistory, type HistoryEntry } from '../../features/history/dedupeHistory'
 import { trackDownload, type DownloadEntry } from '../../features/downloads/trackDownload'
+import { useDownloadCenter } from '../../features/downloads/useDownloadCenter'
+import { DownloadCenter } from '../../features/downloads/DownloadCenter'
 import type { Document } from '../../types'
 
 export function LibraryPage() {
@@ -19,6 +21,7 @@ export function LibraryPage() {
   const [offline,setOffline]=useState(false)
   const [history,setHistory]=useState<HistoryEntry[]>([])
   const [downloads,setDownloads]=useState<DownloadEntry[]>([])
+  const downloadCenter = useDownloadCenter()
   const [creating,setCreating]=useState(false)
   const [newName,setNewName]=useState('')
   const [messageApi, contextHolder] = message.useMessage()
@@ -74,7 +77,6 @@ export function LibraryPage() {
   }
   const starredCount = documents.filter(item => item.starred).length
   const recentHistory = history.slice(0, 8)
-  const recentDownloads = downloads.slice(0, 8)
   const collectionContent = <div className="library-module">
     <div className="library-module__head"><div><Typography.Title level={3}>集合</Typography.Title><Typography.Text type="secondary">按主题整理保存的网页和笔记。</Typography.Text></div><Button icon={<PlusOutlined/>} onClick={()=>setCreating(true)}>新建集合</Button></div>
     {collections.length === 0
@@ -84,8 +86,8 @@ export function LibraryPage() {
   const historyContent = <div className="library-module"><div className="library-module__head"><div><Typography.Title level={3}>近期浏览</Typography.Title><Typography.Text type="secondary">最近访问过的网页，按时间倒序排列。</Typography.Text></div></div>
     {recentHistory.length===0?<Empty description="暂无浏览记录"/>:<List size="small" className="library-history" dataSource={recentHistory} renderItem={item => <List.Item key={item.url + item.visitedAt}><List.Item.Meta avatar={<span className="library-list-icon"><ClockCircleOutlined/></span>} title={<Typography.Text ellipsis={{ tooltip: item.title }}>{item.title || item.url}</Typography.Text>} description={<Typography.Text type="secondary" ellipsis>{new Date(item.visitedAt).toLocaleString()} · <GlobalOutlined/> {item.url}</Typography.Text>}/></List.Item>}/>} 
   </div>
-  const downloadContent = <div className="library-module"><div className="library-module__head"><div><Typography.Title level={3}>下载记录</Typography.Title><Typography.Text type="secondary">从知识库导出的 Markdown 文件。</Typography.Text></div></div>
-    {recentDownloads.length===0?<Empty description="暂无下载记录"/>:<List size="small" className="library-downloads" dataSource={recentDownloads} renderItem={item => <List.Item key={item.documentId + item.exportedAt}><List.Item.Meta avatar={<span className="library-list-icon"><DownloadOutlined/></span>} title={<Typography.Text ellipsis={{ tooltip: item.title }}>{item.title || '(无标题)'}</Typography.Text>} description={<Typography.Text type="secondary">{new Date(item.exportedAt).toLocaleString()}</Typography.Text>}/></List.Item>}/>} 
+  const downloadContent = <div className="library-module"><div className="library-module__head"><div><Typography.Title level={3}>下载记录</Typography.Title><Typography.Text type="secondary">浏览器下载的文件，重启后保留。</Typography.Text></div></div>
+    <DownloadCenter center={downloadCenter} />
   </div>
   const documentContent = <div className="library-module"><div className="library-module__head"><div><Typography.Title level={3}>最近保存</Typography.Title><Typography.Text type="secondary">已沉淀到本地知识库的内容。</Typography.Text></div></div>
     {!loaded?<Skeleton active/>:!documents.length?<Empty description={offline?'本地数据服务未连接':'暂无保存内容，请先从浏览器保存网页。'}/>:<Row gutter={[16,16]}>{documents.map(document=><Col xs={24} lg={12} key={document.id}><DocumentCard document={document} onOpen={setSelected} onToggleStarred={toggleStar} onArchived={handleArchived} onChanged={refreshCollections}/></Col>)}</Row>}
@@ -97,7 +99,7 @@ export function LibraryPage() {
       {key:'documents',label:`最近保存 ${documents.length}`,children:documentContent},
       {key:'collections',label:`集合 ${collections.length}`,children:collectionContent},
       {key:'history',label:`近期浏览 ${recentHistory.length}`,children:historyContent},
-      {key:'downloads',label:`下载记录 ${recentDownloads.length}`,children:downloadContent},
+      {key:'downloads',label:`下载记录 ${downloadCenter.records.length}`,children:downloadContent},
     ]}/>
     <Modal title="新建集合" open={creating} onCancel={()=>{setCreating(false);setNewName('')}} onOk={()=>void createNewCollection()} okText="创建" cancelText="取消"><Input autoFocus placeholder="集合名称" value={newName} onChange={event=>setNewName(event.target.value)} onPressEnter={()=>void createNewCollection()}/></Modal>
     <DocumentDetailDrawer document={selected} onClose={()=>setSelected(null)} onDeleted={id=>setDocuments(items=>items.filter(item=>item.id!==id))} onExported={onExported} onUpdated={handleDocumentUpdated}/>

@@ -14,11 +14,30 @@ export interface NativePageSnapshot { url: string; html: string }
  */
 interface NativeNewTabRequest { version: number; openerLabel: string; url: string }
 /**
- * v1: tabLabel + url + path? + status. Future revisions may add byte-level
- * progress, paused/resumed signalling, danger classification, etc.
+ * v2 download progress payload emitted on `browser://download`. Legacy v1
+ * fields (`tabLabel`, `url`, `path`, `status`) are preserved; new fields
+ * cover id-based dedupe, byte progress, danger classification, and private
+ * mode. Missing `version` is treated as v1 (only legacy fields populated).
  */
-export interface NativeDownloadUpdate { version: number; tabLabel: string; url: string; path?: string; status: 'downloading'|'completed'|'failed' }
-export const EVENT_PAYLOAD_VERSION = 1
+export interface NativeDownloadUpdate {
+  version: number
+  kind: 'started' | 'progress' | 'finished' | 'failed' | 'cancelled' | 'blocked'
+  id: string
+  tabLabel: string
+  url: string
+  fileName?: string
+  targetPath?: string
+  mimeType?: string
+  receivedBytes?: number
+  totalBytes?: number
+  progressKnown?: boolean
+  status: 'downloading' | 'completed' | 'failed' | 'cancelled' | 'blocked' | 'paused' | 'queued'
+  dangerType?: 'none' | 'executable' | 'script' | 'archive' | 'document' | 'other'
+  errorMessage?: string
+  private?: boolean
+  sourceOrigin?: string
+}
+export const EVENT_PAYLOAD_VERSION = 2
 const labels = new Map<string, string>()
 const isTauri = () => '__TAURI_INTERNALS__' in window
 const labelFor = (tabId: string) => `browser-${tabId.replace(/[^a-zA-Z0-9-]/g, '-')}`
@@ -78,6 +97,44 @@ export async function onNativeNewTab(handler: (url: string) => void): Promise<Un
 export async function onNativeDownload(handler: (download: NativeDownloadUpdate) => void): Promise<UnlistenFn> {
   if (!isTauri()) return () => undefined
   return listen<NativeDownloadUpdate>('browser://download', event => handler(event.payload))
+}
+
+/**
+ * Right-click context menu payload emitted by the context-menu init script.
+ * `clientX` / `clientY` are the cursor position in viewport coordinates of
+ * the WebView itself — the host multiplies by the surface scale + offset
+ * before showing the menu.
+ */
+export interface ContextMenuRequest {
+  version: number
+  kind: 'page' | 'selection' | 'link' | 'image' | 'input'
+  clientX: number
+  clientY: number
+  selectionText: string
+  linkUrl: string | null
+  imageUrl: string | null
+  editable: boolean
+}
+
+const CONTEXT_MENU_PAYLOAD_VERSION = 1
+
+export async function onNativeContextMenu(handler: (request: ContextMenuRequest) => void): Promise<UnlistenFn> {
+  if (!isTauri()) return () => undefined
+  return listen<ContextMenuRequest>('browser://context-menu', event => handler(event.payload))
+}
+
+/**
+ * Best-effort check for "safe" protocols before opening a link from a
+ * context menu. The Rust navigation layer also enforces the same rules,
+ * but rejecting here keeps the menu item disabled when applicable.
+ */
+export function isAllowedExternalUrl(value: string): boolean {
+  try {
+    const url = new URL(value)
+    return url.protocol === 'http:' || url.protocol === 'https:'
+  } catch {
+    return false
+  }
 }
 
 /**

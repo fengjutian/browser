@@ -1,6 +1,7 @@
 import { MouseEvent, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
-import { AutoComplete, Badge, Button, Card, Dropdown, Empty, Input, List, Popover, Segmented, Space, Tabs, Tag, Tooltip, Typography, message, type InputRef, type MenuProps } from 'antd'
-import { ArrowDownOutlined, ArrowLeftOutlined, ArrowRightOutlined, ArrowUpOutlined, BookOutlined, CheckCircleOutlined, CloseCircleOutlined, CloseOutlined, CopyOutlined, DownloadOutlined, GlobalOutlined, LoadingOutlined, MoreOutlined, PlusOutlined, PrinterOutlined, ReloadOutlined, RobotOutlined, SafetyCertificateOutlined, SaveOutlined, SearchOutlined, StarOutlined, ThunderboltOutlined, TranslationOutlined } from '@ant-design/icons'
+import { AutoComplete, Badge, Button, Card, Dropdown, Input, Popover, Segmented, Space, Tabs, Tag, Tooltip, Typography, message, type InputRef, type MenuProps } from 'antd'
+import { ArrowDownOutlined, ArrowLeftOutlined, ArrowRightOutlined, ArrowUpOutlined, BookOutlined, CheckCircleOutlined, CloseCircleOutlined, CloseOutlined, CopyOutlined, DownloadOutlined, GlobalOutlined, LoadingOutlined, MoreOutlined, PlusOutlined, PrinterOutlined, ReloadOutlined, SafetyCertificateOutlined, SaveOutlined, SearchOutlined, StarOutlined, ThunderboltOutlined, TranslationOutlined } from '@ant-design/icons'
+import { Sparkles as RobotOutlined } from 'lucide-react'
 import type { BrowserTab, BrowserTabError } from '../../types'
 import { findDocumentByUrl, getBrowserShortcutsEnabled, getDocument, getSession, saveDocument, setSession, toggleStarred } from '../../api'
 import { captureNativePage, closeNativeTab, ensureNativeTab, findInNativeTab, hasNativeTab, hideNativeTab, navigateHistory, onNativeNewTab, openNativeTab, printNativeTab, readNativeState, reloadNativeTab, resizeNativeTab, showNativeTab, stopNativeTab, zoomNativeTab } from '../../services/nativeBrowser'
@@ -17,6 +18,9 @@ import { resolveNavigationInput } from '../../features/browser/navigation'
 import { useDownloads } from '../../features/downloads/useDownloads'
 import { useTabRuntime } from '../../features/browser/useTabRuntime'
 import { buildAddressSuggestions } from '../../features/browser/addressSuggestions'
+import { DownloadSummary } from '../../features/downloads/DownloadCenter'
+import { ContextMenu } from '../../features/browser/ContextMenuView'
+import type { ContextMenuAction } from '../../features/browser/contextMenu'
 
 const SESSION_KEY = 'browser.tabs'
 const SESSION_DEBOUNCE_MS = 500
@@ -99,7 +103,7 @@ export function BrowserPage({ visible = true }: { visible?: boolean }) {
   const [findQuery, setFindQuery] = useState('')
   const [findStatus, setFindStatus] = useState<'idle' | 'found' | 'missing'>('idle')
   const [zoomLevels, setZoomLevels] = useState<Record<string, number>>({})
-  const { downloads, clear: clearDownloads } = useDownloads({
+  const { downloads } = useDownloads({
     onTerminal: entry => {
       if (entry.status === 'completed') messageApi.success('下载完成')
       else if (entry.status === 'failed') messageApi.error('下载失败')
@@ -444,14 +448,12 @@ export function BrowserPage({ visible = true }: { visible?: boolean }) {
     { key: 'zoom-reset', label: '重置缩放', extra: 'Ctrl+0', onClick: () => setZoom(active.id, 1) },
   ]
 
-  const downloadPanel = <div className="browser-downloads">
-    <div className="browser-downloads__head"><b>下载</b>{downloads.length > 0&&<Button type="link" size="small" onClick={clearDownloads}>清除记录</Button>}</div>
-    {downloads.length===0?<Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无下载"/>:<List size="small" dataSource={downloads} renderItem={item=>{
-      const name = item.path?.split(/[\\/]/).pop() || (()=>{try{return new URL(item.url).pathname.split('/').pop()}catch{return item.url}})() || '下载文件'
-      const icon = item.status==='downloading'?<LoadingOutlined spin/>:item.status==='completed'?<CheckCircleOutlined className="is-success"/>:<CloseCircleOutlined className="is-error"/>
-      return <List.Item><List.Item.Meta avatar={icon} title={<Typography.Text ellipsis={{tooltip:name}}>{name}</Typography.Text>} description={<Typography.Text type="secondary">{item.status==='downloading'?'正在下载':item.status==='completed'?'已完成':'失败'}</Typography.Text>}/></List.Item>
-    }}/>} 
-  </div>
+  const downloadPanel = (
+    <DownloadSummary
+      feed={downloads.map(item => ({ ...item, targetPath: item.targetPath ?? item.path }))}
+      inFlight={downloads.filter(item => item.status === 'downloading').length}
+    />
+  )
 
   async function retryActive() {
     const url = active.url
@@ -467,6 +469,51 @@ export function BrowserPage({ visible = true }: { visible?: boolean }) {
       messageApi.success('已复制链接')
     } catch {
       messageApi.error('复制失败，请手动复制')
+    }
+  }
+
+  async function writeClipboard(value: string, label: string) {
+    try {
+      await navigator.clipboard.writeText(value)
+      messageApi.success(`已复制${label}`)
+    } catch {
+      messageApi.error(`复制${label}失败`)
+    }
+  }
+
+  async function handleContextAction(action: ContextMenuAction, request: { linkUrl: string | null; imageUrl: string | null; selectionText: string }) {
+    switch (action) {
+      case 'back': void navigateHistory(active.id, -1); return
+      case 'forward': void navigateHistory(active.id, 1); return
+      case 'reload': if (hasNativeTab(active.id)) void reloadNativeTab(active.id); return
+      case 'stop': if (hasNativeTab(active.id)) void stopNativeTab(active.id); return
+      case 'print': if (hasNativeTab(active.id)) void printNativeTab(active.id); return
+      case 'view-source':
+        messageApi.info(`${active.title || '当前页'} · ${active.url || ''}`)
+        return
+      case 'copy': await writeClipboard(request.selectionText ?? '', '选区'); return
+      case 'cut':
+      case 'paste':
+      case 'select-all':
+        messageApi.info('请在网页内使用 Ctrl+X / Ctrl+V / Ctrl+A（受限于 WebView 边界）')
+        return
+      case 'search-selection': if (request.selectionText) void navigate(`https://www.google.com/search?q=${encodeURIComponent(request.selectionText)}`); return
+      case 'ask-ai':
+        setAiOpen(true)
+        messageApi.info('AI 提问功能在 Assistant 面板中接入，本批暂未接通')
+        return
+      case 'open-link-current': if (request.linkUrl) void navigate(request.linkUrl); return
+      case 'open-link-new': if (request.linkUrl) openNewTab(request.linkUrl); return
+      case 'copy-link': if (request.linkUrl) await writeClipboard(request.linkUrl, '链接'); return
+      case 'open-image-new': if (request.imageUrl) openNewTab(request.imageUrl); return
+      case 'copy-image': if (request.imageUrl) await writeClipboard(request.imageUrl, '图片地址'); return
+      case 'save-image':
+        if (request.imageUrl) {
+          // 第 1 批 sub-batch B 接通 reqwest 接管后改为 downloader；当前退化：
+          // 通过 navigate 走 WebView 原生下载路径并立即把标签关闭以避免误触发。
+          messageApi.info('保存图片：当前版本请直接右键图片另存；下批接通 reqwest 流式接管')
+        }
+        return
     }
   }
 
@@ -746,6 +793,16 @@ export function BrowserPage({ visible = true }: { visible?: boolean }) {
             : active.url
               ? <BrowserErrorView tab={{...active, error:{kind:'web-mode-required',message:'当前网页需要在 Tauri 桌面应用中打开。'}}} onRetry={retryActive} onNewTab={openNewTab} onCopy={copyUrl}/>
               : <NewTab address={address} setAddress={setAddress} navigate={navigate}/>}</div>{aiOpen&&<AssistantPanel close={()=>setAiOpen(false)} saveToLibrary={save} currentUrl={active.url} currentTabId={active.id} readerArticle={readerArticle}/>}</div>
+    <ContextMenu
+      surfaceRef={surfaceRef}
+      capabilities={{
+        canGoBack: !!active.canGoBack,
+        canGoForward: !!active.canGoForward,
+        canPrint: nativeMode,
+        canAskAi: false,
+      }}
+      onAction={handleContextAction}
+    />
   </div>
 }
 

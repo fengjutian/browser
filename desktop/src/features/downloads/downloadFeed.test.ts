@@ -40,13 +40,30 @@ describe('applyDownloadUpdate', () => {
 })
 
 describe('normalizeDownloadPayload', () => {
-  it('accepts the minimal v1 payload from Tauri', () => {
-    expect(normalizeDownloadPayload({ url: 'https://e/x', tabLabel: 'browser-1', status: 'downloading' })).toEqual({
+  it('accepts the minimal v2 payload from Tauri', () => {
+    expect(normalizeDownloadPayload({
       url: 'https://e/x',
       tabLabel: 'browser-1',
       status: 'downloading',
+      id: 'dl-1',
+      kind: 'started',
+    })).toEqual({
+      id: 'dl-1',
+      url: 'https://e/x',
+      tabLabel: 'browser-1',
+      fileName: undefined,
+      targetPath: undefined,
       path: undefined,
+      status: 'downloading',
       version: DOWNLOAD_PAYLOAD_VERSION,
+      receivedBytes: undefined,
+      totalBytes: undefined,
+      progressKnown: undefined,
+      dangerType: undefined,
+      errorMessage: undefined,
+      private: undefined,
+      sourceOrigin: undefined,
+      kind: 'started',
     })
   })
 
@@ -54,8 +71,13 @@ describe('normalizeDownloadPayload', () => {
     expect(normalizeDownloadPayload({ url: 'a', tabLabel: 'b', status: 'completed', version: 2 })?.version).toBe(2)
   })
 
+  it('accepts the queued status (v2 extension)', () => {
+    const result = normalizeDownloadPayload({ url: 'a', tabLabel: 'b', status: 'queued' })
+    expect(result?.status).toBe('queued')
+  })
+
   it('drops payloads with unknown status', () => {
-    expect(normalizeDownloadPayload({ url: 'a', tabLabel: 'b', status: 'queued' })).toBeNull()
+    expect(normalizeDownloadPayload({ url: 'a', tabLabel: 'b', status: 'garbage' })).toBeNull()
   })
 
   it('drops payloads missing url or tabLabel', () => {
@@ -66,5 +88,25 @@ describe('normalizeDownloadPayload', () => {
   it('drops non-object payloads', () => {
     expect(normalizeDownloadPayload('garbage')).toBeNull()
     expect(normalizeDownloadPayload(null)).toBeNull()
+  })
+
+  it('maps v1 path to targetPath', () => {
+    const result = normalizeDownloadPayload({ url: 'a', tabLabel: 'b', status: 'completed', path: '/tmp/a.zip' })
+    expect(result?.targetPath).toBe('/tmp/a.zip')
+  })
+})
+
+describe('applyDownloadUpdate dedupe', () => {
+  it('prefers id over url for dedupe when both are present', () => {
+    const seed = [entry({ id: 'dl-1', url: 'https://example.com/a' })]
+    const result = applyDownloadUpdate(seed, entry({ id: 'dl-1', url: 'https://example.com/a', status: 'completed' }))
+    expect(result).toHaveLength(1)
+    expect(result[0].status).toBe('completed')
+  })
+
+  it('keeps two distinct ids of the same url as separate entries', () => {
+    const seed = [entry({ id: 'dl-1', url: 'https://example.com/a' })]
+    const result = applyDownloadUpdate(seed, entry({ id: 'dl-2', url: 'https://example.com/a' }))
+    expect(result).toHaveLength(2)
   })
 })
