@@ -747,18 +747,22 @@ body[data-theme='dark'] {
 
 // The assistant is an application workspace, not a scrolling document.
 .assistant-page {
+  width: min(100%, 1220px);
+  padding: 26px 30px 32px;
   height: 100vh;
   min-height: 0;
   display: flex;
   flex-direction: column;
   overflow: hidden;
 
-  .page-header { flex: none; }
+  .page-header { flex: none; margin-bottom: 18px; }
 
   .assistant-grid {
     flex: 1;
     height: auto;
     min-height: 0;
+    grid-template-columns: minmax(0, 1fr) 260px;
+    gap: 12px;
   }
 
   .assistant-grid > .ant-card {
@@ -779,6 +783,80 @@ body[data-theme='dark'] {
   .assistant-conversation { min-height: 0; overflow: auto; scrollbar-width: none; }
   .assistant-conversation::-webkit-scrollbar { display: none; }
 }
+
+// Native rail buttons avoid the centering offsets of collapsed component menus.
+.rail-nav {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 4px;
+}
+
+.rail-nav--utility {
+  padding-top: 10px;
+  border-top: 1px solid rgba(100,115,106,.14);
+}
+
+.rail-button {
+  width: 100%;
+  height: 46px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 4px 8px;
+  border: 0;
+  border-radius: 12px;
+  color: #7a776f;
+  background: transparent;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: color .16s ease, background-color .16s ease;
+
+  &:hover { color: var(--accent); background: var(--accent-soft); }
+
+  .nav-glyph {
+    width: 38px;
+    height: 38px;
+    display: grid;
+    place-items: center;
+    flex: 0 0 38px;
+    border-radius: 11px;
+  }
+
+  svg {
+    width: 20px;
+    height: 20px;
+    display: block;
+    stroke-width: 1.8;
+  }
+
+  &.is-active {
+    color: #fff;
+    background: transparent;
+  }
+
+  &.is-active .nav-glyph {
+    background: var(--accent);
+    box-shadow: 0 3px 9px color-mix(in srgb, var(--accent) 20%, transparent);
+  }
+}
+
+.rail-button__label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.app-sider--collapsed .rail-button {
+  width: 46px;
+  margin-inline: auto;
+  justify-content: center;
+  padding: 4px;
+}
+
+.app-sider--collapsed .rail-button__label { display: none; }
 
 .address-suggestion {
   min-width: 0;

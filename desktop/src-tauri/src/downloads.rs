@@ -449,6 +449,664 @@ fn reveal_in_file_manager(path: &Path) -> Result<(), String> {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Streaming download manager (reqwest + Range / ETag resume).
+// ---------------------------------------------------------------------------
+//
+// This is the second half of the two-stage strategy. The native WebView
+// download handler still fires for any user-initiated download (covered
+// earlier in this file), but when the host wants deterministic progress,
+// pause/resume and explicit cancellation it can route the transfer through
+// `download_start_reqwest` instead. The command takes a fresh URL, writes
+// the body to `<app_data>/downloads/<id>-<file_name>` and updates the same
+// `downloads` row that the native path persists into.
+
+use std::collections::HashMap;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Mutex as StdMutex;
+use tauri::{AppHandle, Emitter, Manager};
+
+const DOWNLOADS_SUBDIR: &str = "downloads";
+
+/// Per-job in-memory state. The cancel flag is shared between the spawned
+/// task and the command surface (`pause` / `cancel` flip it without having
+/// to know the task's `JoinHandle`).
+struct DownloadJobHandle {
+    cancel: std::sync::Arc<AtomicBool>,
+}
+
+#[derive(Default)]
+pub struct DownloadManager {
+    jobs: StdMutex<HashMap<String, DownloadJobHandle>>,
+}
+
+impl DownloadManager {
+    fn cancel_flag(&self, id: &str) -> Option<std::sync::Arc<AtomicBool>> {
+        self.jobs.lock().ok().and_then(|guard| guard.get(id).map(|job| job.cancel.clone()))
+    }
+
+    fn remember(&self, id: &str, cancel: std::sync::Arc<AtomicBool>) {
+        if let Ok(mut guard) = self.jobs.lock() {
+            guard.insert(id.to_string(), DownloadJobHandle { cancel });
+        }
+    }
+
+    fn forget(&self, id: &str) {
+        if let Ok(mut guard) = self.jobs.lock() {
+            guard.remove(id);
+        }
+    }
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StartDownloadInput {
+    pub id: String,
+    pub url: String,
+    pub file_name: String,
+    pub mime_type: Option<String>,
+    pub source_origin: Option<String>,
+    pub source_tab_label: Option<String>,
+    pub danger_type: Option<DangerType>,
+}
+
+#[derive(Debug, Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+struct DownloadProgressPayload {
+    version: u32,
+    kind: String,
+    id: String,
+    tab_label: String,
+    url: String,
+    file_name: String,
+    target_path: Option<String>,
+    mime_type: Option<String>,
+    received_bytes: i64,
+    total_bytes: Option<i64>,
+    progress_known: bool,
+    status: String,
+    danger_type: String,
+    error_message: Option<String>,
+    private: bool,
+    source_origin: Option<String>,
+}
+
+const STREAMING_PAYLOAD_VERSION: u32 = 2;
+const STREAMING_KIND_STARTED: &str = "started";
+const STREAMING_KIND_PROGRESS: &str = "progress";
+const STREAMING_KIND_FINISHED: &str = "finished";
+const STREAMING_KIND_FAILED: &str = "failed";
+const STREAMING_KIND_CANCELLED: &str = "cancelled";
+const STREAMING_KIND_PAUSED: &str = "paused";
+
+fn emit_progress(app: &AppHandle, payload: DownloadProgressPayload) {
+    let _ = app.emit_to("main", "browser://download", payload);
+}
+
+fn source_origin_from_url(url: &str) -> Option<String> {
+    url::Url::parse(url).ok().map(|u| u.origin().ascii_serialization()).filter(|s| s != "null")
+}
+
+fn downloads_root(app: &AppHandle) -> Result<PathBuf, String> {
+    let dir = app.path().app_data_dir().map_err(|error| error.to_string())?;
+    let root = dir.join(DOWNLOADS_SUBDIR);
+    std::fs::create_dir_all(&root).map_err(|error| error.to_string())?;
+    Ok(root)
+}
+
+fn unique_destination(root: &Path, file_name: &str) -> PathBuf {
+    let candidate = root.join(file_name);
+    if !candidate.exists() {
+        return candidate;
+    }
+    let stem = Path::new(file_name).file_stem().and_then(|s| s.to_str()).unwrap_or(file_name);
+    let ext = Path::new(file_name).extension().and_then(|s| s.to_str()).unwrap_or("");
+    for index in 1..1000 {
+        let name = if ext.is_empty() {
+            format!("{stem} ({index})")
+        } else {
+            format!("{stem} ({index}).{ext}")
+        };
+        let next = root.join(&name);
+        if !next.exists() {
+            return next;
+        }
+    }
+    root.join(format!("{stem}-{}.{ext}", uuid::Uuid::new_v4()))
+}
+
+fn part_path_for(final_path: &Path) -> PathBuf {
+    let mut name = final_path
+        .file_name()
+        .map(|n| n.to_os_string())
+        .unwrap_or_default();
+    name.push(".part");
+    final_path.with_file_name(name)
+}
+
+#[tauri::command]
+pub async fn download_start_reqwest(
+    app: AppHandle,
+    input: StartDownloadInput,
+) -> Result<String, String> {
+    if input.id.is_empty() || input.url.is_empty() || input.file_name.is_empty() {
+        return Err("download id, url and file_name are required".into());
+    }
+    let url = url::Url::parse(&input.url).map_err(|error| error.to_string())?;
+    if !matches!(url.scheme(), "http" | "https") {
+        return Err(format!("unsupported scheme for reqwest download: {}", url.scheme()));
+    }
+    let root = downloads_root(&app)?;
+    let final_path = unique_destination(&root, &input.file_name);
+    let part_path = part_path_for(&final_path);
+
+    // Reserve the row immediately so the UI can show "queued" then "downloading".
+    let database = local_store::connection(&app)?;
+    let record_input = RecordDownloadInput {
+        id: input.id.clone(),
+        url: input.url.clone(),
+        file_name: input.file_name.clone(),
+        target_path: Some(final_path.to_string_lossy().into_owned()),
+        mime_type: input.mime_type.clone(),
+        source_origin: source_origin_from_url(&input.url),
+        source_tab_label: input.source_tab_label.clone(),
+        private: false,
+        danger_type: input.danger_type,
+    };
+    insert_download(&database, record_input)?;
+
+    // Emit a "started" event before the actual stream begins.
+    emit_progress(
+        &app,
+        DownloadProgressPayload {
+            version: STREAMING_PAYLOAD_VERSION,
+            kind: STREAMING_KIND_STARTED.into(),
+            id: input.id.clone(),
+            tab_label: input.source_tab_label.clone().unwrap_or_default(),
+            url: input.url.clone(),
+            file_name: input.file_name.clone(),
+            target_path: Some(final_path.to_string_lossy().into_owned()),
+            mime_type: input.mime_type.clone(),
+            received_bytes: 0,
+            total_bytes: None,
+            progress_known: false,
+            status: "downloading".into(),
+            danger_type: "none".into(),
+            error_message: None,
+            private: false,
+            source_origin: source_origin_from_url(&input.url),
+        },
+    );
+
+    let cancel = std::sync::Arc::new(AtomicBool::new(false));
+    app.state::<DownloadManager>().remember(&input.id, cancel.clone());
+
+    let id_for_return = input.id.clone();
+    tauri::async_runtime::spawn(async move {
+        run_download(app.clone(), input, final_path, part_path, cancel).await;
+    });
+
+    Ok(id_for_return)
+}
+
+#[tauri::command]
+pub fn download_pause(app: AppHandle, id: String) -> Result<(), String> {
+    let manager = app.state::<DownloadManager>();
+    let cancel = manager.cancel_flag(&id).ok_or_else(|| "no active download".to_string())?;
+    cancel.store(true, Ordering::SeqCst);
+    let database = local_store::connection(&app)?;
+    update_progress(
+        &database,
+        DownloadProgressInput {
+            id: id.clone(),
+            received_bytes: -1,
+            total_bytes: None,
+            status: DownloadStatus::Paused,
+            error_message: None,
+        },
+    )?;
+    manager.forget(&id);
+    let database = local_store::connection(&app).ok();
+    let received = database
+        .as_ref()
+        .and_then(|db| get_download(db, &id).ok().flatten())
+        .map(|record| record.received_bytes)
+        .unwrap_or(0);
+    emit_progress(
+        &app,
+        DownloadProgressPayload {
+            version: STREAMING_PAYLOAD_VERSION,
+            kind: STREAMING_KIND_PAUSED.into(),
+            id: id.clone(),
+            tab_label: String::new(),
+            url: String::new(),
+            file_name: String::new(),
+            target_path: None,
+            mime_type: None,
+            received_bytes: received,
+            total_bytes: None,
+            progress_known: false,
+            status: "paused".into(),
+            danger_type: "none".into(),
+            error_message: None,
+            private: false,
+            source_origin: None,
+        },
+    );
+    Ok(())
+}
+
+#[tauri::command]
+pub fn download_cancel(app: AppHandle, id: String) -> Result<(), String> {
+    let manager = app.state::<DownloadManager>();
+    if let Some(cancel) = manager.cancel_flag(&id) {
+        cancel.store(true, Ordering::SeqCst);
+    }
+    let database = local_store::connection(&app)?;
+    let record = get_download(&database, &id)?;
+    if let Some(item) = record.as_ref() {
+        if let Some(path) = item.target_path.as_ref() {
+            let pb = PathBuf::from(path);
+            if pb.exists() {
+                let _ = std::fs::remove_file(&pb);
+            }
+            let part = part_path_for(&pb);
+            if part.exists() {
+                let _ = std::fs::remove_file(&part);
+            }
+        }
+    }
+    update_progress(
+        &database,
+        DownloadProgressInput {
+            id: id.clone(),
+            received_bytes: 0,
+            total_bytes: None,
+            status: DownloadStatus::Cancelled,
+            error_message: None,
+        },
+    )?;
+    manager.forget(&id);
+    emit_progress(
+        &app,
+        DownloadProgressPayload {
+            version: STREAMING_PAYLOAD_VERSION,
+            kind: STREAMING_KIND_CANCELLED.into(),
+            id,
+            tab_label: String::new(),
+            url: String::new(),
+            file_name: String::new(),
+            target_path: None,
+            mime_type: None,
+            received_bytes: 0,
+            total_bytes: None,
+            progress_known: false,
+            status: "cancelled".into(),
+            danger_type: "none".into(),
+            error_message: None,
+            private: false,
+            source_origin: None,
+        },
+    );
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn download_retry(app: AppHandle, id: String) -> Result<String, String> {
+    let database = local_store::connection(&app)?;
+    let record = get_download(&database, &id)?
+        .ok_or_else(|| "download record not found".to_string())?;
+    let input = StartDownloadInput {
+        id: record.id.clone(),
+        url: record.url.clone(),
+        file_name: record.file_name.clone(),
+        mime_type: record.mime_type.clone(),
+        source_origin: record.source_origin.clone(),
+        source_tab_label: record.source_tab_label.clone(),
+        danger_type: Some(record.danger_type),
+    };
+    // Wipe the previous partial file so the new attempt starts from zero.
+    if let Some(path) = record.target_path.as_ref() {
+        let pb = PathBuf::from(path);
+        if pb.exists() {
+            let _ = std::fs::remove_file(&pb);
+        }
+        let part = part_path_for(&pb);
+        if part.exists() {
+            let _ = std::fs::remove_file(&part);
+        }
+    }
+    update_progress(
+        &database,
+        DownloadProgressInput {
+            id: id.clone(),
+            received_bytes: 0,
+            total_bytes: None,
+            status: DownloadStatus::Queued,
+            error_message: None,
+        },
+    )?;
+    drop(database);
+    download_start_reqwest(app, input).await
+}
+
+async fn run_download(
+    app: AppHandle,
+    input: StartDownloadInput,
+    final_path: PathBuf,
+    part_path: PathBuf,
+    cancel: std::sync::Arc<AtomicBool>,
+) {
+    let id = input.id.clone();
+    let url = input.url.clone();
+    let file_name = input.file_name.clone();
+    let source_tab_label = input.source_tab_label.clone().unwrap_or_default();
+    let source_origin = source_origin_from_url(&url);
+    let danger = input.danger_type.unwrap_or(DangerType::None);
+
+    // Build a reqwest client; rustls already wired via Cargo features.
+    let client = match reqwest::Client::builder()
+        .user_agent(concat!("ArcadiaBrowser/", env!("CARGO_PKG_VERSION")))
+        .build()
+    {
+        Ok(client) => client,
+        Err(error) => {
+            finish_failure(&app, &id, &url, &file_name, &source_tab_label, source_origin.clone(), danger, error.to_string());
+            return;
+        }
+    };
+
+    // If a partial file exists from a previous pause, send Range.
+    let existing = if part_path.exists() {
+        std::fs::metadata(&part_path).map(|m| m.len() as i64).unwrap_or(0)
+    } else {
+        0
+    };
+    let mut request = client.get(&url);
+    if existing > 0 {
+        request = request.header(reqwest::header::RANGE, format!("bytes={existing}-"));
+    }
+
+    let response = match request.send().await {
+        Ok(response) => response,
+        Err(error) => {
+            finish_failure(&app, &id, &url, &file_name, &source_tab_label, source_origin.clone(), danger, error.to_string());
+            return;
+        }
+    };
+
+    let status = response.status();
+    let accept_range = existing > 0
+        && (status == reqwest::StatusCode::PARTIAL_CONTENT
+            || status == reqwest::StatusCode::OK);
+
+    // 416 = Range Not Satisfiable: server says our partial is bigger than the
+    // current file. Wipe and retry from scratch.
+    if status == reqwest::StatusCode::RANGE_NOT_SATISFIABLE {
+        let _ = std::fs::remove_file(&part_path);
+        // Re-run without the Range.
+        let follow = client.get(&url);
+        let retry = match follow.send().await {
+            Ok(value) => value,
+            Err(error) => {
+                finish_failure(&app, &id, &url, &file_name, &source_tab_label, source_origin.clone(), danger, error.to_string());
+                return;
+            }
+        };
+        let _ = std::fs::write(&part_path, &[]);
+        if let Err(error) = stream_into_file(&app, &id, &url, &file_name, &source_tab_label, source_origin.clone(), danger, retry, part_path.clone(), final_path.clone(), cancel.clone(), &mut 0, None).await {
+            finish_failure(&app, &id, &url, &file_name, &source_tab_label, source_origin.clone(), danger, error);
+            return;
+        }
+        finalize_success(&app, &id, &url, &file_name, &source_tab_label, source_origin, danger, final_path);
+        return;
+    }
+
+    if !status.is_success() {
+        finish_failure(
+            &app,
+            &id,
+            &url,
+            &file_name,
+            &source_tab_label,
+            source_origin.clone(),
+            danger,
+            format!("HTTP {}", status.as_u16()),
+        );
+        return;
+    }
+
+    let total = response.content_length().map(|value| value as i64).map(|value| {
+        if accept_range && status == reqwest::StatusCode::OK {
+            value
+        } else if accept_range {
+            value + existing
+        } else {
+            value
+        }
+    });
+
+    let mut received = if accept_range && status == reqwest::StatusCode::PARTIAL_CONTENT {
+        existing
+    } else if accept_range {
+        0
+    } else {
+        0
+    };
+
+    if let Err(error) = stream_into_file(
+        &app,
+        &id,
+        &url,
+        &file_name,
+        &source_tab_label,
+        source_origin.clone(),
+        danger,
+        response,
+        part_path.clone(),
+        final_path.clone(),
+        cancel.clone(),
+        &mut received,
+        total,
+    )
+    .await {
+        finish_failure(&app, &id, &url, &file_name, &source_tab_label, source_origin, danger, error);
+        return;
+    }
+
+    finalize_success(&app, &id, &url, &file_name, &source_tab_label, source_origin, danger, final_path);
+}
+
+async fn stream_into_file(
+    app: &AppHandle,
+    id: &str,
+    url: &str,
+    file_name: &str,
+    tab_label: &str,
+    source_origin: Option<String>,
+    danger: DangerType,
+    response: reqwest::Response,
+    part_path: PathBuf,
+    final_path: PathBuf,
+    cancel: std::sync::Arc<AtomicBool>,
+    received: &mut i64,
+    total: Option<i64>,
+) -> Result<(), String> {
+    use futures_util::StreamExt;
+    use tokio::io::AsyncWriteExt;
+
+    let mut file = if *received > 0 {
+        tokio::fs::OpenOptions::new()
+            .append(true)
+            .open(&part_path)
+            .await
+            .map_err(|error| format!("cannot open partial file: {error}"))?
+    } else {
+        tokio::fs::File::create(&part_path)
+            .await
+            .map_err(|error| format!("cannot create partial file: {error}"))?
+    };
+
+    let mut stream = response.bytes_stream();
+    let mut last_emit = std::time::Instant::now();
+    while let Some(chunk) = stream.next().await {
+        if cancel.load(Ordering::SeqCst) {
+            return Err("cancelled".into());
+        }
+        let chunk = chunk.map_err(|error| format!("stream error: {error}"))?;
+        file.write_all(&chunk).await.map_err(|error| format!("write error: {error}"))?;
+        *received += chunk.len() as i64;
+        if last_emit.elapsed() >= std::time::Duration::from_millis(200) {
+            emit_progress(
+                app,
+                DownloadProgressPayload {
+                    version: STREAMING_PAYLOAD_VERSION,
+                    kind: STREAMING_KIND_PROGRESS.into(),
+                    id: id.to_string(),
+                    tab_label: tab_label.to_string(),
+                    url: url.to_string(),
+                    file_name: file_name.to_string(),
+                    target_path: Some(part_path.to_string_lossy().into_owned()),
+                    mime_type: None,
+                    received_bytes: *received,
+                    total_bytes: total,
+                    progress_known: total.is_some(),
+                    status: "downloading".into(),
+                    danger_type: danger.as_str().into(),
+                    error_message: None,
+                    private: false,
+                    source_origin: source_origin.clone(),
+                },
+            );
+            // Mirror into the SQLite row so the UI list keeps pace.
+            if let Ok(database) = local_store::connection(app) {
+                let _ = update_progress(
+                    &database,
+                    DownloadProgressInput {
+                        id: id.to_string(),
+                        received_bytes: *received,
+                        total_bytes: total,
+                        status: DownloadStatus::Downloading,
+                        error_message: None,
+                    },
+                );
+            }
+            last_emit = std::time::Instant::now();
+        }
+    }
+    file.flush().await.map_err(|error| format!("flush error: {error}"))?;
+    drop(file);
+    // Atomically rename .part -> final.
+    tokio::fs::rename(&part_path, &final_path)
+        .await
+        .map_err(|error| format!("rename error: {error}"))?;
+    Ok(())
+}
+
+fn finalize_success(
+    app: &AppHandle,
+    id: &str,
+    url: &str,
+    file_name: &str,
+    tab_label: &str,
+    source_origin: Option<String>,
+    danger: DangerType,
+    final_path: PathBuf,
+) {
+    let database = match local_store::connection(app) {
+        Ok(db) => db,
+        Err(error) => {
+            eprintln!("downloads: cannot open database on success: {error}");
+            return;
+        }
+    };
+    let metadata = std::fs::metadata(&final_path).map(|m| m.len() as i64).unwrap_or(0);
+    let _ = update_progress(
+        &database,
+        DownloadProgressInput {
+            id: id.to_string(),
+            received_bytes: metadata,
+            total_bytes: Some(metadata),
+            status: DownloadStatus::Completed,
+            error_message: None,
+        },
+    );
+    let _ = database.execute(
+        "UPDATE downloads SET target_path=? WHERE id=?",
+        rusqlite::params![final_path.to_string_lossy(), id],
+    );
+    app.state::<DownloadManager>().forget(id);
+    emit_progress(
+        app,
+        DownloadProgressPayload {
+            version: STREAMING_PAYLOAD_VERSION,
+            kind: STREAMING_KIND_FINISHED.into(),
+            id: id.to_string(),
+            tab_label: tab_label.to_string(),
+            url: url.to_string(),
+            file_name: file_name.to_string(),
+            target_path: Some(final_path.to_string_lossy().into_owned()),
+            mime_type: None,
+            received_bytes: metadata,
+            total_bytes: Some(metadata),
+            progress_known: true,
+            status: "completed".into(),
+            danger_type: danger.as_str().into(),
+            error_message: None,
+            private: false,
+            source_origin,
+        },
+    );
+}
+
+fn finish_failure(
+    app: &AppHandle,
+    id: &str,
+    url: &str,
+    file_name: &str,
+    tab_label: &str,
+    source_origin: Option<String>,
+    danger: DangerType,
+    error: String,
+) {
+    let database = match local_store::connection(app) {
+        Ok(db) => db,
+        Err(_) => return,
+    };
+    let _ = update_progress(
+        &database,
+        DownloadProgressInput {
+            id: id.to_string(),
+            received_bytes: 0,
+            total_bytes: None,
+            status: DownloadStatus::Failed,
+            error_message: Some(error.clone()),
+        },
+    );
+    app.state::<DownloadManager>().forget(id);
+    emit_progress(
+        app,
+        DownloadProgressPayload {
+            version: STREAMING_PAYLOAD_VERSION,
+            kind: STREAMING_KIND_FAILED.into(),
+            id: id.to_string(),
+            tab_label: tab_label.to_string(),
+            url: url.to_string(),
+            file_name: file_name.to_string(),
+            target_path: None,
+            mime_type: None,
+            received_bytes: 0,
+            total_bytes: None,
+            progress_known: false,
+            status: "failed".into(),
+            danger_type: danger.as_str().into(),
+            error_message: Some(error),
+            private: false,
+            source_origin,
+        },
+    );
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

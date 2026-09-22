@@ -1,11 +1,10 @@
 import { useEffect, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react'
-import { Avatar, Badge, Layout, Menu, Space, Typography } from 'antd'
+import { Avatar, Badge, Layout, Space, Tooltip, Typography } from 'antd'
 import { SafetyCertificateOutlined, ThunderboltOutlined } from '@ant-design/icons'
 import { Bot, BookOpen, Globe2, Search, Settings } from 'lucide-react'
 import type { View } from '../types'
 
-const navIcon = (icon: ReactNode) => <span className="nav-glyph">{icon}</span>
-const items = [{ key: 'browser', icon: navIcon(<Globe2/>), label: '浏览器' }, { key: 'library', icon: navIcon(<BookOpen/>), label: '知识库' }, { key: 'search', icon: navIcon(<Search/>), label: '搜索' }, { key: 'ai', icon: navIcon(<Bot/>), label: 'AI Research' }]
+const items = [{ key: 'browser', icon: <Globe2/>, label: '浏览器' }, { key: 'library', icon: <BookOpen/>, label: '知识库' }, { key: 'search', icon: <Search/>, label: '搜索' }, { key: 'ai', icon: <Bot/>, label: 'AI Research' }] as const
 
 const MIN_SIDER_WIDTH = 72
 const MAX_SIDER_WIDTH = 280
@@ -43,5 +42,10 @@ export function AppLayout({ view, onViewChange, children }: { view: View; onView
     window.addEventListener('pointercancel', stop)
   }
 
-  return <Layout className="app-layout"><Layout.Sider width={siderWidth} collapsedWidth={MIN_SIDER_WIDTH} collapsed={collapsed} trigger={null} className={`app-sider${collapsed ? ' app-sider--collapsed' : ''}`}><div className="brand"><span className="brand__mark"><ThunderboltOutlined /></span><b>Arcadia</b></div><Menu className="nav-menu nav-menu--primary" theme="light" mode="inline" inlineCollapsed={collapsed} selectedKeys={[view]} items={items} onClick={({ key }) => onViewChange(key as View)} /><div className="sider-spacer"/><div className="privacy-status"><Space><SafetyCertificateOutlined/><b>保护已开启</b></Space><Typography.Text>已拦截 43 个请求</Typography.Text></div><Menu className="nav-menu nav-menu--utility" theme="light" mode="inline" inlineCollapsed={collapsed} selectedKeys={[view]} items={[{ key: 'settings', icon: navIcon(<Settings/>), label: '设置' }]} onClick={() => onViewChange('settings')} /><div className="user-card"><Badge dot color="#65c98b"><Avatar>CF</Avatar></Badge><span><b>Charles</b><small>本地工作区</small></span></div><div className="sider-resizer" role="separator" aria-label="调整左侧栏宽度" aria-orientation="vertical" aria-valuemin={MIN_SIDER_WIDTH} aria-valuemax={MAX_SIDER_WIDTH} aria-valuenow={siderWidth} onPointerDown={startResize}/></Layout.Sider><Layout.Content className="app-content">{children}</Layout.Content></Layout>
+  function navButton(item: { key: View; icon: ReactNode; label: string }) {
+    const button = <button type="button" className={`rail-button${view === item.key ? ' is-active' : ''}`} aria-label={item.label} aria-current={view === item.key ? 'page' : undefined} onClick={() => onViewChange(item.key)}><span className="nav-glyph">{item.icon}</span><span className="rail-button__label">{item.label}</span></button>
+    return collapsed ? <Tooltip key={item.key} title={item.label} placement="right" mouseEnterDelay={0.5}>{button}</Tooltip> : <span key={item.key}>{button}</span>
+  }
+
+  return <Layout className="app-layout"><Layout.Sider width={siderWidth} collapsedWidth={MIN_SIDER_WIDTH} collapsed={collapsed} trigger={null} className={`app-sider${collapsed ? ' app-sider--collapsed' : ''}`}><div className="brand"><span className="brand__mark"><ThunderboltOutlined /></span><b>Arcadia</b></div><nav className="rail-nav rail-nav--primary" aria-label="主导航">{items.map(navButton)}</nav><div className="sider-spacer"/><div className="privacy-status"><Space><SafetyCertificateOutlined/><b>保护已开启</b></Space><Typography.Text>已拦截 43 个请求</Typography.Text></div><nav className="rail-nav rail-nav--utility" aria-label="辅助导航">{navButton({ key: 'settings', icon: <Settings/>, label: '设置' })}</nav><div className="user-card"><Badge dot color="#65c98b"><Avatar>CF</Avatar></Badge><span><b>Charles</b><small>本地工作区</small></span></div><div className="sider-resizer" role="separator" aria-label="调整左侧栏宽度" aria-orientation="vertical" aria-valuemin={MIN_SIDER_WIDTH} aria-valuemax={MAX_SIDER_WIDTH} aria-valuenow={siderWidth} onPointerDown={startResize}/></Layout.Sider><Layout.Content className="app-content">{children}</Layout.Content></Layout>
 }

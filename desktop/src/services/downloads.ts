@@ -73,6 +73,41 @@ export async function showDownloadInFolder(id: string): Promise<void> {
   await invoke('download_show_in_folder', { id })
 }
 
+export interface StartDownloadInput {
+  id: string
+  url: string
+  fileName: string
+  mimeType?: string
+  sourceOrigin?: string
+  sourceTabLabel?: string
+  dangerType?: DangerType
+}
+
+/**
+ * Host-driven download (used by "save image" from the context menu). Uses
+ * `reqwest` streaming with ETag/Range resume, and surfaces byte-level
+ * progress through the same v2 event bus as the WebView-native flow.
+ */
+export async function startDownload(input: StartDownloadInput): Promise<string> {
+  if (!isTauri()) throw new Error('startDownload requires Tauri runtime')
+  return invoke<string>('download_start_reqwest', { input })
+}
+
+export async function pauseDownload(id: string): Promise<void> {
+  if (!isTauri()) return
+  await invoke('download_pause', { id })
+}
+
+export async function cancelDownload(id: string): Promise<void> {
+  if (!isTauri()) return
+  await invoke('download_cancel', { id })
+}
+
+export async function retryDownload(id: string): Promise<string> {
+  if (!isTauri()) throw new Error('retryDownload requires Tauri runtime')
+  return invoke<string>('download_retry', { id })
+}
+
 /**
  * Display-friendly file name. Prefers the database's `fileName` column
  * (which we set from WebView's destination basename) but falls back to the

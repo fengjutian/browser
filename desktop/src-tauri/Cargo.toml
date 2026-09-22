@@ -22,6 +22,6 @@ chrono = { version = "0.4", default-features = false, features = ["clock"] }
 keyring = { version = "3", features = ["windows-native", "apple-native", "linux-native"] }
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json", "stream"] }
 futures-util = "0.3"
-tokio = { version = "1", features = ["sync"] }
+tokio = { version = "1", features = ["sync", "rt", "macros", "fs", "io-util"] }
 async-trait = "0.1"
 thiserror = "1"

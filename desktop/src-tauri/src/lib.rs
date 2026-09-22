@@ -836,6 +836,7 @@ pub fn run() {
     tauri::Builder::default()
         .manage(NavStacks::default())
         .manage(DownloadIndex::default())
+        .manage(downloads::DownloadManager::default())
         .setup(|app| {
             // Set the runtime window icon explicitly as well as the bundled executable
             // icon. This keeps `tauri dev` and packaged Windows builds consistent.
@@ -864,6 +865,10 @@ pub fn run() {
             downloads::download_remove_record,
             downloads::download_open_file,
             downloads::download_show_in_folder,
+            downloads::download_start_reqwest,
+            downloads::download_pause,
+            downloads::download_cancel,
+            downloads::download_retry,
             local_store::local_list_documents,
             local_store::local_save_document,
             local_store::local_get_document,
