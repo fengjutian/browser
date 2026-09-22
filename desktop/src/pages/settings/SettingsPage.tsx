@@ -1,9 +1,10 @@
-import { Alert, Button, Card, Form, Input, InputNumber, List, Select, Space, Tabs, Tag, Typography, message } from 'antd'
+import { Alert, Button, Card, Form, Input, InputNumber, List, Select, Space, Switch, Tabs, Tag, Typography, message } from 'antd'
 import { DeleteOutlined, KeyOutlined, SafetyCertificateOutlined, SaveOutlined, ThunderboltOutlined } from '@ant-design/icons'
 import { useEffect, useState } from 'react'
 import { PageHeader } from '../../shared/components/PageHeader'
 import { deleteAIProvider, exportBackup, getAIProvider, importBackup, listAIProviders, saveAIProvider, aiTestProvider, type AIProviderInput } from '../../api'
 import type { AIProvider, AIProviderType } from '../../types'
+import { normalizeOrigin, readSitePermissions, writeSitePermissions, type SitePermissionKind, type SitePermissionRule } from '../../features/browser/sitePermissions'
 
 const PROVIDER_OPTIONS: { label: string; value: AIProviderType }[] = [
   { label: 'OpenAI 兼容（API Key）', value: 'openai-compatible' },
@@ -165,11 +166,48 @@ function KnowledgeBaseSettings() {
   return <>{contextHolder}<Card title="知识库备份" className="settings-card"><Typography.Paragraph type="secondary">导出本地文档和会话状态为 JSON 文件；恢复时会以文档 id 做 upsert，已存在的条目会被覆盖。</Typography.Paragraph><Space><Button type="primary" onClick={doExport}>导出备份</Button><Button onClick={doImport}>从文件恢复</Button></Space></Card></>
 }
 
+const PERMISSION_LABELS: Record<SitePermissionKind, string> = {
+  camera: '摄像头',
+  microphone: '麦克风',
+  location: '位置',
+  notifications: '通知',
+  clipboard: '读取剪贴板',
+}
+
+function SitePermissionSettings() {
+  const [messageApi, contextHolder] = message.useMessage()
+  const [rules, setRules] = useState<SitePermissionRule[]>(readSitePermissions)
+  const [site, setSite] = useState('')
+
+  function persist(next: SitePermissionRule[]) {
+    setRules(next)
+    writeSitePermissions(next)
+  }
+
+  function addSite() {
+    const origin = normalizeOrigin(site)
+    if (!origin) { messageApi.error('请输入有效的网站域名'); return }
+    if (rules.some(rule => rule.origin === origin)) { messageApi.info('该站点已存在'); return }
+    persist([...rules, { origin, camera: false, microphone: false, location: false, notifications: false, clipboard: false }])
+    setSite('')
+  }
+
+  function toggle(origin: string, kind: SitePermissionKind, allowed: boolean) {
+    persist(rules.map(rule => rule.origin === origin ? { ...rule, [kind]: allowed } : rule))
+  }
+
+  return <>{contextHolder}<Card title="站点权限" className="settings-card site-permissions">
+    <Alert type="warning" showIcon message="敏感权限默认拒绝" description="只有下方明确允许的站点才能请求摄像头、麦克风、位置、通知或读取剪贴板。权限修改对新打开的标签生效。"/>
+    <Space.Compact block style={{margin:'18px 0'}}><Input value={site} onChange={event=>setSite(event.target.value)} onPressEnter={addSite} placeholder="example.com 或 https://example.com"/><Button type="primary" onClick={addSite}>添加站点</Button></Space.Compact>
+    {rules.length===0?<Typography.Text type="secondary">尚未授权任何站点。</Typography.Text>:<List dataSource={rules} renderItem={rule=><List.Item actions={[<Button danger type="link" onClick={()=>persist(rules.filter(item=>item.origin!==rule.origin))}>移除</Button>]}><List.Item.Meta title={rule.origin} description={<Space wrap>{(Object.keys(PERMISSION_LABELS) as SitePermissionKind[]).map(kind=><span className="site-permission-toggle" key={kind}><Switch size="small" checked={rule[kind]} onChange={checked=>toggle(rule.origin,kind,checked)}/><span>{PERMISSION_LABELS[kind]}</span></span>)}</Space>}/></List.Item>}/>} 
+  </Card></>
+}
+
 export function SettingsPage() {
   const items = ['通用','浏览器','隐私','AI Provider','知识库','插件','高级'].map((label, index) => ({
     key: label,
     label,
-    children: index === 3 ? <AIProviderSettings/> : index === 4 ? <KnowledgeBaseSettings/> : <Card><Typography.Title level={4}>{label}</Typography.Title><Typography.Paragraph type="secondary">该设置模块将在对应开发阶段开放。</Typography.Paragraph></Card>,
+    children: index === 2 ? <SitePermissionSettings/> : index === 3 ? <AIProviderSettings/> : index === 4 ? <KnowledgeBaseSettings/> : <Card><Typography.Title level={4}>{label}</Typography.Title><Typography.Paragraph type="secondary">该设置模块将在对应开发阶段开放。</Typography.Paragraph></Card>,
   }))
   return <section className="page"><PageHeader eyebrow="PREFERENCES" title="设置" description="调整浏览器、隐私、AI Provider 与知识库工作流。"/><Tabs tabPosition="left" items={items} defaultActiveKey="AI Provider"/></section>
 }

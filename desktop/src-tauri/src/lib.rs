@@ -17,7 +17,7 @@ use crate::providers::{AiProvider, ChatMessage, ChatRequest, ChatResponse};
 
 const KEYRING_SERVICE: &str = "ai-knowledge-browser";
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct BrowserBounds {
     x: f64,
@@ -40,6 +40,47 @@ struct DownloadUpdate {
     url: String,
     path: Option<String>,
     status: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SitePermissionRule {
+    origin: String,
+    camera: bool,
+    microphone: bool,
+    location: bool,
+    notifications: bool,
+    clipboard: bool,
+}
+
+fn permission_guard_script(rules: &[SitePermissionRule]) -> String {
+    let rules = serde_json::to_string(rules).unwrap_or_else(|_| "[]".into());
+    format!(r#"(()=>{{
+      const rules={rules};
+      const rule=rules.find(item=>item.origin===location.origin);
+      const denied=name=>new DOMException(name+' permission denied by Arcadia','NotAllowedError');
+      if(!rule?.camera&&!rule?.microphone&&navigator.mediaDevices?.getUserMedia){{
+        navigator.mediaDevices.getUserMedia=()=>Promise.reject(denied('Media'));
+      }} else if(navigator.mediaDevices?.getUserMedia){{
+        const original=navigator.mediaDevices.getUserMedia.bind(navigator.mediaDevices);
+        navigator.mediaDevices.getUserMedia=constraints=>{{
+          if(constraints?.video&&!rule?.camera)return Promise.reject(denied('Camera'));
+          if(constraints?.audio&&!rule?.microphone)return Promise.reject(denied('Microphone'));
+          return original(constraints);
+        }};
+      }}
+      if(!rule?.location&&navigator.geolocation){{
+        const reject=(_,error)=>error?.({{code:1,message:'Location permission denied by Arcadia'}});
+        navigator.geolocation.getCurrentPosition=reject;
+        navigator.geolocation.watchPosition=reject;
+      }}
+      if(!rule?.notifications&&globalThis.Notification){{
+        try{{Notification.requestPermission=()=>Promise.resolve('denied')}}catch{{}}
+      }}
+      if(!rule?.clipboard&&navigator.clipboard){{
+        try{{navigator.clipboard.read=()=>Promise.reject(denied('Clipboard'));navigator.clipboard.readText=()=>Promise.reject(denied('Clipboard'))}}catch{{}}
+      }}
+    }})()"#)
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -130,6 +171,7 @@ async fn browser_create(
     label: String,
     url: String,
     bounds: BrowserBounds,
+    permissions: Option<Vec<SitePermissionRule>>,
 ) -> Result<(), String> {
     if app.get_webview(&label).is_some() {
         return Ok(());
@@ -141,6 +183,7 @@ async fn browser_create(
     let download_app = app.clone();
     let download_label = label.clone();
     let builder = tauri::webview::WebviewBuilder::new(&label, tauri::WebviewUrl::External(url))
+        .initialization_script(permission_guard_script(permissions.as_deref().unwrap_or(&[])))
         .on_new_window(move |url, _features| {
             if matches!(url.scheme(), "http" | "https") {
                 let _ = event_app.emit_to(

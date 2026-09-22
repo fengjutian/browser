@@ -2,6 +2,7 @@ import { invoke } from '@tauri-apps/api/core'
 import { LogicalPosition, LogicalSize } from '@tauri-apps/api/dpi'
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 import { Webview } from '@tauri-apps/api/webview'
+import { readSitePermissions } from '../features/browser/sitePermissions'
 
 export interface BrowserBounds { x: number; y: number; width: number; height: number }
 export interface NativeBrowserState { url: string; title: string; favicon?: string; loading: boolean; canGoBack: boolean; canGoForward: boolean }
@@ -17,7 +18,7 @@ export async function openNativeTab(tabId: string, url: string, bounds: BrowserB
   const label = labelFor(tabId)
   let webview = await Webview.getByLabel(label)
   if (!webview) {
-    await invoke('browser_create', { label, url, bounds })
+    await invoke('browser_create', { label, url, bounds, permissions: readSitePermissions() })
     webview = await Webview.getByLabel(label)
     if (!webview) throw new Error('browser tab webview was not created')
   } else {
@@ -36,7 +37,7 @@ export async function ensureNativeTab(tabId: string, url: string, bounds: Browse
   if (existing) {
     await invoke<string>('browser_navigate', { label, url })
   } else {
-    await invoke('browser_create', { label, url, bounds })
+    await invoke('browser_create', { label, url, bounds, permissions: readSitePermissions() })
     const created = await Webview.getByLabel(label)
     if (!created) throw new Error('browser tab webview was not created')
   }
