@@ -18,6 +18,8 @@ export interface TabRuntimeInputs {
   intervalMs?: number
   /** Whether the active panel is visible — polling pauses when hidden. */
   visible: boolean
+  /** Gate: caller-controlled predicate (e.g. nativeMode && hasNativeTab(tab.id)). */
+  enabled?: boolean
 }
 
 export interface TabRuntimeHandle {
@@ -35,7 +37,7 @@ export interface TabRuntimeHandle {
  * recovery threshold is unit-testable.
  */
 export function useTabRuntime(inputs: TabRuntimeInputs): TabRuntimeHandle {
-  const { tab, onApply, onReopen, intervalMs = 750, visible } = inputs
+  const { tab, onApply, onReopen, intervalMs = 750, visible, enabled = true } = inputs
   const failureCountRef = useRef(new Map<string, number>())
   const pendingScrollRef = useRef(new Map<string, { x: number; y: number }>())
   const onApplyRef = useRef(onApply)
@@ -44,7 +46,7 @@ export function useTabRuntime(inputs: TabRuntimeInputs): TabRuntimeHandle {
   onReopenRef.current = onReopen
 
   useEffect(() => {
-    if (!visible) return
+    if (!visible || !enabled) return
     let cancelled = false
     let timer: number | undefined
 
@@ -100,7 +102,7 @@ export function useTabRuntime(inputs: TabRuntimeInputs): TabRuntimeHandle {
       cancelled = true
       if (timer !== undefined) window.clearInterval(timer)
     }
-  }, [tab.id, tab.url, intervalMs, visible])
+  }, [tab.id, tab.url, intervalMs, visible, enabled])
 
   return {
     enqueueScroll: (tabId, position) => { pendingScrollRef.current.set(tabId, position) },

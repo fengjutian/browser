@@ -2,8 +2,8 @@ import { MouseEvent, useEffect, useMemo, useRef, useState, type CSSProperties } 
 import { AutoComplete, Badge, Button, Card, Dropdown, Empty, Input, List, Popover, Segmented, Space, Tabs, Tag, Tooltip, Typography, message, type InputRef, type MenuProps } from 'antd'
 import { ArrowDownOutlined, ArrowLeftOutlined, ArrowRightOutlined, ArrowUpOutlined, BookOutlined, CheckCircleOutlined, CloseCircleOutlined, CloseOutlined, CopyOutlined, DownloadOutlined, GlobalOutlined, LoadingOutlined, MoreOutlined, PlusOutlined, PrinterOutlined, ReloadOutlined, RobotOutlined, SafetyCertificateOutlined, SaveOutlined, SearchOutlined, StarOutlined, ThunderboltOutlined, TranslationOutlined } from '@ant-design/icons'
 import type { BrowserTab, BrowserTabError } from '../../types'
-import { findDocumentByUrl, getDocument, getSession, saveDocument, setSession, toggleStarred } from '../../api'
-import { captureNativePage, closeNativeTab, ensureNativeTab, findInNativeTab, hasNativeTab, hideNativeTab, isNativeTabAlive, navigateHistory, onNativeDownload, onNativeNewTab, openNativeTab, printNativeTab, readNativeState, reloadNativeTab, resizeNativeTab, restoreNativeScroll, showNativeTab, stopNativeTab, zoomNativeTab, type NativeDownloadUpdate } from '../../services/nativeBrowser'
+import { findDocumentByUrl, getBrowserShortcutsEnabled, getDocument, getSession, saveDocument, setSession, toggleStarred } from '../../api'
+import { captureNativePage, closeNativeTab, ensureNativeTab, findInNativeTab, hasNativeTab, hideNativeTab, navigateHistory, onNativeNewTab, openNativeTab, printNativeTab, reloadNativeTab, resizeNativeTab, showNativeTab, stopNativeTab, zoomNativeTab } from '../../services/nativeBrowser'
 import { extractArticle } from '../../features/reader/extractArticle'
 import type { ReaderArticle } from '../../features/reader/types'
 import { classifySaveError } from '../../features/documents/saveClassifier'
@@ -14,6 +14,9 @@ import { interpretShortcut } from '../../features/browser/shortcuts'
 import { popClosedTab, recordClosedTab, type ClosedTab } from '../../features/browser/closedTabs'
 import { AssistantPanel } from '../../features/ai/AssistantPanel'
 import { resolveNavigationInput } from '../../features/browser/navigation'
+import { useDownloads } from '../../features/downloads/useDownloads'
+import { useTabRuntime } from '../../features/browser/useTabRuntime'
+import { buildAddressSuggestions } from '../../features/browser/addressSuggestions'
 
 const SESSION_KEY = 'browser.tabs'
 const SESSION_DEBOUNCE_MS = 500
@@ -96,7 +99,12 @@ export function BrowserPage({ visible = true }: { visible?: boolean }) {
   const [findQuery, setFindQuery] = useState('')
   const [findStatus, setFindStatus] = useState<'idle' | 'found' | 'missing'>('idle')
   const [zoomLevels, setZoomLevels] = useState<Record<string, number>>({})
-  const [downloads, setDownloads] = useState<NativeDownloadUpdate[]>([])
+  const { downloads, clear: clearDownloads } = useDownloads({
+    onTerminal: entry => {
+      if (entry.status === 'completed') messageApi.success('下载完成')
+      else if (entry.status === 'failed') messageApi.error('下载失败')
+    },
+  })
   const [readerArticle, setReaderArticle] = useState<ReaderArticle | null>(null)
   const [hydrated, setHydrated] = useState(false)
   const [history, setHistory] = useState<HistoryEntry[]>([])
@@ -116,15 +124,14 @@ export function BrowserPage({ visible = true }: { visible?: boolean }) {
   const pendingScrollRestoreRef = useRef(new Map<string, { x: number; y: number }>())
   const stateFailureCountRef = useRef(new Map<string, number>())
   const lastHistoryUrl = useRef<string>('')
+  const shortcutsEnabledRef = useRef(getBrowserShortcutsEnabled())
   const active = tabs.find(tab => tab.id === activeTabId) ?? tabs[0]
   const nativeMode = hasNativeTab(active.id)
-  const addressSuggestions = useMemo(() => {
-    const query = address.trim().toLocaleLowerCase()
-    return history
-      .filter(item => !query || item.url.toLocaleLowerCase().includes(query) || item.title.toLocaleLowerCase().includes(query))
-      .slice(0, 8)
-      .map(item => ({ value: item.url, label: <div className="address-suggestion"><b>{item.title || item.url}</b><small>{item.url}</small></div> }))
-  }, [address, history])
+  const addressSuggestions = useMemo(() => buildAddressSuggestions(
+    address,
+    history,
+    item => (<div className="address-suggestion"><b>{item.title || item.url}</b><small>{item.url}</small></div>),
+  ), [address, history])
 
   useEffect(() => {
     let cancelled = false
@@ -170,23 +177,6 @@ export function BrowserPage({ visible = true }: { visible?: boolean }) {
     })
     return () => { cancelled = true }
   }, [])
-
-  useEffect(() => {
-    let disposed = false
-    let unlisten: (() => void) | undefined
-    void onNativeDownload(update => {
-      setDownloads(current => {
-        const index = current.findIndex(item => item.url === update.url)
-        if (index < 0) return [update, ...current].slice(0, 30)
-        const next = current.slice()
-        next[index] = update
-        return next
-      })
-      if (update.status === 'completed') messageApi.success('下载完成')
-      if (update.status === 'failed') messageApi.error('下载失败')
-    }).then(stop => { if (disposed) stop(); else unlisten = stop })
-    return () => { disposed = true; unlisten?.() }
-  }, [messageApi])
 
   const sessionJson = useDebouncedValue(JSON.stringify({ tabs, activeTabId }), SESSION_DEBOUNCE_MS)
   useEffect(() => {
@@ -304,6 +294,7 @@ export function BrowserPage({ visible = true }: { visible?: boolean }) {
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (!visibleRef.current) return
+      if (!shortcutsEnabledRef.current) return
       const action = interpretShortcut(event)
       if (!action) return
       event.preventDefault()
@@ -368,8 +359,17 @@ export function BrowserPage({ visible = true }: { visible?: boolean }) {
       }
     }
     window.addEventListener('keydown', onKeyDown)
-    return () => window.removeEventListener('keydown', onKeyDown)
+    window.addEventListener('arcadia-shortcuts-change', onShortcutsChange)
+    return () => {
+      window.removeEventListener('keydown', onKeyDown)
+      window.removeEventListener('arcadia-shortcuts-change', onShortcutsChange)
+    }
   }, [])
+
+  function onShortcutsChange(event: Event) {
+    const detail = (event as CustomEvent<{ enabled: boolean }>).detail
+    shortcutsEnabledRef.current = detail.enabled !== false
+  }
 
   async function navigate(input: string) {
     const url = resolveNavigationInput(input)
