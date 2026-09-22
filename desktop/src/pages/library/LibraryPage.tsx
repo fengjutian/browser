@@ -1,5 +1,5 @@
 import { Button, Col, Empty, Input, List, Modal, Row, Skeleton, Space, Statistic, Tag, Typography, message } from 'antd'
-import { ClockCircleOutlined, DeleteOutlined, DownloadOutlined, FolderOutlined, GlobalOutlined, PlusOutlined } from '@ant-design/icons'
+import { ClockCircleOutlined, DeleteOutlined, DownloadOutlined, FileTextOutlined, FolderOpenOutlined, FolderOutlined, GlobalOutlined, PlusOutlined, StarOutlined } from '@ant-design/icons'
 import { useEffect, useState } from 'react'
 import { PageHeader } from '../../shared/components/PageHeader'
 import { DocumentCard } from '../../features/documents/DocumentCard'
@@ -76,17 +76,17 @@ export function LibraryPage() {
   const recentHistory = history.slice(0, 8)
   const recentDownloads = downloads.slice(0, 8)
   return <section className="page">{contextHolder}<PageHeader eyebrow="KNOWLEDGE BASE" title="你的知识库" description="保存的网页会在这里沉淀、组织并被重新发现。" action="添加文档"/>
-    <Row gutter={12} className="stats-row"><Col span={8}><Statistic title="文档" value={documents.length}/></Col><Col span={8}><Statistic title="收藏" value={starredCount}/></Col><Col span={8}><Statistic title="集合" value={collections.length}/></Col></Row>
+    <Row gutter={12} className="stats-row library-stats"><Col span={8}><Statistic prefix={<span className="library-stat-icon"><FileTextOutlined/></span>} title="文档" value={documents.length}/></Col><Col span={8}><Statistic prefix={<span className="library-stat-icon"><StarOutlined/></span>} title="收藏" value={starredCount}/></Col><Col span={8}><Statistic prefix={<span className="library-stat-icon"><FolderOutlined/></span>} title="集合" value={collections.length}/></Col></Row>
     <Space style={{marginBottom:16}}><Typography.Title level={3} style={{margin:0}}>集合</Typography.Title><Button icon={<PlusOutlined/>} onClick={()=>setCreating(true)}>新建集合</Button></Space>
     {collections.length === 0
-      ? <Empty description="还没有集合，点击「新建集合」开始整理。"/>
+      ? <Empty className="library-empty" image={<FolderOpenOutlined/>} description="还没有集合，点击「新建集合」开始整理。"/>
       : <Row gutter={[12,12]}>{collections.map(collection => <Col xs={24} sm={12} lg={8} xl={6} key={collection.id}><div className="collection-card"><div className="collection-card__head"><FolderOutlined/><Typography.Text strong>{collection.name}</Typography.Text><Tag>{collection.documentCount}</Tag></div>{collection.description && <Typography.Paragraph type="secondary">{collection.description}</Typography.Paragraph>}<Space><Button danger size="small" icon={<DeleteOutlined/>} onClick={()=>void removeCollection(collection)}>删除</Button></Space></div></Col>)}</Row>}
     <Modal title="新建集合" open={creating} onCancel={()=>{setCreating(false);setNewName('')}} onOk={()=>void createNewCollection()} okText="创建" cancelText="取消"><Input autoFocus placeholder="集合名称" value={newName} onChange={event=>setNewName(event.target.value)} onPressEnter={()=>void createNewCollection()}/></Modal>
     {recentHistory.length > 0 && <>
       <Typography.Title level={3}>近期浏览</Typography.Title>
       <List size="small" className="library-history" dataSource={recentHistory} renderItem={item => (
         <List.Item key={item.url + item.visitedAt}>
-          <List.Item.Meta avatar={<Tag color="green"><ClockCircleOutlined/></Tag>} title={<Typography.Text ellipsis={{ tooltip: item.title }}>{item.title || item.url}</Typography.Text>} description={<Typography.Text type="secondary" ellipsis>{new Date(item.visitedAt).toLocaleString()} · <GlobalOutlined/> {item.url}</Typography.Text>}/>
+          <List.Item.Meta avatar={<span className="library-list-icon"><ClockCircleOutlined/></span>} title={<Typography.Text ellipsis={{ tooltip: item.title }}>{item.title || item.url}</Typography.Text>} description={<Typography.Text type="secondary" ellipsis>{new Date(item.visitedAt).toLocaleString()} · <GlobalOutlined/> {item.url}</Typography.Text>}/>
         </List.Item>
       )}/>
     </>}
@@ -94,7 +94,7 @@ export function LibraryPage() {
       <Typography.Title level={3}>近期下载</Typography.Title>
       <List size="small" className="library-downloads" dataSource={recentDownloads} renderItem={item => (
         <List.Item key={item.documentId + item.exportedAt}>
-          <List.Item.Meta avatar={<Tag color="blue"><DownloadOutlined/></Tag>} title={<Typography.Text ellipsis={{ tooltip: item.title }}>{item.title || '(无标题)'}</Typography.Text>} description={<Typography.Text type="secondary">{new Date(item.exportedAt).toLocaleString()}</Typography.Text>}/>
+          <List.Item.Meta avatar={<span className="library-list-icon"><DownloadOutlined/></span>} title={<Typography.Text ellipsis={{ tooltip: item.title }}>{item.title || '(无标题)'}</Typography.Text>} description={<Typography.Text type="secondary">{new Date(item.exportedAt).toLocaleString()}</Typography.Text>}/>
         </List.Item>
       )}/>
     </>}
