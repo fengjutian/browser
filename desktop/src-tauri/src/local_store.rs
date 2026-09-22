@@ -90,6 +90,10 @@ const MIGRATIONS: &[(i64, &str)] = &[
             updated_at TEXT NOT NULL
         );",
     ),
+    (
+        7,
+        "ALTER TABLE local_documents ADD COLUMN auto_tags TEXT NOT NULL DEFAULT '[]';",
+    ),
 ];
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -105,6 +109,7 @@ pub struct LocalDocument {
     word_count: i64,
     status: String,
     tags: Vec<String>,
+    auto_tags: Vec<String>,
     created_at: String,
     starred: bool,
 }
@@ -245,7 +250,8 @@ fn unix_seconds() -> i64 {
 
 fn row_document(row: &rusqlite::Row<'_>) -> rusqlite::Result<LocalDocument> {
     let tags: String = row.get(9)?;
-    let starred: i64 = row.get(11)?;
+    let auto_tags: String = row.get(11)?;
+    let starred: i64 = row.get(12)?;
     Ok(LocalDocument {
         id: row.get(0)?,
         title: row.get(1)?,
@@ -257,6 +263,7 @@ fn row_document(row: &rusqlite::Row<'_>) -> rusqlite::Result<LocalDocument> {
         word_count: row.get(7)?,
         status: row.get(8)?,
         tags: serde_json::from_str(&tags).unwrap_or_default(),
+        auto_tags: serde_json::from_str(&auto_tags).unwrap_or_default(),
         created_at: row.get(10)?,
         starred: starred != 0,
     })
@@ -269,7 +276,7 @@ pub fn local_list_documents(
 ) -> Result<Vec<LocalDocument>, String> {
     let database = connection(&app)?;
     let pattern = format!("%{}%", query.trim());
-    let mut statement = database.prepare("SELECT id,title,url,source,author,summary,markdown,word_count,status,tags,created_at,starred FROM local_documents WHERE ?1 = '%%' OR title LIKE ?1 OR markdown LIKE ?1 OR summary LIKE ?1 OR tags LIKE ?1 ORDER BY starred DESC, created_at DESC")
+    let mut statement = database.prepare("SELECT id,title,url,source,author,summary,markdown,word_count,status,tags,auto_tags,created_at,starred FROM local_documents WHERE ?1 = '%%' OR title LIKE ?1 OR markdown LIKE ?1 OR summary LIKE ?1 OR tags LIKE ?1 ORDER BY starred DESC, created_at DESC")
         .map_err(|error| error.to_string())?;
     let rows = statement
         .query_map(params![pattern], row_document)
@@ -285,7 +292,8 @@ pub fn local_save_document(
 ) -> Result<LocalDocument, String> {
     let database = connection(&app)?;
     let tags = serde_json::to_string(&document.tags).map_err(|error| error.to_string())?;
-    database.execute("INSERT OR REPLACE INTO local_documents(id,title,url,source,author,summary,markdown,word_count,status,tags,created_at,starred) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)", params![document.id, document.title, document.url, document.source, document.author, document.summary, document.markdown, document.word_count, document.status, tags, document.created_at, document.starred as i64])
+    let auto_tags = serde_json::to_string(&document.auto_tags).unwrap_or_else(|_| "[]".to_string());
+    database.execute("INSERT OR REPLACE INTO local_documents(id,title,url,source,author,summary,markdown,word_count,status,tags,auto_tags,created_at,starred) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)", params![document.id, document.title, document.url, document.source, document.author, document.summary, document.markdown, document.word_count, document.status, tags, auto_tags, document.created_at, document.starred as i64])
         .map_err(|error| error.to_string())?;
     Ok(document)
 }
@@ -296,7 +304,7 @@ pub fn local_get_document(
     id: String,
 ) -> Result<Option<LocalDocument>, String> {
     let database = connection(&app)?;
-    let mut statement = database.prepare("SELECT id,title,url,source,author,summary,markdown,word_count,status,tags,created_at,starred FROM local_documents WHERE id=?")
+    let mut statement = database.prepare("SELECT id,title,url,source,author,summary,markdown,word_count,status,tags,auto_tags,created_at,starred FROM local_documents WHERE id=?")
         .map_err(|error| error.to_string())?;
     match statement.query_row(params![id], row_document) {
         Ok(document) => Ok(Some(document)),
@@ -351,7 +359,7 @@ pub fn local_update_document(
         return Err(format!("document not found: {id}"));
     }
     let mut statement = database
-        .prepare("SELECT id,title,url,source,author,summary,markdown,word_count,status,tags,created_at,starred FROM local_documents WHERE id=?1")
+        .prepare("SELECT id,title,url,source,author,summary,markdown,word_count,status,tags,auto_tags,created_at,starred FROM local_documents WHERE id=?1")
         .map_err(|error| error.to_string())?;
     statement
         .query_row(params![id], row_document)
@@ -368,6 +376,23 @@ pub fn local_update_tags(
     let tags_json = serde_json::to_string(&tags).map_err(|error| error.to_string())?;
     let updated = database
         .execute("UPDATE local_documents SET tags=? WHERE id=?", params![tags_json, id])
+        .map_err(|error| error.to_string())?;
+    if updated == 0 {
+        return Err(format!("document not found: {id}"));
+    }
+    Ok(())
+}
+
+#[tauri::command]
+pub fn local_update_auto_tags(
+    app: tauri::AppHandle,
+    id: String,
+    auto_tags: Vec<String>,
+) -> Result<(), String> {
+    let database = connection(&app)?;
+    let tags_json = serde_json::to_string(&auto_tags).map_err(|error| error.to_string())?;
+    let updated = database
+        .execute("UPDATE local_documents SET auto_tags=? WHERE id=?", params![tags_json, id])
         .map_err(|error| error.to_string())?;
     if updated == 0 {
         return Err(format!("document not found: {id}"));
@@ -798,7 +823,7 @@ pub fn local_find_document_by_url(
 ) -> Result<Option<LocalDocument>, String> {
     let database = connection(&app)?;
     let mut statement = database
-        .prepare("SELECT id,title,url,source,author,summary,markdown,word_count,status,tags,created_at,starred FROM local_documents WHERE url = ?1 ORDER BY created_at DESC LIMIT 1")
+        .prepare("SELECT id,title,url,source,author,summary,markdown,word_count,status,tags,auto_tags,created_at,starred FROM local_documents WHERE url = ?1 ORDER BY created_at DESC LIMIT 1")
         .map_err(|error| error.to_string())?;
     let mut rows = statement
         .query_map(params![url], row_document)
@@ -879,7 +904,7 @@ pub struct LocalImportSummary {
 pub fn local_export_backup(app: tauri::AppHandle) -> Result<LocalBackup, String> {
     let database = connection(&app)?;
     let mut statement = database
-        .prepare("SELECT id,title,url,source,author,summary,markdown,word_count,status,tags,created_at,starred FROM local_documents ORDER BY created_at ASC")
+        .prepare("SELECT id,title,url,source,author,summary,markdown,word_count,status,tags,auto_tags,created_at,starred FROM local_documents ORDER BY created_at ASC")
         .map_err(|error| error.to_string())?;
     let documents = statement
         .query_map([], row_document)
@@ -917,9 +942,10 @@ pub fn local_import_backup(app: tauri::AppHandle, backup: LocalBackup) -> Result
     let mut documents_skipped = 0;
     for document in backup.documents {
         let tags = serde_json::to_string(&document.tags).map_err(|error| error.to_string())?;
+        let auto_tags = serde_json::to_string(&document.auto_tags).unwrap_or_else(|_| "[]".to_string());
         let result = database.execute(
-            "INSERT OR REPLACE INTO local_documents(id,title,url,source,author,summary,markdown,word_count,status,tags,created_at,starred) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
-            params![document.id, document.title, document.url, document.source, document.author, document.summary, document.markdown, document.word_count, document.status, tags, document.created_at, document.starred as i64],
+            "INSERT OR REPLACE INTO local_documents(id,title,url,source,author,summary,markdown,word_count,status,tags,auto_tags,created_at,starred) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            params![document.id, document.title, document.url, document.source, document.author, document.summary, document.markdown, document.word_count, document.status, tags, auto_tags, document.created_at, document.starred as i64],
         );
         match result {
             Ok(_) => documents_inserted += 1,
@@ -989,7 +1015,7 @@ mod tests {
             .unwrap()
             .collect::<Result<Vec<_>, _>>()
             .unwrap();
-        assert_eq!(versions, vec![1, 2, 3, 4, 5, 6]);
+        assert_eq!(versions, vec![1, 2, 3, 4, 5, 6, 7]);
     }
 
     #[test]
@@ -1021,7 +1047,7 @@ mod tests {
             .unwrap()
             .collect::<Result<Vec<_>, _>>()
             .unwrap();
-        assert_eq!(versions, vec![1, 2, 3, 4, 5, 6]);
+        assert_eq!(versions, vec![1, 2, 3, 4, 5, 6, 7]);
     }
 
     #[test]
@@ -1037,7 +1063,7 @@ mod tests {
             .unwrap()
             .collect::<Result<Vec<_>, _>>()
             .unwrap();
-        assert_eq!(versions, vec![1, 2, 3, 4, 5, 6]);
+        assert_eq!(versions, vec![1, 2, 3, 4, 5, 6, 7]);
     }
 
     #[test]
@@ -1123,7 +1149,7 @@ mod tests {
             .unwrap();
 
         // Export by mirroring the SELECT used in local_export_backup.
-        let mut stmt = source.prepare("SELECT id,title,url,source,author,summary,markdown,word_count,status,tags,created_at,starred FROM local_documents ORDER BY created_at ASC").unwrap();
+        let mut stmt = source.prepare("SELECT id,title,url,source,author,summary,markdown,word_count,status,tags,auto_tags,created_at,starred FROM local_documents ORDER BY created_at ASC").unwrap();
         let documents: Vec<LocalDocument> = stmt
             .query_map([], row_document)
             .unwrap()
@@ -1173,9 +1199,10 @@ mod tests {
         let mut documents_skipped = 0;
         for document in backup.documents {
             let tags = serde_json::to_string(&document.tags).map_err(|error| error.to_string())?;
+            let auto_tags = serde_json::to_string(&document.auto_tags).unwrap_or_else(|_| "[]".to_string());
             let result = database.execute(
-                "INSERT OR REPLACE INTO local_documents(id,title,url,source,author,summary,markdown,word_count,status,tags,created_at,starred) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
-                params![document.id, document.title, document.url, document.source, document.author, document.summary, document.markdown, document.word_count, document.status, tags, document.created_at, document.starred as i64],
+                "INSERT OR REPLACE INTO local_documents(id,title,url,source,author,summary,markdown,word_count,status,tags,auto_tags,created_at,starred) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                params![document.id, document.title, document.url, document.source, document.author, document.summary, document.markdown, document.word_count, document.status, tags, auto_tags, document.created_at, document.starred as i64],
             );
             match result {
                 Ok(_) => documents_inserted += 1,

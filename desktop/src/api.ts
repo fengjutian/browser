@@ -55,6 +55,11 @@ export async function updateTags(id: string, tags: string[]): Promise<void> {
   await invoke('local_update_tags', { id, tags })
 }
 
+export async function updateAutoTags(id: string, autoTags: string[]): Promise<void> {
+  if (!isTauri()) return
+  await invoke('local_update_auto_tags', { id, autoTags })
+}
+
 export async function archiveDocument(id: string): Promise<void> {
   if (!isTauri()) return
   await invoke('local_archive_document', { id })
@@ -147,7 +152,16 @@ export interface AIProviderInput {
 
 export async function saveAIProvider(input: AIProviderInput): Promise<AIProvider> {
   if (!isTauri()) throw new Error('Document unavailable')
-  return invoke<AIProvider>('local_save_ai_provider', input)
+  return invoke<AIProvider>('local_save_ai_provider', {
+    id: input.id,
+    providerType: input.type,
+    baseUrl: input.baseUrl,
+    model: input.model,
+    embeddingModel: input.embeddingModel,
+    timeoutSeconds: input.timeoutSeconds,
+    apiKey: input.apiKey,
+    clearApiKey: input.clearApiKey ?? false,
+  })
 }
 
 export async function listAIProviders(): Promise<AIProvider[]> {

@@ -401,6 +401,7 @@ pub fn run() {
             local_store::local_toggle_starred,
             local_store::local_update_document,
             local_store::local_update_tags,
+            local_store::local_update_auto_tags,
             local_store::local_archive_document,
             local_store::local_create_collection,
             local_store::local_list_collections,

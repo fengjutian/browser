@@ -1,7 +1,7 @@
-import { MouseEvent, useEffect, useRef, useState } from 'react'
-import { Button, Card, Input, Segmented, Space, Tabs, Tag, Tooltip, Typography, message, type InputRef } from 'antd'
+import { MouseEvent, useEffect, useRef, useState, type CSSProperties } from 'react'
+import { Button, Card, Dropdown, Input, Segmented, Space, Tabs, Tag, Tooltip, Typography, message, type InputRef, type MenuProps } from 'antd'
 import { ArrowLeftOutlined, ArrowRightOutlined, BookOutlined, CloseOutlined, CopyOutlined, GlobalOutlined, LoadingOutlined, PlusOutlined, ReloadOutlined, RobotOutlined, SafetyCertificateOutlined, SaveOutlined, SearchOutlined, StarOutlined, ThunderboltOutlined, TranslationOutlined } from '@ant-design/icons'
-import type { BrowserTab } from '../../types'
+import type { BrowserTab, BrowserTabError } from '../../types'
 import { findDocumentByUrl, getDocument, getSession, saveDocument, setSession, toggleStarred } from '../../api'
 import { captureNativePage, closeNativeTab, ensureNativeTab, hasNativeTab, hideNativeTab, navigateHistory, onNativeNewTab, openNativeTab, readNativeState, reloadNativeTab, resizeNativeTab, showNativeTab, stopNativeTab } from '../../services/nativeBrowser'
 import { extractArticle } from '../../features/reader/extractArticle'
@@ -13,6 +13,7 @@ import { reorderTabs } from '../../features/browser/reorderTabs'
 import { interpretShortcut } from '../../features/browser/shortcuts'
 import { popClosedTab, recordClosedTab, type ClosedTab } from '../../features/browser/closedTabs'
 import { AssistantPanel } from '../../features/ai/AssistantPanel'
+import { resolveNavigationInput } from '../../features/browser/navigation'
 
 const SESSION_KEY = 'browser.tabs'
 const SESSION_DEBOUNCE_MS = 500
@@ -292,12 +293,11 @@ export function BrowserPage() {
   }, [])
 
   async function navigate(input: string) {
-    const trimmed = input.trim()
-    if (!trimmed) return
-    const url = /^https?:\/\//.test(trimmed) ? trimmed : `https://www.google.com/search?q=${encodeURIComponent(trimmed)}`
+    const url = resolveNavigationInput(input)
+    if (!url) return
     const tabId = active.id
     setReaderArticle(null)
-    setTabs(current => current.map(tab => tab.id === tabId ? { ...tab, url, title: trimmed, loading: true, error: undefined } : tab))
+    setTabs(current => current.map(tab => tab.id === tabId ? { ...tab, url, title: input.trim(), loading: true, error: undefined } : tab))
     await new Promise(resolve => requestAnimationFrame(resolve))
     const nextBounds = bounds()
     if (!nextBounds) return
@@ -347,7 +347,7 @@ export function BrowserPage() {
         try {
           const opened = await openNativeTab(tab.id, url, nextBounds)
           if (!opened) {
-            setTabs(current => current.map(item => item.id === tab.id ? { ...item, loading: false, error: { kind: 'web-mode-required', message: '网页浏览仅在 Tauri 桌面应用中可用。' } } : current))
+            setTabs(current => current.map(item => item.id === tab.id ? { ...item, loading: false, error: { kind: 'web-mode-required', message: '网页浏览仅在 Tauri 桌面应用中可用。' } } : item))
             return
           }
           setTabs(current => current.map(item => item.id === tab.id ? { ...item, loading: false, error: undefined } : item))
@@ -365,6 +365,52 @@ export function BrowserPage() {
     activeTabIdRef.current = id
     setAddress(selected?.url ?? '')
     setReaderArticle(null)
+  }
+
+  function duplicateTab(tab: BrowserTab) {
+    openNewTab(tab.url || undefined)
+  }
+
+  function togglePinned(id: string) {
+    setTabs(current => {
+      const updated = current.map(tab => tab.id === id ? { ...tab, pinned: !tab.pinned } : tab)
+      return [...updated.filter(tab => tab.pinned), ...updated.filter(tab => !tab.pinned)]
+    })
+  }
+
+  function closeTabs(ids: string[]) {
+    const targets = new Set(ids)
+    ids.forEach(id => { void closeNativeTab(id) })
+    setTabs(current => {
+      const remaining = current.filter(tab => !targets.has(tab.id))
+      if (!remaining.length) {
+        const replacement = newTab()
+        activeTabIdRef.current = replacement.id
+        setActiveTabId(replacement.id)
+        setAddress('')
+        return [replacement]
+      }
+      if (targets.has(activeTabIdRef.current)) {
+        const next = remaining[0]
+        activeTabIdRef.current = next.id
+        setActiveTabId(next.id)
+        setAddress(next.url)
+        return remaining.map(tab => ({ ...tab, active: tab.id === next.id }))
+      }
+      return remaining
+    })
+  }
+
+  function tabMenu(tab: BrowserTab, index: number): MenuProps['items'] {
+    return [
+      { key: 'reload', label: '重新加载', disabled: !hasNativeTab(tab.id), onClick: () => void reloadNativeTab(tab.id) },
+      { key: 'duplicate', label: '复制标签页', disabled: !tab.url, onClick: () => duplicateTab(tab) },
+      { key: 'pin', label: tab.pinned ? '取消固定' : '固定标签页', onClick: () => togglePinned(tab.id) },
+      { type: 'divider' },
+      { key: 'close', label: '关闭标签页', onClick: () => closeTab(tab.id) },
+      { key: 'close-others', label: '关闭其他标签页', disabled: tabs.length < 2, onClick: () => closeTabs(tabs.filter(item => item.id !== tab.id && !item.pinned).map(item => item.id)) },
+      { key: 'close-right', label: '关闭右侧标签页', disabled: index === tabs.length - 1, onClick: () => closeTabs(tabs.slice(index + 1).filter(item => !item.pinned).map(item => item.id)) },
+    ]
   }
 
   function onTabDragStart(index: number) {
@@ -509,22 +555,26 @@ export function BrowserPage() {
   }
 
   return <div className="browser-page">{contextHolder}
-    <div className="browser-tabs"><Tabs type="editable-card" items={tabs.map((tab, index) => {
+    <div className="browser-tabs" style={{ '--tab-count': tabs.length } as CSSProperties}><Tabs type="editable-card" items={tabs.map((tab, index) => {
           const isDragging = draggingIndex === index
           const isDropTarget = dragOverIndex === index && draggingIndex !== null && draggingIndex !== index
           return {
             key: tab.id,
-            label: <Tooltip title={tab.url || '新标签页'} mouseEnterDelay={0.6}>
+            label: <Dropdown menu={{ items: tabMenu(tab, index) }} trigger={['contextMenu']}>
+              <Tooltip title={tab.url || '新标签页'} mouseEnterDelay={0.6}>
               <span
                 draggable
+                onAuxClick={event => { if (event.button === 1 && !tab.pinned) closeTab(tab.id) }}
                 onDragStart={onTabDragStart(index)}
                 onDragOver={onTabDragOver(index)}
                 onDrop={onTabDrop(index)}
                 onDragEnd={onTabDragEnd}
                 className={`browser-tab-title${isDragging ? ' is-dragging' : ''}${isDropTarget ? ' is-drop-target' : ''}`}
               >{tab.loading ? <LoadingOutlined spin/> : tab.favicon ? <img src={tab.favicon} alt=""/> : <GlobalOutlined/>}<span>{tab.title}</span></span>
-            </Tooltip>,
-            closable: tabs.length > 1,
+              </Tooltip>
+            </Dropdown>,
+            className: tab.pinned ? 'browser-tab--pinned' : undefined,
+            closable: tabs.length > 1 && !tab.pinned,
           }
         })} activeKey={activeTabId} onChange={activateTab} addIcon={<Tooltip title="新建标签页 (Ctrl+T)"><PlusOutlined aria-label="新建标签页"/></Tooltip>} onEdit={(target, action) => action === 'add' ? openNewTab() : closeTab(String(target))}/></div>
     <div className="browser-toolbar"><Space><Button type="text" aria-label="后退" title="后退 (Alt+←)" icon={<ArrowLeftOutlined/>} disabled={!nativeMode || !active.canGoBack} onClick={() => void navigateHistory(active.id,-1)}/><Button type="text" aria-label="前进" title="前进 (Alt+→)" icon={<ArrowRightOutlined/>} disabled={!nativeMode || !active.canGoForward} onClick={() => void navigateHistory(active.id,1)}/><Button type="text" aria-label={active.loading?'停止加载':'重新加载'} title={active.loading?'停止加载 (Esc)':'重新加载 (F5)'} icon={active.loading?<CloseOutlined/>:<ReloadOutlined/>} disabled={!nativeMode} onClick={() => void (active.loading ? stopNativeTab(active.id) : reloadNativeTab(active.id))}/><Button type="text" icon={<BookOutlined/>} onClick={() => void openReader()}>阅读模式</Button></Space><form onSubmit={event => { event.preventDefault(); void navigate(address) }}><Input ref={addressRef} prefix={<SafetyCertificateOutlined/>} suffix={<button type="button" className={`browser-star${starredDocId ? ' is-active' : ''}`} disabled={!active.url} aria-label={starredDocId ? '取消收藏' : '收藏当前页'} title={starredDocId ? '取消收藏' : '收藏当前页'} onClick={event => { event.preventDefault(); event.stopPropagation(); void toggleStarCurrent() }}><StarOutlined/></button>} value={address} onFocus={event=>event.currentTarget.select()} onChange={event=>setAddress(event.target.value)} placeholder="搜索或输入网址"/></form><Tag icon={<SafetyCertificateOutlined/>} color="green">43</Tag><Button type={aiOpen?'primary':'text'} ghost={aiOpen} icon={<RobotOutlined/>} onClick={()=>setAiOpen(value=>!value)}/></div>

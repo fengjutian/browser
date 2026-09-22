@@ -57,9 +57,10 @@ export function parseAutoTagResponse(raw: string, options: AutoTagOptions = {}):
     if (matches.length === 0) return []
     parsed = matches.map(match => match[1])
   }
+  const candidates: unknown[] = Array.isArray(parsed) ? parsed : []
   const seen = new Set<string>()
   const result: string[] = []
-  for (const candidate of parsed) {
+  for (const candidate of candidates) {
     if (typeof candidate !== 'string') continue
     const tag = normalizeTag(candidate)
     if (!tag || seen.has(tag)) continue
