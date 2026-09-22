@@ -8,9 +8,11 @@ import { extractArticle } from '../../features/reader/extractArticle'
 import type { ReaderArticle } from '../../features/reader/types'
 import { classifySaveError } from '../../features/documents/saveClassifier'
 import { useDebouncedValue } from '../../shared/hooks/useDebouncedValue'
+import { dedupeHistory, parseHistory, type HistoryEntry } from '../../features/history/dedupeHistory'
 
 const SESSION_KEY = 'browser.tabs'
 const SESSION_DEBOUNCE_MS = 500
+const HISTORY_KEY = 'browser.history'
 
 const newTab = (id: string = crypto.randomUUID()): BrowserTab => ({ id, url: '', title: '新标签页', loading: false, active: true, pinned: false })
 
@@ -38,12 +40,14 @@ export function BrowserPage() {
   const [nativeMode, setNativeMode] = useState(false)
   const [readerArticle, setReaderArticle] = useState<ReaderArticle | null>(null)
   const [hydrated, setHydrated] = useState(false)
+  const [history, setHistory] = useState<HistoryEntry[]>([])
   const [messageApi, contextHolder] = message.useMessage()
   const surfaceRef = useRef<HTMLDivElement>(null)
   const addressRef = useRef<InputRef>(null)
   const previousTab = useRef<string | undefined>(undefined)
   const activeTabIdRef = useRef(activeTabId)
   const tabsRef = useRef(tabs)
+  const lastHistoryUrl = useRef<string>('')
   const active = tabs.find(tab => tab.id === activeTabId) ?? tabs[0]
 
   useEffect(() => {
