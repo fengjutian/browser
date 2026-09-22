@@ -6,6 +6,7 @@
 export type ShortcutAction =
   | 'focusAddress'
   | 'newTab'
+  | 'reopenClosedTab'
   | 'closeTab'
   | 'nextTab'
   | 'prevTab'
@@ -27,7 +28,7 @@ export function interpretShortcut(event: ShortcutEvent): ShortcutAction | null {
   const modifier = event.ctrlKey || event.metaKey
   const key = event.key
   const lower = key.toLowerCase()
-  if (modifier && lower === 'l') return 'focusAddress'
+  if (modifier && event.shiftKey && lower === 't') return 'reopenClosedTab'
   if (modifier && lower === 't') return 'newTab'
   if (modifier && lower === 'w') return 'closeTab'
   if (modifier && lower === 'tab') return event.shiftKey ? 'prevTab' : 'nextTab'

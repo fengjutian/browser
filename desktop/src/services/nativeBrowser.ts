@@ -4,7 +4,7 @@ import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 import { Webview } from '@tauri-apps/api/webview'
 
 export interface BrowserBounds { x: number; y: number; width: number; height: number }
-export interface NativeBrowserState { url: string; title: string; favicon?: string; loading: boolean }
+export interface NativeBrowserState { url: string; title: string; favicon?: string; loading: boolean; canGoBack: boolean; canGoForward: boolean }
 export interface NativePageSnapshot { url: string; html: string }
 interface NativeNewTabRequest { openerLabel: string; url: string }
 const labels = new Map<string, string>()
@@ -22,6 +22,22 @@ export async function openNativeTab(tabId: string, url: string, bounds: BrowserB
   } else {
     await invoke<string>('browser_navigate', { label, url })
     await webview.show()
+  }
+  labels.set(tabId, label)
+  await resizeNativeTab(tabId, bounds)
+  return true
+}
+
+export async function ensureNativeTab(tabId: string, url: string, bounds: BrowserBounds): Promise<boolean> {
+  if (!isTauri()) return false
+  const label = labelFor(tabId)
+  const existing = await Webview.getByLabel(label)
+  if (existing) {
+    await invoke<string>('browser_navigate', { label, url })
+  } else {
+    await invoke('browser_create', { label, url, bounds })
+    const created = await Webview.getByLabel(label)
+    if (!created) throw new Error('browser tab webview was not created')
   }
   labels.set(tabId, label)
   await resizeNativeTab(tabId, bounds)

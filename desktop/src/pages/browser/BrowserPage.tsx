@@ -1,9 +1,9 @@
 import { MouseEvent, useEffect, useRef, useState } from 'react'
 import { Button, Card, Input, Segmented, Space, Tabs, Tag, Tooltip, Typography, message, type InputRef } from 'antd'
-import { ArrowLeftOutlined, ArrowRightOutlined, BookOutlined, CloseOutlined, GlobalOutlined, LoadingOutlined, PlusOutlined, ReloadOutlined, RobotOutlined, SafetyCertificateOutlined, SaveOutlined, SearchOutlined, StarOutlined, ThunderboltOutlined, TranslationOutlined } from '@ant-design/icons'
+import { ArrowLeftOutlined, ArrowRightOutlined, BookOutlined, CloseOutlined, CopyOutlined, GlobalOutlined, LoadingOutlined, PlusOutlined, ReloadOutlined, RobotOutlined, SafetyCertificateOutlined, SaveOutlined, SearchOutlined, StarOutlined, ThunderboltOutlined, TranslationOutlined } from '@ant-design/icons'
 import type { BrowserTab } from '../../types'
 import { getDocument, getSession, saveDocument, setSession } from '../../api'
-import { captureNativePage, closeNativeTab, hasNativeTab, hideNativeTab, navigateHistory, onNativeNewTab, openNativeTab, readNativeState, reloadNativeTab, resizeNativeTab, showNativeTab, stopNativeTab } from '../../services/nativeBrowser'
+import { captureNativePage, closeNativeTab, ensureNativeTab, hasNativeTab, hideNativeTab, navigateHistory, onNativeNewTab, openNativeTab, readNativeState, reloadNativeTab, resizeNativeTab, showNativeTab, stopNativeTab } from '../../services/nativeBrowser'
 import { extractArticle } from '../../features/reader/extractArticle'
 import type { ReaderArticle } from '../../features/reader/types'
 import { classifySaveError } from '../../features/documents/saveClassifier'
@@ -11,10 +11,12 @@ import { useDebouncedValue } from '../../shared/hooks/useDebouncedValue'
 import { dedupeHistory, parseHistory, type HistoryEntry } from '../../features/history/dedupeHistory'
 import { reorderTabs } from '../../features/browser/reorderTabs'
 import { interpretShortcut } from '../../features/browser/shortcuts'
+import { popClosedTab, recordClosedTab, type ClosedTab } from '../../features/browser/closedTabs'
 
 const SESSION_KEY = 'browser.tabs'
 const SESSION_DEBOUNCE_MS = 500
 const HISTORY_KEY = 'browser.history'
+const CLOSED_KEY = 'browser.closed'
 
 interface QuickSite {
   name: string
@@ -58,15 +60,29 @@ function parsePersistedSession(raw: string | null): PersistedSession | null {
   } catch { return null }
 }
 
+function parseClosedTabs(raw: string | null): ClosedTab[] {
+  if (!raw) return []
+  try {
+    const value = JSON.parse(raw) as unknown
+    if (!Array.isArray(value)) return []
+    return value.filter((item): item is ClosedTab => (
+      !!item && typeof item === 'object'
+      && typeof (item as ClosedTab).url === 'string'
+      && typeof (item as ClosedTab).id === 'string'
+      && typeof (item as ClosedTab).closedAt === 'number'
+    ))
+  } catch { return [] }
+}
+
 export function BrowserPage() {
   const [tabs, setTabs] = useState<BrowserTab[]>([newTab('new')])
   const [activeTabId, setActiveTabId] = useState('new')
   const [address, setAddress] = useState('')
   const [aiOpen, setAiOpen] = useState(false)
-  const [nativeMode, setNativeMode] = useState(false)
   const [readerArticle, setReaderArticle] = useState<ReaderArticle | null>(null)
   const [hydrated, setHydrated] = useState(false)
   const [history, setHistory] = useState<HistoryEntry[]>([])
+  const [closedTabs, setClosedTabs] = useState<ClosedTab[]>([])
   const [draggingIndex, setDraggingIndex] = useState<number | null>(null)
   const [dragOverIndex, setDragOverIndex] = useState<number | null>(null)
   const [messageApi, contextHolder] = message.useMessage()
@@ -75,15 +91,18 @@ export function BrowserPage() {
   const previousTab = useRef<string | undefined>(undefined)
   const activeTabIdRef = useRef(activeTabId)
   const tabsRef = useRef(tabs)
+  const closedTabsRef = useRef(closedTabs)
   const lastHistoryUrl = useRef<string>('')
   const active = tabs.find(tab => tab.id === activeTabId) ?? tabs[0]
+  const nativeMode = hasNativeTab(active.id)
 
   useEffect(() => {
     let cancelled = false
     void Promise.all([
       getSession(SESSION_KEY),
       getSession(HISTORY_KEY),
-    ]).then(([tabsRaw, historyRaw]) => {
+      getSession(CLOSED_KEY),
+    ]).then(([tabsRaw, historyRaw, closedRaw]) => {
       if (cancelled) return
       const parsed = parsePersistedSession(tabsRaw)
       if (parsed) {
@@ -94,7 +113,29 @@ export function BrowserPage() {
         if (activeTab?.url) lastHistoryUrl.current = activeTab.url
       }
       setHistory(parseHistory(historyRaw))
+      setClosedTabs(parseClosedTabs(closedRaw))
       setHydrated(true)
+      if (parsed) {
+        void (async () => {
+          await new Promise(resolve => requestAnimationFrame(resolve))
+          if (cancelled) return
+          const nextBounds = bounds()
+          if (!nextBounds) return
+          await Promise.all(parsed.tabs.filter(tab => tab.url).map(async tab => {
+            try {
+              const opened = await ensureNativeTab(tab.id, tab.url, nextBounds)
+              if (!opened) {
+                setTabs(current => current.map(item => item.id === tab.id ? { ...item, error: { kind: 'web-mode-required', message: '网页浏览仅在 Tauri 桌面应用中可用。' } } : item))
+                return
+              }
+              if (tab.id === parsed.activeTabId) await showNativeTab(tab.id)
+              else await hideNativeTab(tab.id)
+            } catch (error) {
+              setTabs(current => current.map(item => item.id === tab.id ? { ...item, error: { kind: 'load-failed', message: String(error) } } : item))
+            }
+          }))
+        })()
+      }
     })
     return () => { cancelled = true }
   }, [])
@@ -111,6 +152,12 @@ export function BrowserPage() {
     void setSession(HISTORY_KEY, historyJson)
   }, [historyJson, hydrated])
 
+  const closedJson = useDebouncedValue(JSON.stringify(closedTabs), SESSION_DEBOUNCE_MS)
+  useEffect(() => {
+    if (!hydrated) return
+    void setSession(CLOSED_KEY, closedJson)
+  }, [closedJson, hydrated])
+
   useEffect(() => {
     if (!hydrated || !active.url || active.url === lastHistoryUrl.current) return
     lastHistoryUrl.current = active.url
@@ -119,6 +166,7 @@ export function BrowserPage() {
 
   useEffect(() => { activeTabIdRef.current = activeTabId }, [activeTabId])
   useEffect(() => { tabsRef.current = tabs }, [tabs])
+  useEffect(() => { closedTabsRef.current = closedTabs }, [closedTabs])
 
   const bounds = () => {
     const rect = surfaceRef.current?.getBoundingClientRect()
@@ -138,7 +186,7 @@ export function BrowserPage() {
         const state = await readNativeState(active.id)
         if (!state) return
         const fallbackTitle = (() => { try { return new URL(state.url).hostname } catch { return '新标签页' } })()
-        setTabs(current => current.map(tab => tab.id === active.id ? { ...tab, url: state.url, title: state.title || fallbackTitle, favicon: state.favicon, loading: state.loading } : tab))
+        setTabs(current => current.map(tab => tab.id === active.id ? { ...tab, url: state.url, title: state.title || fallbackTitle, favicon: state.favicon, loading: state.loading, canGoBack: state.canGoBack, canGoForward: state.canGoForward } : tab))
         setAddress(state.url)
       } catch { /* the page may be navigating between documents */ }
     }
@@ -177,6 +225,9 @@ export function BrowserPage() {
           return
         case 'newTab':
           openNewTab()
+          return
+        case 'reopenClosedTab':
+          reopenLastClosed()
           return
         case 'closeTab':
           closeTab(activeTabIdRef.current)
@@ -223,18 +274,36 @@ export function BrowserPage() {
     const url = /^https?:\/\//.test(trimmed) ? trimmed : `https://www.google.com/search?q=${encodeURIComponent(trimmed)}`
     const tabId = active.id
     setReaderArticle(null)
-    setTabs(current => current.map(tab => tab.id === tabId ? { ...tab, url, title: trimmed, loading: true } : tab))
+    setTabs(current => current.map(tab => tab.id === tabId ? { ...tab, url, title: trimmed, loading: true, error: undefined } : tab))
     await new Promise(resolve => requestAnimationFrame(resolve))
     const nextBounds = bounds()
     if (!nextBounds) return
     try {
       const opened = await openNativeTab(tabId, url, nextBounds)
-      if (activeTabIdRef.current === tabId) setNativeMode(opened)
-      setTabs(current => current.map(tab => tab.id === tabId ? { ...tab, loading: false } : tab))
+      if (!opened) {
+        setTabs(current => current.map(tab => tab.id === tabId ? { ...tab, loading: false, error: { kind: 'web-mode-required', message: '网页浏览仅在 Tauri 桌面应用中可用。' } } : tab))
+        return
+      }
+      setTabs(current => current.map(tab => tab.id === tabId ? { ...tab, loading: false, error: undefined } : tab))
     } catch (error) {
-      if (activeTabIdRef.current === tabId) setNativeMode(false)
-      setTabs(current => current.map(tab => tab.id === tabId ? { ...tab, loading: false } : tab))
-      messageApi.error(`网页打开失败：${String(error)}`)
+      setTabs(current => current.map(tab => tab.id === tabId ? { ...tab, loading: false, error: classifyNavigationError(error) } : tab))
+    }
+  }
+
+  async function retryActive() {
+    const url = active.url
+    if (!url) return
+    await navigate(url)
+  }
+
+  async function copyUrl() {
+    const url = active.url
+    if (!url) return
+    try {
+      await navigator.clipboard.writeText(url)
+      messageApi.success('已复制链接')
+    } catch {
+      messageApi.error('复制失败，请手动复制')
     }
   }
 
@@ -247,7 +316,6 @@ export function BrowserPage() {
     activeTabIdRef.current = tab.id
     setActiveTabId(tab.id)
     setAddress(url ?? '')
-    setNativeMode(false)
     setReaderArticle(null)
     if (url) {
       void new Promise(resolve => requestAnimationFrame(resolve)).then(async () => {
@@ -255,11 +323,13 @@ export function BrowserPage() {
         if (!nextBounds) return
         try {
           const opened = await openNativeTab(tab.id, url, nextBounds)
-          if (activeTabIdRef.current === tab.id) setNativeMode(opened)
+          if (!opened) {
+            setTabs(current => current.map(item => item.id === tab.id ? { ...item, loading: false, error: { kind: 'web-mode-required', message: '网页浏览仅在 Tauri 桌面应用中可用。' } } : current))
+            return
+          }
+          setTabs(current => current.map(item => item.id === tab.id ? { ...item, loading: false, error: undefined } : item))
         } catch (error) {
-          messageApi.error(`网页打开失败：${String(error)}`)
-        } finally {
-          setTabs(current => current.map(item => item.id === tab.id ? { ...item, loading: false } : item))
+          setTabs(current => current.map(item => item.id === tab.id ? { ...item, loading: false, error: { kind: 'load-failed', message: String(error) } } : item))
         }
       })
     }
@@ -272,7 +342,6 @@ export function BrowserPage() {
     activeTabIdRef.current = id
     setAddress(selected?.url ?? '')
     setReaderArticle(null)
-    setNativeMode(hasNativeTab(id))
   }
 
   function onTabDragStart(index: number) {
@@ -305,6 +374,11 @@ export function BrowserPage() {
 
   function closeTab(id: string) {
     void closeNativeTab(id)
+    const closing = tabs.find(tab => tab.id === id)
+    if (closing && closing.url) {
+      const entry: ClosedTab = { id: closing.id, url: closing.url, title: closing.title, favicon: closing.favicon, closedAt: Date.now() }
+      setClosedTabs(current => recordClosedTab(current, entry))
+    }
     const closedIndex = tabs.findIndex(tab => tab.id === id)
     const remaining = tabs.filter(tab => tab.id !== id)
     if (!remaining.length) {
@@ -313,7 +387,6 @@ export function BrowserPage() {
       setActiveTabId(replacement.id)
       activeTabIdRef.current = replacement.id
       setAddress('')
-      setNativeMode(false)
       return
     }
     if (id === activeTabIdRef.current) {
@@ -322,10 +395,42 @@ export function BrowserPage() {
       setActiveTabId(next.id)
       activeTabIdRef.current = next.id
       setAddress(next.url)
-      setNativeMode(hasNativeTab(next.id))
       return
     }
     setTabs(remaining)
+  }
+
+  function reopenLastClosed() {
+    const result = popClosedTab(closedTabsRef.current)
+    if (!result) return
+    setClosedTabs(result.remaining)
+    const restored = result.popped
+    const tab: BrowserTab = {
+      id: crypto.randomUUID(),
+      url: restored.url,
+      title: restored.title || '正在加载…',
+      favicon: restored.favicon,
+      loading: true,
+      active: true,
+      pinned: false,
+    }
+    setTabs(current => [...current.map(item => ({ ...item, active: false })), tab])
+    activeTabIdRef.current = tab.id
+    setActiveTabId(tab.id)
+    setAddress(restored.url)
+    setReaderArticle(null)
+    void new Promise(resolve => requestAnimationFrame(resolve)).then(async () => {
+      const nextBounds = bounds()
+      if (!nextBounds) return
+      try {
+        await ensureNativeTab(tab.id, restored.url, nextBounds)
+        if (activeTabIdRef.current === tab.id) await showNativeTab(tab.id)
+      } catch (error) {
+        setTabs(current => current.map(item => item.id === tab.id ? { ...item, loading: false, error: { kind: 'load-failed', message: String(error) } } : item))
+      } finally {
+        setTabs(current => current.map(item => item.id === tab.id ? { ...item, loading: false } : item))
+      }
+    })
   }
 
   async function save() {
@@ -358,7 +463,6 @@ export function BrowserPage() {
       const article = extractArticle(await captureNativePage(active.id))
       await hideNativeTab(active.id)
       setReaderArticle(article)
-      setNativeMode(false)
       messageApi.open({ key, type: 'success', content: `已提取 ${article.wordCount} 字` })
     } catch { messageApi.open({ key, type: 'error', content: '无法识别该页面正文' }) }
   }
@@ -382,12 +486,39 @@ export function BrowserPage() {
             closable: tabs.length > 1,
           }
         })} activeKey={activeTabId} onChange={activateTab} onEdit={(target, action) => action === 'remove' && closeTab(String(target))}/><Tooltip title="新建标签页 (Ctrl+T)"><button type="button" aria-label="新建标签页" className="browser-tabs__new-tab" onClick={() => openNewTab()}><PlusOutlined/></button></Tooltip></div>
-    <div className="browser-toolbar"><Space><Button type="text" aria-label="后退" title="后退 (Alt+←)" icon={<ArrowLeftOutlined/>} onClick={() => void navigateHistory(active.id,-1)}/><Button type="text" aria-label="前进" title="前进 (Alt+→)" icon={<ArrowRightOutlined/>} onClick={() => void navigateHistory(active.id,1)}/><Button type="text" aria-label={active.loading?'停止加载':'重新加载'} title={active.loading?'停止加载 (Esc)':'重新加载 (F5)'} icon={active.loading?<CloseOutlined/>:<ReloadOutlined/>} onClick={() => void (active.loading ? stopNativeTab(active.id) : reloadNativeTab(active.id))}/><Button type="text" icon={<BookOutlined/>} onClick={() => void openReader()}>阅读模式</Button></Space><form onSubmit={event => { event.preventDefault(); void navigate(address) }}><Input ref={addressRef} prefix={<SafetyCertificateOutlined/>} suffix={<StarOutlined/>} value={address} onFocus={event=>event.currentTarget.select()} onChange={event=>setAddress(event.target.value)} placeholder="搜索或输入网址"/></form><Tag icon={<SafetyCertificateOutlined/>} color="green">43</Tag><Button type={aiOpen?'primary':'text'} ghost={aiOpen} icon={<RobotOutlined/>} onClick={()=>setAiOpen(value=>!value)}/></div>
-    <div className="browser-content"><div className="web-surface" ref={surfaceRef}>{readerArticle ? <ReaderArticleView article={readerArticle}/> : !nativeMode && (active.url ? <ReaderPreview/> : <NewTab address={address} setAddress={setAddress} navigate={navigate}/>)}</div>{aiOpen&&<AssistantPanel close={()=>setAiOpen(false)} save={save}/>}</div>
+    <div className="browser-toolbar"><Space><Button type="text" aria-label="后退" title="后退 (Alt+←)" icon={<ArrowLeftOutlined/>} disabled={!nativeMode || !active.canGoBack} onClick={() => void navigateHistory(active.id,-1)}/><Button type="text" aria-label="前进" title="前进 (Alt+→)" icon={<ArrowRightOutlined/>} disabled={!nativeMode || !active.canGoForward} onClick={() => void navigateHistory(active.id,1)}/><Button type="text" aria-label={active.loading?'停止加载':'重新加载'} title={active.loading?'停止加载 (Esc)':'重新加载 (F5)'} icon={active.loading?<CloseOutlined/>:<ReloadOutlined/>} disabled={!nativeMode} onClick={() => void (active.loading ? stopNativeTab(active.id) : reloadNativeTab(active.id))}/><Button type="text" icon={<BookOutlined/>} onClick={() => void openReader()}>阅读模式</Button></Space><form onSubmit={event => { event.preventDefault(); void navigate(address) }}><Input ref={addressRef} prefix={<SafetyCertificateOutlined/>} suffix={<StarOutlined/>} value={address} onFocus={event=>event.currentTarget.select()} onChange={event=>setAddress(event.target.value)} placeholder="搜索或输入网址"/></form><Tag icon={<SafetyCertificateOutlined/>} color="green">43</Tag><Button type={aiOpen?'primary':'text'} ghost={aiOpen} icon={<RobotOutlined/>} onClick={()=>setAiOpen(value=>!value)}/></div>
+    <div className="browser-content"><div className="web-surface" ref={surfaceRef}>{readerArticle
+      ? <ReaderArticleView article={readerArticle}/>
+      : active.error
+        ? <BrowserErrorView tab={active} onRetry={retryActive} onNewTab={openNewTab} onCopy={copyUrl}/>
+        : nativeMode
+          ? null
+          : active.loading
+            ? <div className="web-surface__loading"><LoadingOutlined spin/></div>
+            : active.url
+              ? <BrowserErrorView tab={{...active, error:{kind:'web-mode-required',message:'当前网页需要在 Tauri 桌面应用中打开。'}}} onRetry={retryActive} onNewTab={openNewTab} onCopy={copyUrl}/>
+              : <NewTab address={address} setAddress={setAddress} navigate={navigate}/>}</div>{aiOpen&&<AssistantPanel close={()=>setAiOpen(false)} save={save}/>}</div>
   </div>
 }
 
 function NewTab({address,setAddress,navigate}:{address:string;setAddress:(value:string)=>void;navigate:(input:string)=>Promise<void>}) { return <div className="new-tab"><span className="new-tab__icon"><ThunderboltOutlined/></span><Typography.Title>今天想探索什么？</Typography.Title><Typography.Paragraph>深入阅读，保存重要内容，随时向你的知识库提问。</Typography.Paragraph><form onSubmit={event=>{event.preventDefault();void navigate(address)}}><Input size="large" prefix={<SearchOutlined/>} value={address} onChange={event=>setAddress(event.target.value)} placeholder="搜索网页或输入 URL"/></form><div className="quick-actions"><Card><BookOutlined/><b>Reader Mode</b><small>更专注地阅读</small></Card><Card><RobotOutlined/><b>AI 摘要</b><small>快速理解页面</small></Card><Card><SaveOutlined/><b>知识库</b><small>沉淀重要内容</small></Card></div><div className="quick-sites"><div className="quick-sites__label">常用网站</div><div className="quick-sites__grid">{QUICK_SITES.map(site => <button key={site.url} type="button" className="quick-site" title={site.name} aria-label={`打开 ${site.name}`} onClick={(event:MouseEvent<HTMLButtonElement>)=>{event.currentTarget.blur();void navigate(site.url)}}><span className="quick-site__mark" style={{background:site.color}}>{site.initial}</span><span className="quick-site__name">{site.name}</span></button>)}</div></div></div> }
-function ReaderPreview(){return <article className="reader-preview"><Typography.Text className="eyebrow">WEBVIEW PREVIEW</Typography.Text><Typography.Title>构建会记忆的系统</Typography.Title><Typography.Paragraph className="lead">浏览器环境预览模式；在 Tauri 桌面应用中这里会替换为真实原生 WebView。</Typography.Paragraph><div className="reader-hero"><ThunderboltOutlined/></div></article>}
+
+function BrowserErrorView({tab, onRetry, onNewTab, onCopy}:{tab:BrowserTab;onRetry:()=>void;onNewTab:()=>void;onCopy:()=>void}) {
+  const error = tab.error
+  const kind = error?.kind ?? 'load-failed'
+  const message = error?.message ?? '未知错误'
+  const title = kind === 'web-mode-required' ? '请在 Tauri 桌面应用中打开网页' : '无法加载该网页'
+  return <div className="browser-error">
+    <Typography.Text className="eyebrow">{kind === 'web-mode-required' ? '需要桌面应用' : '加载失败'}</Typography.Text>
+    <Typography.Title level={3}>{title}</Typography.Title>
+    <Typography.Paragraph type="secondary">{message}</Typography.Paragraph>
+    {tab.url && <Typography.Text code className="browser-error__url">{tab.url}</Typography.Text>}
+    <Space wrap>
+      {kind !== 'web-mode-required' && <Button type="primary" icon={<ReloadOutlined/>} onClick={onRetry}>重试</Button>}
+      <Button icon={<PlusOutlined/>} onClick={onNewTab}>返回新标签页</Button>
+      {tab.url && <Button icon={<CopyOutlined/>} onClick={onCopy}>复制 URL</Button>}
+    </Space>
+  </div>
+}
 function ReaderArticleView({article}:{article:ReaderArticle}){return <article className="reader-document"><Typography.Text className="eyebrow">READER MODE · {article.wordCount} WORDS</Typography.Text><Typography.Title>{article.title}</Typography.Title>{article.byline&&<Typography.Text type="secondary">{article.byline}</Typography.Text>}<div className="reader-document__body" dangerouslySetInnerHTML={{__html:article.contentHtml}}/></article>}
 function AssistantPanel({close,save}:{close:()=>void;save:()=>Promise<void>}){return <aside className="ai-panel"><div className="panel-title"><Space><span className="ai-mark"><RobotOutlined/></span><b>AI Assistant</b></Space><Button type="text" icon={<CloseOutlined/>} onClick={close}/></div><Segmented block options={['摘要','提问','翻译']}/><Card size="small" className="context-card"><GlobalOutlined/> 当前页面<Tag color="success">Ready</Tag></Card><Typography.Title level={4}>理解这个页面</Typography.Title><Typography.Paragraph type="secondary">打开文章后可生成有依据的摘要、问答或翻译。</Typography.Paragraph><Space direction="vertical" className="panel-actions"><Button icon={<ThunderboltOutlined/>}>生成 100 字摘要</Button><Button icon={<BookOutlined/>}>提取核心观点</Button><Button icon={<TranslationOutlined/>}>翻译为中文</Button></Space><Card className="ai-preview" size="small"><b><RobotOutlined/> AI 预览</b><p>可靠的知识系统将阅读、结构化保存和可引用检索连接起来。</p></Card><div className="panel-spacer"/><Button type="primary" block icon={<SaveOutlined/>} onClick={()=>void save()}>保存到知识库</Button><Input className="ask-input" placeholder="询问当前页面…" suffix={<ArrowRightOutlined/>}/></aside>}

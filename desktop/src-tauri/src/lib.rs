@@ -4,6 +4,8 @@ pub mod plugins;
 
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
+use std::sync::Mutex;
 use std::time::Duration;
 use tauri::image::Image;
 use tauri::{Emitter, Manager};
@@ -31,6 +33,47 @@ struct BrowserState {
     title: String,
     favicon: Option<String>,
     loading: bool,
+    can_go_back: bool,
+    can_go_forward: bool,
+}
+
+#[derive(Default)]
+struct NavStacks {
+    stacks: Mutex<HashMap<String, NavStack>>,
+}
+
+#[derive(Default)]
+struct NavStack {
+    entries: Vec<String>,
+    index: usize,
+}
+
+impl NavStack {
+    fn push(&mut self, url: String) {
+        if let Some(pos) = self.entries.get(self.index + 1..).and_then(|_| Some(self.index + 1)) {
+            self.entries.truncate(pos);
+        }
+        if self.entries.last().map(|last| last == &url).unwrap_or(false) {
+            return;
+        }
+        self.entries.push(url);
+        self.index = self.entries.len() - 1;
+    }
+
+    fn back(&mut self) -> bool {
+        if self.index == 0 { return false; }
+        self.index -= 1;
+        true
+    }
+
+    fn forward(&mut self) -> bool {
+        if self.index + 1 >= self.entries.len() { return false; }
+        self.index += 1;
+        true
+    }
+
+    fn can_go_back(&self) -> bool { self.index > 0 }
+    fn can_go_forward(&self) -> bool { self.index + 1 < self.entries.len() }
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -45,17 +88,21 @@ fn validate_navigation(url: String) -> Result<String, String> {
 }
 
 fn external_url(input: &str) -> Result<url::Url, String> {
-    if let Ok(explicit) = url::Url::parse(input.trim()) {
-        return match explicit.scheme() {
-            "http" | "https" => Ok(explicit),
-            _ => Err("only http and https navigation is allowed".into()),
-        };
-    }
-    let normalized = browser::normalize_navigation(input).map_err(|error| error.to_string())?;
-    let url = url::Url::parse(&normalized).map_err(|error| error.to_string())?;
-    match url.scheme() {
-        "http" | "https" => Ok(url),
-        _ => Err("only http and https navigation is allowed".into()),
+    let parsed = if let Ok(explicit) = url::Url::parse(input.trim()) {
+        explicit
+    } else {
+        let normalized = browser::normalize_navigation(input).map_err(|error| error.to_string())?;
+        url::Url::parse(&normalized).map_err(|error| error.to_string())?
+    };
+    match parsed.scheme() {
+        "http" | "https" => Ok(parsed),
+        scheme if matches!(scheme, "mailto" | "tel" | "sms") => {
+            Err(format!("external-protocol:{scheme}"))
+        }
+        scheme if matches!(scheme, "file" | "javascript" | "data" | "vbscript" | "about" | "chrome") => {
+            Err(format!("blocked-protocol:{scheme}"))
+        }
+        scheme => Err(format!("unknown-protocol:{scheme}")),
     }
 }
 
@@ -70,6 +117,7 @@ async fn browser_create(
         return Ok(());
     }
     let url = external_url(&url)?;
+    let nav_url = url.to_string();
     let opener_label = label.clone();
     let event_app = app.clone();
     let builder = tauri::webview::WebviewBuilder::new(&label, tauri::WebviewUrl::External(url))
@@ -96,6 +144,10 @@ async fn browser_create(
             tauri::LogicalSize::new(bounds.width.max(1.0), bounds.height.max(1.0)),
         )
         .map_err(|error| error.to_string())?;
+    let navs = app.state::<NavStacks>();
+    let mut guard = navs.stacks.lock().map_err(|_| "nav stack poisoned".to_string())?;
+    let stack = guard.entry(label).or_default();
+    stack.push(nav_url);
     Ok(())
 }
 
@@ -110,6 +162,10 @@ async fn browser_navigate(
         .ok_or_else(|| "browser tab webview not found".to_string())?
         .navigate(url.clone())
         .map_err(|error| error.to_string())?;
+    let navs = app.state::<NavStacks>();
+    let mut guard = navs.stacks.lock().map_err(|_| "nav stack poisoned".to_string())?;
+    let stack = guard.entry(label).or_default();
+    stack.push(url.to_string());
     Ok(url.to_string())
 }
 
@@ -133,6 +189,19 @@ async fn browser_stop(app: tauri::AppHandle, label: String) -> Result<(), String
 async fn browser_history(app: tauri::AppHandle, label: String, delta: i32) -> Result<(), String> {
     if !(-1..=1).contains(&delta) || delta == 0 {
         return Err("history delta must be -1 or 1".into());
+    }
+    {
+        let navs = app.state::<NavStacks>();
+        let mut guard = navs.stacks.lock().map_err(|_| "nav stack poisoned".to_string())?;
+        let stack = guard.entry(label.clone()).or_default();
+        let moved = match delta {
+            -1 => stack.back(),
+            1 => stack.forward(),
+            _ => unreachable!(),
+        };
+        if !moved {
+            return Err("history navigation unavailable".into());
+        }
     }
     app.get_webview(&label)
         .ok_or_else(|| "browser tab webview not found".to_string())?
@@ -163,11 +232,21 @@ async fn browser_state(app: tauri::AppHandle, label: String) -> Result<BrowserSt
     let webview = app
         .get_webview(&label)
         .ok_or_else(|| "browser tab webview not found".to_string())?;
-    eval_json(
+    let mut state: BrowserState = eval_json(
         webview,
         "({url:location.href,title:document.title,favicon:(document.querySelector('link[rel~=icon]')?.href??null),loading:document.readyState!=='complete'})",
     )
-    .await
+    .await?;
+    let navs = app.state::<NavStacks>();
+    let guard = navs.stacks.lock().map_err(|_| "nav stack poisoned".to_string())?;
+    if let Some(stack) = guard.get(&label) {
+        state.can_go_back = stack.can_go_back();
+        state.can_go_forward = stack.can_go_forward();
+    } else {
+        state.can_go_back = false;
+        state.can_go_forward = false;
+    }
+    Ok(state)
 }
 
 #[tauri::command]
@@ -189,6 +268,7 @@ async fn browser_snapshot(app: tauri::AppHandle, label: String) -> Result<PageSn
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .manage(NavStacks::default())
         .setup(|app| {
             // Set the runtime window icon explicitly as well as the bundled executable
             // icon. This keeps `tauri dev` and packaged Windows builds consistent.
