@@ -433,6 +433,10 @@ select {
       .browser-tab-title { justify-content: center; }
       .browser-tab-title > span:last-child { display: none; }
     }
+
+    &.browser-tab--suspended {
+      .browser-tab-title { opacity: .58; }
+    }
   }
 
   .ant-tabs-tab-btn,

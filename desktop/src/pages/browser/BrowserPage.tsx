@@ -19,6 +19,7 @@ const SESSION_KEY = 'browser.tabs'
 const SESSION_DEBOUNCE_MS = 500
 const HISTORY_KEY = 'browser.history'
 const CLOSED_KEY = 'browser.closed'
+const MAX_LIVE_WEBVIEWS = 8
 
 interface QuickSite {
   name: string
@@ -111,6 +112,7 @@ export function BrowserPage({ visible = true }: { visible?: boolean }) {
   const tabsRef = useRef(tabs)
   const closedTabsRef = useRef(closedTabs)
   const visibleRef = useRef(visible)
+  const lastActiveAtRef = useRef(new Map<string, number>([['new', Date.now()]]))
   const lastHistoryUrl = useRef<string>('')
   const active = tabs.find(tab => tab.id === activeTabId) ?? tabs[0]
   const nativeMode = hasNativeTab(active.id)
@@ -147,7 +149,7 @@ export function BrowserPage({ visible = true }: { visible?: boolean }) {
           if (cancelled) return
           const nextBounds = bounds()
           if (!nextBounds) return
-          await Promise.all(parsed.tabs.filter(tab => tab.url).map(async tab => {
+          await Promise.all(parsed.tabs.filter(tab => tab.url && (!tab.suspended || tab.id === parsed.activeTabId)).map(async tab => {
             try {
               const opened = await ensureNativeTab(tab.id, tab.url, nextBounds)
               if (!opened) {
@@ -160,6 +162,7 @@ export function BrowserPage({ visible = true }: { visible?: boolean }) {
               setTabs(current => current.map(item => item.id === tab.id ? { ...item, error: { kind: 'load-failed', message: String(error) } } : item))
             }
           }))
+          await enforceLiveTabLimit(parsed.activeTabId)
         })()
       }
     })
@@ -362,8 +365,37 @@ export function BrowserPage({ visible = true }: { visible?: boolean }) {
         return
       }
       setTabs(current => current.map(tab => tab.id === tabId ? { ...tab, error: undefined } : tab))
+      await enforceLiveTabLimit(tabId)
     } catch (error) {
       setTabs(current => current.map(tab => tab.id === tabId ? { ...tab, loading: false, error: classifyNavigationError(error) } : tab))
+    }
+  }
+
+  async function enforceLiveTabLimit(protectedId: string) {
+    const live = tabsRef.current.filter(tab => hasNativeTab(tab.id))
+    if (live.length <= MAX_LIVE_WEBVIEWS) return
+    const candidates = live
+      .filter(tab => tab.id !== protectedId && !tab.pinned)
+      .sort((a, b) => (lastActiveAtRef.current.get(a.id) ?? 0) - (lastActiveAtRef.current.get(b.id) ?? 0))
+    for (const tab of candidates.slice(0, live.length - MAX_LIVE_WEBVIEWS)) {
+      await closeNativeTab(tab.id)
+      setTabs(current => current.map(item => item.id === tab.id ? { ...item, suspended: true, loading: false } : item))
+    }
+  }
+
+  async function resumeTab(tab: BrowserTab) {
+    if (!tab.url || hasNativeTab(tab.id)) return
+    const nextBounds = bounds()
+    if (!nextBounds) return
+    setTabs(current => current.map(item => item.id === tab.id ? { ...item, suspended: false, loading: true, error: undefined } : item))
+    try {
+      const opened = await ensureNativeTab(tab.id, tab.url, nextBounds)
+      if (!opened) throw new Error('网页浏览仅在 Tauri 桌面应用中可用。')
+      if (visibleRef.current && activeTabIdRef.current === tab.id) await showNativeTab(tab.id)
+      setTabs(current => current.map(item => item.id === tab.id ? { ...item, suspended: false, error: undefined } : item))
+      await enforceLiveTabLimit(tab.id)
+    } catch (error) {
+      setTabs(current => current.map(item => item.id === tab.id ? { ...item, loading: false, error: { kind: 'load-failed', message: String(error) } } : item))
     }
   }
 
@@ -442,6 +474,7 @@ export function BrowserPage({ visible = true }: { visible?: boolean }) {
       return next
     })
     activeTabIdRef.current = tab.id
+    lastActiveAtRef.current.set(tab.id, Date.now())
     setActiveTabId(tab.id)
     setAddress(url ?? '')
     setReaderArticle(null)
@@ -456,6 +489,7 @@ export function BrowserPage({ visible = true }: { visible?: boolean }) {
             return
           }
           setTabs(current => current.map(item => item.id === tab.id ? { ...item, error: undefined } : item))
+          await enforceLiveTabLimit(tab.id)
         } catch (error) {
           setTabs(current => current.map(item => item.id === tab.id ? { ...item, loading: false, error: { kind: 'load-failed', message: String(error) } } : item))
         }
@@ -468,8 +502,10 @@ export function BrowserPage({ visible = true }: { visible?: boolean }) {
     setTabs(current => current.map(tab => ({ ...tab, active: tab.id === id })))
     setActiveTabId(id)
     activeTabIdRef.current = id
+    lastActiveAtRef.current.set(id, Date.now())
     setAddress(selected?.url ?? '')
     setReaderArticle(null)
+    if (selected?.suspended || (selected?.url && !hasNativeTab(id))) void resumeTab(selected)
   }
 
   function duplicateTab(tab: BrowserTab) {
@@ -548,6 +584,7 @@ export function BrowserPage({ visible = true }: { visible?: boolean }) {
 
   function closeTab(id: string) {
     void closeNativeTab(id)
+    lastActiveAtRef.current.delete(id)
     const closing = tabs.find(tab => tab.id === id)
     if (closing && closing.url) {
       const entry: ClosedTab = { id: closing.id, url: closing.url, title: closing.title, favicon: closing.favicon, closedAt: Date.now() }
@@ -606,6 +643,7 @@ export function BrowserPage({ visible = true }: { visible?: boolean }) {
         await ensureNativeTab(tab.id, restored.url, nextBounds)
         if (activeTabIdRef.current === tab.id) await showNativeTab(tab.id)
         setTabs(current => current.map(item => item.id === tab.id ? { ...item, error: undefined } : item))
+        await enforceLiveTabLimit(tab.id)
       } catch (error) {
         setTabs(current => current.map(item => item.id === tab.id ? { ...item, loading: false, error: { kind: 'load-failed', message: String(error) } } : item))
       }
@@ -683,7 +721,7 @@ export function BrowserPage({ visible = true }: { visible?: boolean }) {
               >{tab.loading ? <LoadingOutlined spin/> : tab.favicon ? <img src={tab.favicon} alt=""/> : <GlobalOutlined/>}<span>{tab.title}</span></span>
               </Tooltip>
             </Dropdown>,
-            className: tab.pinned ? 'browser-tab--pinned' : undefined,
+            className: `${tab.pinned ? 'browser-tab--pinned ' : ''}${tab.suspended ? 'browser-tab--suspended' : ''}`.trim() || undefined,
             closable: tabs.length > 1 && !tab.pinned,
           }
         })} activeKey={activeTabId} onChange={activateTab} addIcon={<Tooltip title="新建标签页 (Ctrl+T)"><PlusOutlined aria-label="新建标签页"/></Tooltip>} onEdit={(target, action) => action === 'add' ? openNewTab() : closeTab(String(target))}/></div>
