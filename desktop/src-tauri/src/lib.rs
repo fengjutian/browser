@@ -1,4 +1,5 @@
 pub mod browser;
+pub mod downloads;
 pub mod local_store;
 pub mod plugins;
 pub mod providers;
@@ -34,17 +35,57 @@ struct NewTabRequest {
     url: String,
 }
 
+/// v2 download progress payload. The legacy v1 fields (`tabLabel`, `url`,
+/// `path`, `status`) are preserved so existing consumers keep working; new
+/// fields (`id`, `receivedBytes`, `totalBytes`, `progressKnown`,
+/// `dangerType`, `kind`, `errorMessage`, `private`, `sourceOrigin`) extend
+/// the contract.
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct DownloadUpdate {
+struct DownloadProgress {
     version: u32,
+    kind: String, // started | progress | finished | failed | cancelled | blocked
+    id: String,
     tab_label: String,
     url: String,
-    path: Option<String>,
+    file_name: String,
+    target_path: Option<String>,
+    mime_type: Option<String>,
+    received_bytes: i64,
+    total_bytes: Option<i64>,
+    progress_known: bool,
     status: String,
+    danger_type: String,
+    error_message: Option<String>,
+    private: bool,
+    source_origin: Option<String>,
 }
 
-const EVENT_PAYLOAD_VERSION: u32 = 1;
+const EVENT_PAYLOAD_VERSION: u32 = 2;
+const DOWNLOAD_EVENT_KIND_STARTED: &str = "started";
+const DOWNLOAD_EVENT_KIND_FINISHED: &str = "finished";
+const DOWNLOAD_EVENT_KIND_FAILED: &str = "failed";
+const DOWNLOAD_EVENT_KIND_CANCELLED: &str = "cancelled";
+const DOWNLOAD_EVENT_KIND_PROGRESS: &str = "progress";
+
+#[derive(Default)]
+struct DownloadIndex {
+    by_url: Mutex<HashMap<String, String>>,
+}
+
+impl DownloadIndex {
+    fn remember(&self, url: &str, id: &str) {
+        if let Ok(mut guard) = self.by_url.lock() {
+            guard.insert(url.to_string(), id.to_string());
+        }
+    }
+    fn forget(&self, url: &str) -> Option<String> {
+        self.by_url.lock().ok().and_then(|mut guard| guard.remove(url))
+    }
+    fn get(&self, url: &str) -> Option<String> {
+        self.by_url.lock().ok().and_then(|guard| guard.get(url).cloned())
+    }
+}
 
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -279,24 +320,30 @@ async fn browser_create(
             tauri::webview::NewWindowResponse::Deny
         })
         .on_download(move |_webview, event| {
-            let update = match event {
-                DownloadEvent::Requested { url, destination } => DownloadUpdate {
-                    version: EVENT_PAYLOAD_VERSION,
-                    tab_label: download_label.clone(),
-                    url: url.to_string(),
-                    path: Some(destination.to_string_lossy().into_owned()),
-                    status: "downloading".into(),
-                },
-                DownloadEvent::Finished { url, path, success } => DownloadUpdate {
-                    version: EVENT_PAYLOAD_VERSION,
-                    tab_label: download_label.clone(),
-                    url: url.to_string(),
-                    path: path.map(|value| value.to_string_lossy().into_owned()),
-                    status: if success { "completed" } else { "failed" }.into(),
-                },
-                _ => return true,
-            };
-            let _ = download_app.emit_to("main", "browser://download", update);
+            let label = download_label.clone();
+            let app = download_app.clone();
+            match event {
+                DownloadEvent::Requested { url, destination } => {
+                    let url_str = url.to_string();
+                    let dest_str = destination.to_string_lossy().into_owned();
+                    let file_name = destination
+                        .file_name()
+                        .and_then(|n| n.to_str())
+                        .map(|s| s.to_owned())
+                        .unwrap_or_else(|| url_str.clone());
+                    tauri::async_runtime::spawn(async move {
+                        handle_download_started(app, label, url_str, dest_str, file_name).await;
+                    });
+                }
+                DownloadEvent::Finished { url, path, success } => {
+                    let url_str = url.to_string();
+                    let path_str = path.map(|value| value.to_string_lossy().into_owned());
+                    tauri::async_runtime::spawn(async move {
+                        handle_download_finished(app, label, url_str, path_str, success).await;
+                    });
+                }
+                _ => {}
+            }
             true
         });
     let window = app

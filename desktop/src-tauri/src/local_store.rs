@@ -94,6 +94,29 @@ const MIGRATIONS: &[(i64, &str)] = &[
         7,
         "ALTER TABLE local_documents ADD COLUMN auto_tags TEXT NOT NULL DEFAULT '[]';",
     ),
+    (
+        8,
+        "CREATE TABLE downloads (
+            id TEXT PRIMARY KEY,
+            url TEXT NOT NULL,
+            file_name TEXT NOT NULL,
+            target_path TEXT,
+            mime_type TEXT,
+            received_bytes INTEGER NOT NULL DEFAULT 0,
+            total_bytes INTEGER,
+            status TEXT NOT NULL,
+            danger_type TEXT NOT NULL DEFAULT 'none',
+            error_message TEXT,
+            source_origin TEXT,
+            source_tab_label TEXT,
+            private INTEGER NOT NULL DEFAULT 0,
+            started_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            finished_at TEXT
+        );
+        CREATE INDEX idx_downloads_status_updated ON downloads(status, updated_at DESC);
+        CREATE INDEX idx_downloads_private ON downloads(private);",
+    ),
 ];
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -174,7 +197,7 @@ pub fn connection(app: &tauri::AppHandle) -> Result<Connection, String> {
     Ok(database)
 }
 
-fn run_migrations(database: &mut Connection) -> Result<(), String> {
+pub(crate) fn run_migrations(database: &mut Connection) -> Result<(), String> {
     database
         .execute_batch(
             "CREATE TABLE IF NOT EXISTS schema_version (
