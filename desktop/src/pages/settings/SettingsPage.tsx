@@ -6,6 +6,8 @@ import { deleteAIProvider, exportBackup, getAIProvider, getBrowserShortcutsEnabl
 import type { AIProvider, AIProviderType } from '../../types'
 import { normalizeOrigin, readSitePermissions, writeSitePermissions, type SitePermissionKind, type SitePermissionRule } from '../../features/browser/sitePermissions'
 import { readThemePreference, writeThemePreference, type ThemePreference } from '../../features/settings/theme'
+import { readSearchEngineConfig, resolveActiveSearchTemplate, SEARCH_ENGINE_PRESETS, writeSearchEngineConfig } from '../../features/browser/searchEngine'
+import { isSearchTemplateValid } from '../../features/browser/navigation'
 
 const PROVIDER_OPTIONS: { label: string; value: AIProviderType }[] = [
   { label: 'OpenAI 兼容（API Key）', value: 'openai-compatible' },
@@ -47,6 +49,10 @@ const SHORTCUTS_EVENT = 'arcadia-shortcuts-change'
 
 function BrowserSettings() {
   const [enabled, setEnabled] = useState<boolean>(() => getBrowserShortcutsEnabled())
+  const [messageApi, contextHolder] = message.useMessage()
+  const [config, setConfig] = useState(() => readSearchEngineConfig())
+  const [customTemplate, setCustomTemplate] = useState('')
+  const presets = SEARCH_ENGINE_PRESETS
 
   useEffect(() => {
     function onChange(event: Event) {
@@ -62,14 +68,64 @@ function BrowserSettings() {
     setBrowserShortcutsEnabled(next)
   }
 
-  return <Card title="浏览器" className="settings-card">
+  function pickPreset(presetId: string) {
+    if (presetId === 'custom') {
+      setConfig({ presetId: 'custom', customTemplate: config.customTemplate ?? '' })
+      return
+    }
+    try {
+      const next = writeSearchEngineConfig({ presetId })
+      setConfig(next)
+      messageApi.success(`搜索引擎已切换为 ${presets.find(p => p.id === presetId)?.label ?? presetId}`)
+    } catch (error) {
+      messageApi.error(String(error))
+    }
+  }
+
+  function saveCustom() {
+    try {
+      const next = writeSearchEngineConfig({ presetId: 'custom', customTemplate })
+      setConfig(next)
+      messageApi.success('自定义搜索引擎已保存')
+    } catch (error) {
+      messageApi.error(String(error))
+    }
+  }
+
+  return <>{contextHolder}<Card title="浏览器" className="settings-card">
     <Typography.Title level={5}>键盘快捷键</Typography.Title>
     <Typography.Paragraph type="secondary">关闭后,浏览器视图不再拦截 Ctrl/Cmd + T、W、Tab、1-9、Alt + ←/→ 等全局快捷键,改由各 WebView 自行处理。</Typography.Paragraph>
     <Space>
       <Switch checked={enabled} onChange={toggle} />
       <Typography.Text>{enabled ? '已启用' : '已禁用'}</Typography.Text>
     </Space>
-  </Card>
+    <Typography.Title level={5} style={{ marginTop: 24 }}>默认搜索引擎</Typography.Title>
+    <Typography.Paragraph type="secondary">地址栏中非 URL 输入会展开为搜索引擎查询；模板必须包含 <code>{'{query}'}</code> 占位符。</Typography.Paragraph>
+    <Segmented
+      block
+      value={config.presetId}
+      onChange={value => pickPreset(value)}
+      options={[
+        ...presets.map(p => ({ label: p.label, value: p.id })),
+        { label: '自定义', value: 'custom' },
+      ]}
+    />
+    {config.presetId === 'custom' && (
+      <Space.Compact block style={{ marginTop: 12 }}>
+        <Input
+          value={customTemplate || config.customTemplate || ''}
+          placeholder="https://example.com/search?q={query}"
+          onChange={event => setCustomTemplate(event.target.value)}
+        />
+        <Button type="primary" onClick={saveCustom} disabled={!isSearchTemplateValid(customTemplate || config.customTemplate || '')}>
+          保存
+        </Button>
+      </Space.Compact>
+    )}
+    <Typography.Paragraph type="secondary" style={{ marginTop: 8 }}>
+      当前模板：<Typography.Text code>{resolveActiveSearchTemplate(config)}</Typography.Text>
+    </Typography.Paragraph>
+  </Card></>
 }
 
 function AIProviderSettings() {

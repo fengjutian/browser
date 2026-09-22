@@ -24,6 +24,9 @@ import type { ContextMenuAction } from '../../features/browser/contextMenu'
 import { startDownload } from '../../services/downloads'
 import { usePermissionPrompt } from '../../features/browser/usePermissionPrompt'
 import { PermissionPromptBar } from '../../features/browser/PermissionPromptBar'
+import { buildSuggestions, trimSuggestions, type SuggestionItem } from '../../features/browser/suggestionProvider'
+import { readSearchEngineConfig, resolveActiveSearchTemplate } from '../../features/browser/searchEngine'
+import { evaluateUrlSafety, highestLevel, type SafetyIssue, type SafetyLevel } from '../../features/browser/urlSafety'
 
 const SESSION_KEY = 'browser.tabs'
 const SESSION_DEBOUNCE_MS = 500
@@ -97,6 +100,24 @@ function classifyNavigationError(error: unknown): BrowserTabError {
   return { kind: 'load-failed', message }
 }
 
+const SOURCE_LABELS: Record<SuggestionItem['source'], string> = {
+  'open-tab': '已打开',
+  history: '历史',
+  bookmark: '书签',
+  search: '搜索',
+}
+
+function renderSuggestion(item: SuggestionItem) {
+  const sourceLabel = SOURCE_LABELS[item.source]
+  return (
+    <div className="address-suggestion">
+      <b>{item.title || item.url}</b>
+      <small>{item.url}</small>
+      <span className={`address-suggestion__source address-suggestion__source--${item.source}`}>{sourceLabel}</span>
+    </div>
+  )
+}
+
 export function BrowserPage({ visible = true }: { visible?: boolean }) {
   const [tabs, setTabs] = useState<BrowserTab[]>([newTab('new')])
   const [activeTabId, setActiveTabId] = useState('new')
@@ -133,11 +154,24 @@ export function BrowserPage({ visible = true }: { visible?: boolean }) {
   const shortcutsEnabledRef = useRef(getBrowserShortcutsEnabled())
   const active = tabs.find(tab => tab.id === activeTabId) ?? tabs[0]
   const nativeMode = hasNativeTab(active.id)
-  const addressSuggestions = useMemo(() => buildAddressSuggestions(
-    address,
-    history,
-    item => (<div className="address-suggestion"><b>{item.title || item.url}</b><small>{item.url}</small></div>),
-  ), [address, history])
+  const searchTemplate = useMemo(() => resolveActiveSearchTemplate(readSearchEngineConfig()), [])
+  const addressSuggestions = useMemo(() => {
+    const built = buildSuggestions({
+      query: address,
+      openTabs: tabs.map(tab => ({ url: tab.url, title: tab.title })),
+      history,
+      bookmarks: [],
+      searchTemplate,
+    })
+    const trimmed = trimSuggestions(built, 8)
+    return trimmed.map(item => ({
+      value: item.url,
+      label: renderSuggestion(item),
+    }))
+  }, [address, history, tabs, searchTemplate])
+  const safetyIssues = useMemo<SafetyIssue[]>(() => evaluateUrlSafety(address), [address])
+  const safetyLevel: SafetyLevel = highestLevel(safetyIssues)
+  const showSafety = safetyLevel !== 'safe' && address.trim().length > 0
 
   useEffect(() => {
     let cancelled = false
@@ -361,7 +395,7 @@ export function BrowserPage({ visible = true }: { visible?: boolean }) {
   }
 
   async function navigate(input: string) {
-    const url = resolveNavigationInput(input)
+    const url = resolveNavigationInput(input, { searchTemplate })
     if (!url) return
     const tabId = active.id
     setReaderArticle(null)
@@ -796,6 +830,15 @@ export function BrowserPage({ visible = true }: { visible?: boolean }) {
     <div className="browser-toolbar"><Space><Button type="text" aria-label="后退" title="后退 (Alt+←)" icon={<ArrowLeftOutlined/>} disabled={!nativeMode || !active.canGoBack} onClick={() => void navigateHistory(active.id,-1)}/><Button type="text" aria-label="前进" title="前进 (Alt+→)" icon={<ArrowRightOutlined/>} disabled={!nativeMode || !active.canGoForward} onClick={() => void navigateHistory(active.id,1)}/><Button type="text" aria-label={active.loading?'停止加载':'重新加载'} title={active.loading?'停止加载 (Esc)':'重新加载 (F5)'} icon={active.loading?<CloseOutlined/>:<ReloadOutlined/>} disabled={!nativeMode} onClick={() => void (active.loading ? stopNativeTab(active.id) : reloadNativeTab(active.id))}/><Button type="text" icon={<BookOutlined/>} onClick={() => void openReader()}>阅读模式</Button></Space><form onSubmit={event => { event.preventDefault(); void navigate(address) }}><AutoComplete value={address} options={addressSuggestions} onChange={setAddress} onSelect={value=>void navigate(value)}><Input ref={addressRef} prefix={<SafetyCertificateOutlined/>} suffix={<button type="button" className={`browser-star${starredDocId ? ' is-active' : ''}`} disabled={!active.url} aria-label={starredDocId ? '取消收藏' : '收藏当前页'} title={starredDocId ? '取消收藏' : '收藏当前页'} onClick={event => { event.preventDefault(); event.stopPropagation(); void toggleStarCurrent() }}><StarOutlined/></button>} onFocus={event=>event.currentTarget.select()} placeholder="搜索或输入网址"/></AutoComplete></form><Tag icon={<SafetyCertificateOutlined/>} color="green">43</Tag><Button type={aiOpen?'primary':'text'} ghost={aiOpen} icon={<RobotOutlined/>} onClick={()=>setAiOpen(value=>!value)}/><Popover trigger="click" placement="bottomRight" content={downloadPanel}><Badge size="small" count={downloads.filter(item=>item.status==='downloading').length}><Button type="text" aria-label="下载" icon={<DownloadOutlined/>}/></Badge></Popover><Dropdown menu={{items:browserMenu}} trigger={['click']}><Button type="text" aria-label="浏览器菜单" icon={<MoreOutlined/>}/></Dropdown></div>
     {findOpen&&<div className="browser-find"><Input autoFocus allowClear prefix={<SearchOutlined/>} value={findQuery} status={findStatus==='missing'?'error':undefined} placeholder="在页面中查找" onChange={event=>{setFindQuery(event.target.value);setFindStatus('idle')}} onPressEnter={event=>void runFind(event.shiftKey)}/><Typography.Text type={findStatus==='missing'?'danger':'secondary'}>{findStatus==='missing'?'未找到':findStatus==='found'?'已定位':''}</Typography.Text><Button type="text" aria-label="上一个匹配项" icon={<ArrowUpOutlined/>} onClick={()=>void runFind(true)}/><Button type="text" aria-label="下一个匹配项" icon={<ArrowDownOutlined/>} onClick={()=>void runFind(false)}/><Button type="text" aria-label="关闭查找" icon={<CloseOutlined/>} onClick={closeFind}/></div>}
     <PermissionPromptBar prompt={permissionPrompt} />
+    {showSafety && (
+      <div className={`browser-safety-warn browser-safety-warn--${safetyLevel}`} role="status">
+        <SafetyCertificateOutlined />
+        <span>
+          {safetyLevel === 'dangerous' ? '危险：' : '注意：'}
+          {safetyIssues.map(issue => issue.message).join(' / ')}
+        </span>
+      </div>
+    )}
     <div className="browser-content"><div className="web-surface" ref={surfaceRef}>{readerArticle
       ? <ReaderArticleView article={readerArticle}/>
       : active.error
