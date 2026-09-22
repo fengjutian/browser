@@ -1,7 +1,7 @@
 {
   "name": "ai-knowledge-browser-desktop",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.2.0",
   "packageManager": "npm@11.6.0",
   "type": "module",
   "scripts": {
