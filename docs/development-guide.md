@@ -363,8 +363,8 @@ Processor 使用有界 channel 和 `sync.Map` 去重：
 
 - 相同文档已排队时，重复 `Enqueue` 返回成功但不重复入队。
 - 队列满时返回 false，HTTP 创建接口返回 `503 queue_full`。
-- 队列只存在于进程内，没有持久化、重试、崩溃恢复或多 Worker。
-- 更新失败只写日志，没有结构化错误上报。
+- 队列同时落到 `processor_queue` 表（`SQLiteQueuePersistence`），进程重启时通过 `Processor.RestorePending(ctx)` 重新灌入 channel。
+- 仍然是单进程单 Worker，没有重试调度与多 Worker 协调；没有结构化错误上报。
 
 ## 9. HTTP API
 
@@ -532,7 +532,7 @@ go test ./...
 
 当前测试现状：
 
-- Go：覆盖 health、创建校验、文档生命周期、SQLite 持久化/搜索/删除、Processor READY/FAILED。
+- Go：覆盖 health、创建校验、文档生命周期、SQLite 持久化/搜索/删除、Processor READY/FAILED、`SQLiteQueuePersistence` Insert/Complete/重启恢复。
 - Rust：覆盖域名补全、搜索词转换和高权限协议拒绝。
 - 前端：Vitest + happy-dom 已配置；共 80 个用例（`extractArticle` 6、`api.ts` 26、`useDebouncedValue` 5、`saveClassifier` 4、`dedupeHistory` / `parseHistory` 9、`reorderTabs` 7、`shortcuts` 16、`trackDownload` / `parseDownloads` 7），`npm run test` 通过。
 - TypeScript 检查和 Vite 生产构建当前通过。
@@ -575,7 +575,7 @@ go test ./...
 1. ✅ 桌面保存失败时的占位 Markdown 可能造成伪正文（已在 `BrowserPage.save()` 改为 Reader 失败/空正文时直接报错并取消保存）。
 2. ✅ 桌面数据库没有正式迁移版本（已引入 `schema_version` 表 + `MIGRATIONS` 常量 + `run_migrations` 启动钩子，附 `local_migration_status` command；老库自动打 v1 基线）。
 3. ✅ 前端没有自动化测试（Vitest + happy-dom 已配置；`extractArticle` 6 用例 + `api.ts` 14 用例 + `useDebouncedValue` 5 用例，合计 25 个）。
-4. Go Processor 队列不持久化，崩溃会丢失未处理任务。
+4. ✅ Go Processor 队列不持久化（已修）：`processor_queue (document_id, enqueued_at, updated_at)` 表承载 pending 集合，`SQLiteQueuePersistence` 在 `Enqueue` 时 upsert、`process` 完成时 `DELETE`；启动时 `Processor.RestorePending(ctx)` 从表里 drain 重新入内存 channel。旧 `NewProcessor(...)` 仍可用（默认走 `NoopPersistence`）。
 
 ### P1：阻碍架构演进
 
