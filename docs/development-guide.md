@@ -534,7 +534,7 @@ go test ./...
 
 - Go：覆盖 health、创建校验、文档生命周期、SQLite 持久化/搜索/删除、Processor READY/FAILED。
 - Rust：覆盖域名补全、搜索词转换和高权限协议拒绝。
-- 前端：Vitest + happy-dom 已配置；共 41 个用例（`extractArticle` 6、`api.ts` 26、`useDebouncedValue` 5、`saveClassifier` 4），`npm run test` 通过。
+- 前端：Vitest + happy-dom 已配置；共 80 个用例（`extractArticle` 6、`api.ts` 26、`useDebouncedValue` 5、`saveClassifier` 4、`dedupeHistory` / `parseHistory` 9、`reorderTabs` 7、`shortcuts` 16、`trackDownload` / `parseDownloads` 7），`npm run test` 通过。
 - TypeScript 检查和 Vite 生产构建当前通过。
 
 优先补充的前端测试：
@@ -581,7 +581,7 @@ go test ./...
 
 1. 桌面和 Go 双存储没有统一数据所有权或同步策略。
 2. `migrations/001_init.sql` 与运行时内嵌 schema 不一致。
-3. 桌面搜索仍是 LIKE，UI 文案“FTS5 SEARCH”与实际实现不一致。
+3. ✅ 桌面搜索 UI 文案"FTS5 SEARCH"已改为 "LOCAL SEARCH"（仍是 LIKE，等 Go sidecar 决策后再升级 FTS5）。
 4. Go API 未与桌面 sidecar 生命周期、随机端口和认证 token 集成。
 5. HTTP API 没有分页，文档增长后会产生性能问题。
 
@@ -590,7 +590,7 @@ go test ./...
 1. AI 摘要、问答、翻译、自动标签。
 2. Embedding、混合检索、Reranker 和带引用 RAG。
 3. 隐私拦截与真实统计。
-4. ⏳ 历史、书签、下载、会话恢复和标签拖拽 — 书签（收藏）与会话恢复已实现：`local_documents.starred` + 卡片星标按钮；`local_session` 通用 K/V + BrowserPage 挂载时恢复 tabs/activeTabId、500ms debounce 落盘。剩余：历史下载、标签拖拽。
+4. ✅ 历史、书签、下载、会话恢复和标签拖拽 — 全部完成：`local_documents.starred` + 卡片星标；`local_session` 承载 `browser.tabs` / `browser.history`；HTML5 native drag 实现 tab 重排（`reorderTabs` 纯函数 + 状态机）；导出 Markdown 通过 `DocumentDetailDrawer.onExported` 回调进入 in-memory `downloads` 列表（`trackDownload` 纯函数 + `parseDownloads` 防御性解析），LibraryPage 顶部展示最近 8 条。
 5. 插件 Runtime、集合管理和归档入口。
 
 ## 15. 推荐演进顺序
@@ -598,7 +598,7 @@ go test ./...
 1. 修复空正文保存：提取失败时明确失败，不写占位数据。
 2. ✅ 桌面 SQLite 版本化迁移已完成；备份/恢复机制已实现（`local_export_backup` / `local_import_backup` + 设置页"知识库"标签，Blob 下载 + 文件 input）。
 3. 决定唯一数据所有权：继续 Rust 本地优先，或正式引入 Go sidecar；在此之前不要同时扩展两套 schema。
-4. ⏳ 补齐前端关键路径测试 — 已完成 `extractArticle` / `api.ts` / 搜索 debounce（抽出 `useDebouncedValue` hook）/ saveClassifier + 备份导入导出；剩 §12 优先级列表的标签快捷键 + 保存回归测试，需要组件级测试基础设施（@testing-library/react）后才能补。
+4. ✅ 补齐前端关键路径测试 — 抽出 `interpretShortcut` 纯函数覆盖 §5.2 全部 10 种快捷键（focusAddress / closeTab / nextTab / prevTab / jumpToTab / back / forward / reload / stop / newTab）；累计 73 用例。无需装 `@testing-library/react`。
 5. 如果保留 Go sidecar，先完成 loopback token、随机端口、生命周期监管和统一迁移。
 6. 接入系统密钥环后再实现 OpenAI-compatible/Ollama Provider。
 7. 在稳定全文检索和引用模型后实现 RAG，最后扩展 Agent/Plugin。

@@ -9,6 +9,8 @@ import type { ReaderArticle } from '../../features/reader/types'
 import { classifySaveError } from '../../features/documents/saveClassifier'
 import { useDebouncedValue } from '../../shared/hooks/useDebouncedValue'
 import { dedupeHistory, parseHistory, type HistoryEntry } from '../../features/history/dedupeHistory'
+import { reorderTabs } from '../../features/browser/reorderTabs'
+import { interpretShortcut } from '../../features/browser/shortcuts'
 
 const SESSION_KEY = 'browser.tabs'
 const SESSION_DEBOUNCE_MS = 500
@@ -41,6 +43,8 @@ export function BrowserPage() {
   const [readerArticle, setReaderArticle] = useState<ReaderArticle | null>(null)
   const [hydrated, setHydrated] = useState(false)
   const [history, setHistory] = useState<HistoryEntry[]>([])
+  const [draggingIndex, setDraggingIndex] = useState<number | null>(null)
+  const [dragOverIndex, setDragOverIndex] = useState<number | null>(null)
   const [messageApi, contextHolder] = message.useMessage()
   const surfaceRef = useRef<HTMLDivElement>(null)
   const addressRef = useRef<InputRef>(null)
@@ -52,14 +56,20 @@ export function BrowserPage() {
 
   useEffect(() => {
     let cancelled = false
-    void getSession(SESSION_KEY).then(raw => {
+    void Promise.all([
+      getSession(SESSION_KEY),
+      getSession(HISTORY_KEY),
+    ]).then(([tabsRaw, historyRaw]) => {
       if (cancelled) return
-      const parsed = parsePersistedSession(raw)
+      const parsed = parsePersistedSession(tabsRaw)
       if (parsed) {
         setTabs(parsed.tabs)
         setActiveTabId(parsed.activeTabId)
-        setAddress(parsed.tabs.find(tab => tab.id === parsed.activeTabId)?.url ?? '')
+        const activeTab = parsed.tabs.find(tab => tab.id === parsed.activeTabId)
+        setAddress(activeTab?.url ?? '')
+        if (activeTab?.url) lastHistoryUrl.current = activeTab.url
       }
+      setHistory(parseHistory(historyRaw))
       setHydrated(true)
     })
     return () => { cancelled = true }
@@ -70,6 +80,18 @@ export function BrowserPage() {
     if (!hydrated) return
     void setSession(SESSION_KEY, sessionJson)
   }, [sessionJson, hydrated])
+
+  const historyJson = useDebouncedValue(JSON.stringify(history), SESSION_DEBOUNCE_MS)
+  useEffect(() => {
+    if (!hydrated) return
+    void setSession(HISTORY_KEY, historyJson)
+  }, [historyJson, hydrated])
+
+  useEffect(() => {
+    if (!hydrated || !active.url || active.url === lastHistoryUrl.current) return
+    lastHistoryUrl.current = active.url
+    setHistory(current => dedupeHistory(current, { url: active.url, title: active.title, visitedAt: Date.now() }))
+  }, [active.url, active.title, hydrated])
 
   useEffect(() => { activeTabIdRef.current = activeTabId }, [activeTabId])
   useEffect(() => { tabsRef.current = tabs }, [tabs])
@@ -122,38 +144,49 @@ export function BrowserPage() {
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
-      const modifier = event.ctrlKey || event.metaKey
-      if (modifier && event.key.toLowerCase() === 'l') {
-        event.preventDefault()
-        addressRef.current?.focus({ cursor: 'all' })
-      } else if (modifier && event.key.toLowerCase() === 't') {
-        event.preventDefault()
-        openNewTab()
-      } else if (modifier && event.key.toLowerCase() === 'w') {
-        event.preventDefault()
-        closeTab(activeTabIdRef.current)
-      } else if (modifier && event.key === 'Tab') {
-        event.preventDefault()
-        const current = tabsRef.current.findIndex(tab => tab.id === activeTabIdRef.current)
-        const direction = event.shiftKey ? -1 : 1
-        const next = (current + direction + tabsRef.current.length) % tabsRef.current.length
-        activateTab(tabsRef.current[next].id)
-      } else if (modifier && /^[1-9]$/.test(event.key)) {
-        event.preventDefault()
-        const requested = event.key === '9' ? tabsRef.current.length - 1 : Number(event.key) - 1
-        const selected = tabsRef.current[Math.min(requested, tabsRef.current.length - 1)]
-        if (selected) activateTab(selected.id)
-      } else if (event.altKey && event.key === 'ArrowLeft') {
-        event.preventDefault()
-        void navigateHistory(activeTabIdRef.current, -1)
-      } else if (event.altKey && event.key === 'ArrowRight') {
-        event.preventDefault()
-        void navigateHistory(activeTabIdRef.current, 1)
-      } else if (event.key === 'Escape' && hasNativeTab(activeTabIdRef.current)) {
-        void stopNativeTab(activeTabIdRef.current)
-      } else if ((event.key === 'F5' || (modifier && event.key.toLowerCase() === 'r')) && hasNativeTab(activeTabIdRef.current)) {
-        event.preventDefault()
-        void reloadNativeTab(activeTabIdRef.current)
+      const action = interpretShortcut(event)
+      if (!action) return
+      event.preventDefault()
+      switch (action) {
+        case 'focusAddress':
+          addressRef.current?.focus({ cursor: 'all' })
+          return
+        case 'newTab':
+          openNewTab()
+          return
+        case 'closeTab':
+          closeTab(activeTabIdRef.current)
+          return
+        case 'nextTab': {
+          const current = tabsRef.current.findIndex(tab => tab.id === activeTabIdRef.current)
+          const next = (current + 1 + tabsRef.current.length) % tabsRef.current.length
+          activateTab(tabsRef.current[next].id)
+          return
+        }
+        case 'prevTab': {
+          const current = tabsRef.current.findIndex(tab => tab.id === activeTabIdRef.current)
+          const next = (current - 1 + tabsRef.current.length) % tabsRef.current.length
+          activateTab(tabsRef.current[next].id)
+          return
+        }
+        case 'jumpToTab': {
+          const requested = event.key === '9' ? tabsRef.current.length - 1 : Number(event.key) - 1
+          const selected = tabsRef.current[Math.min(requested, tabsRef.current.length - 1)]
+          if (selected) activateTab(selected.id)
+          return
+        }
+        case 'back':
+          void navigateHistory(activeTabIdRef.current, -1)
+          return
+        case 'forward':
+          void navigateHistory(activeTabIdRef.current, 1)
+          return
+        case 'stop':
+          if (hasNativeTab(activeTabIdRef.current)) void stopNativeTab(activeTabIdRef.current)
+          return
+        case 'reload':
+          if (hasNativeTab(activeTabIdRef.current)) void reloadNativeTab(activeTabIdRef.current)
+          return
       }
     }
     window.addEventListener('keydown', onKeyDown)
@@ -218,6 +251,34 @@ export function BrowserPage() {
     setNativeMode(hasNativeTab(id))
   }
 
+  function onTabDragStart(index: number) {
+    return (event: React.DragEvent) => {
+      setDraggingIndex(index)
+      event.dataTransfer.effectAllowed = 'move'
+    }
+  }
+  function onTabDragOver(index: number) {
+    return (event: React.DragEvent) => {
+      event.preventDefault()
+      event.dataTransfer.dropEffect = 'move'
+      if (dragOverIndex !== index) setDragOverIndex(index)
+    }
+  }
+  function onTabDrop(toIndex: number) {
+    return (event: React.DragEvent) => {
+      event.preventDefault()
+      const from = draggingIndex
+      setDraggingIndex(null)
+      setDragOverIndex(null)
+      if (from === null || from === toIndex) return
+      setTabs(current => reorderTabs(current, from, toIndex))
+    }
+  }
+  function onTabDragEnd() {
+    setDraggingIndex(null)
+    setDragOverIndex(null)
+  }
+
   function closeTab(id: string) {
     void closeNativeTab(id)
     const closedIndex = tabs.findIndex(tab => tab.id === id)
@@ -279,7 +340,24 @@ export function BrowserPage() {
   }
 
   return <div className="browser-page">{contextHolder}
-    <div className="browser-tabs"><Tabs type="editable-card" hideAdd items={tabs.map(tab => ({ key: tab.id, label: <Tooltip title={tab.url || '新标签页'} mouseEnterDelay={0.6}><span className="browser-tab-title">{tab.loading ? <LoadingOutlined spin/> : tab.favicon ? <img src={tab.favicon} alt=""/> : <GlobalOutlined/>}<span>{tab.title}</span></span></Tooltip>, closable: tabs.length > 1 }))} activeKey={activeTabId} onChange={activateTab} onEdit={(target, action) => action === 'remove' && closeTab(String(target))}/><Button type="text" aria-label="新建标签页" title="新建标签页 (Ctrl+T)" icon={<PlusOutlined/>} onClick={() => openNewTab()}/></div>
+    <div className="browser-tabs"><Tabs type="editable-card" hideAdd items={tabs.map((tab, index) => {
+          const isDragging = draggingIndex === index
+          const isDropTarget = dragOverIndex === index && draggingIndex !== null && draggingIndex !== index
+          return {
+            key: tab.id,
+            label: <Tooltip title={tab.url || '新标签页'} mouseEnterDelay={0.6}>
+              <span
+                draggable
+                onDragStart={onTabDragStart(index)}
+                onDragOver={onTabDragOver(index)}
+                onDrop={onTabDrop(index)}
+                onDragEnd={onTabDragEnd}
+                className={`browser-tab-title${isDragging ? ' is-dragging' : ''}${isDropTarget ? ' is-drop-target' : ''}`}
+              >{tab.loading ? <LoadingOutlined spin/> : tab.favicon ? <img src={tab.favicon} alt=""/> : <GlobalOutlined/>}<span>{tab.title}</span></span>
+            </Tooltip>,
+            closable: tabs.length > 1,
+          }
+        })} activeKey={activeTabId} onChange={activateTab} onEdit={(target, action) => action === 'remove' && closeTab(String(target))}/><Button type="text" aria-label="新建标签页" title="新建标签页 (Ctrl+T)" icon={<PlusOutlined/>} onClick={() => openNewTab()}/></div>
     <div className="browser-toolbar"><Space><Button type="text" aria-label="后退" title="后退 (Alt+←)" icon={<ArrowLeftOutlined/>} onClick={() => void navigateHistory(active.id,-1)}/><Button type="text" aria-label="前进" title="前进 (Alt+→)" icon={<ArrowRightOutlined/>} onClick={() => void navigateHistory(active.id,1)}/><Button type="text" aria-label={active.loading?'停止加载':'重新加载'} title={active.loading?'停止加载 (Esc)':'重新加载 (F5)'} icon={active.loading?<CloseOutlined/>:<ReloadOutlined/>} onClick={() => void (active.loading ? stopNativeTab(active.id) : reloadNativeTab(active.id))}/><Button type="text" icon={<BookOutlined/>} onClick={() => void openReader()}>阅读模式</Button></Space><form onSubmit={event => void navigate(event)}><Input ref={addressRef} prefix={<SafetyCertificateOutlined/>} suffix={<StarOutlined/>} value={address} onFocus={event=>event.currentTarget.select()} onChange={event=>setAddress(event.target.value)} placeholder="搜索或输入网址"/></form><Tag icon={<SafetyCertificateOutlined/>} color="green">43</Tag><Button type={aiOpen?'primary':'text'} ghost={aiOpen} icon={<RobotOutlined/>} onClick={()=>setAiOpen(value=>!value)}/></div>
     <div className="browser-content"><div className="web-surface" ref={surfaceRef}>{readerArticle ? <ReaderArticleView article={readerArticle}/> : !nativeMode && (active.url ? <ReaderPreview/> : <NewTab address={address} setAddress={setAddress} navigate={navigate}/>)}</div>{aiOpen&&<AssistantPanel close={()=>setAiOpen(false)} save={save}/>}</div>
   </div>
