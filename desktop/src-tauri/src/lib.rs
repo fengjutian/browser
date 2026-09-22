@@ -879,7 +879,7 @@ mod tests {
     }
 
     #[test]
-    fn event_payload_version_is_v1() {
-        assert_eq!(EVENT_PAYLOAD_VERSION, 1);
+    fn event_payload_version_is_v2() {
+        assert_eq!(EVENT_PAYLOAD_VERSION, 2);
     }
 }
