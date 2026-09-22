@@ -11,6 +11,9 @@ const SettingsPage=lazy(()=>import('../pages/settings/SettingsPage').then(module
 
 export function AppRouter() {
   const [view, setView] = useState<View>('browser')
-  const pages = { browser: <BrowserPage />, library: <LibraryPage />, search: <SearchPage />, ai: <AssistantPage />, settings: <SettingsPage /> }
-  return <AppLayout view={view} onViewChange={setView}><Suspense fallback={<div className="route-loading"><Spin size="large"/></div>}>{pages[view]}</Suspense></AppLayout>
+  const pages = { library: <LibraryPage />, search: <SearchPage />, ai: <AssistantPage />, settings: <SettingsPage /> }
+  return <AppLayout view={view} onViewChange={setView}><Suspense fallback={<div className="route-loading"><Spin size="large"/></div>}>
+    <div className={`route-view${view === 'browser' ? '' : ' is-hidden'}`}><BrowserPage visible={view === 'browser'}/></div>
+    {view !== 'browser' && <div className="route-view">{pages[view]}</div>}
+  </Suspense></AppLayout>
 }

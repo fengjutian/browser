@@ -86,7 +86,7 @@ function classifyNavigationError(error: unknown): BrowserTabError {
   return { kind: 'load-failed', message }
 }
 
-export function BrowserPage() {
+export function BrowserPage({ visible = true }: { visible?: boolean }) {
   const [tabs, setTabs] = useState<BrowserTab[]>([newTab('new')])
   const [activeTabId, setActiveTabId] = useState('new')
   const [address, setAddress] = useState('')
@@ -109,6 +109,7 @@ export function BrowserPage() {
   const activeTabIdRef = useRef(activeTabId)
   const tabsRef = useRef(tabs)
   const closedTabsRef = useRef(closedTabs)
+  const visibleRef = useRef(visible)
   const lastHistoryUrl = useRef<string>('')
   const active = tabs.find(tab => tab.id === activeTabId) ?? tabs[0]
   const nativeMode = hasNativeTab(active.id)
@@ -145,7 +146,7 @@ export function BrowserPage() {
                 setTabs(current => current.map(item => item.id === tab.id ? { ...item, error: { kind: 'web-mode-required', message: '网页浏览仅在 Tauri 桌面应用中可用。' } } : item))
                 return
               }
-              if (tab.id === parsed.activeTabId) await showNativeTab(tab.id)
+              if (tab.id === parsed.activeTabId && visibleRef.current) await showNativeTab(tab.id)
               else await hideNativeTab(tab.id)
             } catch (error) {
               setTabs(current => current.map(item => item.id === tab.id ? { ...item, error: { kind: 'load-failed', message: String(error) } } : item))
@@ -184,6 +185,7 @@ export function BrowserPage() {
   useEffect(() => { activeTabIdRef.current = activeTabId }, [activeTabId])
   useEffect(() => { tabsRef.current = tabs }, [tabs])
   useEffect(() => { closedTabsRef.current = closedTabs }, [closedTabs])
+  useEffect(() => { visibleRef.current = visible }, [visible])
 
   useEffect(() => {
     const url = active.url
@@ -204,8 +206,15 @@ export function BrowserPage() {
   useEffect(() => {
     if (previousTab.current && previousTab.current !== active.id) void hideNativeTab(previousTab.current)
     previousTab.current = active.id
-    if (hasNativeTab(active.id)) void showNativeTab(active.id)
-  }, [active.id])
+    if (hasNativeTab(active.id)) {
+      if (visible) {
+        void showNativeTab(active.id)
+        requestAnimationFrame(() => { const next = bounds(); if (next) void resizeNativeTab(active.id, next) })
+      } else {
+        void hideNativeTab(active.id)
+      }
+    }
+  }, [active.id, visible])
 
   useEffect(() => {
     if (!nativeMode || !hasNativeTab(active.id)) return
@@ -224,11 +233,11 @@ export function BrowserPage() {
   }, [active.id, nativeMode])
 
   useEffect(() => {
-    if (!surfaceRef.current) return
+    if (!surfaceRef.current || !visible) return
     const observer = new ResizeObserver(() => { const next = bounds(); if (next) void resizeNativeTab(active.id, next) })
     observer.observe(surfaceRef.current)
     return () => observer.disconnect()
-  }, [active.id, aiOpen])
+  }, [active.id, aiOpen, findOpen, visible])
 
   useEffect(() => () => { tabsRef.current.forEach(tab => { void closeNativeTab(tab.id) }) }, [])
 
@@ -244,6 +253,7 @@ export function BrowserPage() {
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
+      if (!visibleRef.current) return
       const action = interpretShortcut(event)
       if (!action) return
       event.preventDefault()
