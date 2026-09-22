@@ -12,6 +12,7 @@ import { dedupeHistory, parseHistory, type HistoryEntry } from '../../features/h
 import { reorderTabs } from '../../features/browser/reorderTabs'
 import { interpretShortcut } from '../../features/browser/shortcuts'
 import { popClosedTab, recordClosedTab, type ClosedTab } from '../../features/browser/closedTabs'
+import { AssistantPanel } from '../../features/ai/AssistantPanel'
 
 const SESSION_KEY = 'browser.tabs'
 const SESSION_DEBOUNCE_MS = 500
@@ -537,7 +538,7 @@ export function BrowserPage() {
             ? <div className="web-surface__loading"><LoadingOutlined spin/></div>
             : active.url
               ? <BrowserErrorView tab={{...active, error:{kind:'web-mode-required',message:'当前网页需要在 Tauri 桌面应用中打开。'}}} onRetry={retryActive} onNewTab={openNewTab} onCopy={copyUrl}/>
-              : <NewTab address={address} setAddress={setAddress} navigate={navigate}/>}</div>{aiOpen&&<AssistantPanel close={()=>setAiOpen(false)} save={save}/>}</div>
+              : <NewTab address={address} setAddress={setAddress} navigate={navigate}/>}</div>{aiOpen&&<AssistantPanel close={()=>setAiOpen(false)} saveToLibrary={save} currentUrl={active.url} currentTabId={active.id} readerArticle={readerArticle}/>}</div>
   </div>
 }
 
@@ -570,4 +571,3 @@ function BrowserErrorView({tab, onRetry, onNewTab, onCopy}:{tab:BrowserTab;onRet
   </div>
 }
 function ReaderArticleView({article}:{article:ReaderArticle}){return <article className="reader-document"><Typography.Text className="eyebrow">READER MODE · {article.wordCount} WORDS</Typography.Text><Typography.Title>{article.title}</Typography.Title>{article.byline&&<Typography.Text type="secondary">{article.byline}</Typography.Text>}<div className="reader-document__body" dangerouslySetInnerHTML={{__html:article.contentHtml}}/></article>}
-function AssistantPanel({close,save}:{close:()=>void;save:()=>Promise<void>}){return <aside className="ai-panel"><div className="panel-title"><Space><span className="ai-mark"><RobotOutlined/></span><b>AI Assistant</b></Space><Button type="text" icon={<CloseOutlined/>} onClick={close}/></div><Segmented block options={['摘要','提问','翻译']}/><Card size="small" className="context-card"><GlobalOutlined/> 当前页面<Tag color="success">Ready</Tag></Card><Typography.Title level={4}>理解这个页面</Typography.Title><Typography.Paragraph type="secondary">打开文章后可生成有依据的摘要、问答或翻译。</Typography.Paragraph><Space direction="vertical" className="panel-actions"><Button icon={<ThunderboltOutlined/>}>生成 100 字摘要</Button><Button icon={<BookOutlined/>}>提取核心观点</Button><Button icon={<TranslationOutlined/>}>翻译为中文</Button></Space><Card className="ai-preview" size="small"><b><RobotOutlined/> AI 预览</b><p>可靠的知识系统将阅读、结构化保存和可引用检索连接起来。</p></Card><div className="panel-spacer"/><Button type="primary" block icon={<SaveOutlined/>} onClick={()=>void save()}>保存到知识库</Button><Input className="ask-input" placeholder="询问当前页面…" suffix={<ArrowRightOutlined/>}/></aside>}

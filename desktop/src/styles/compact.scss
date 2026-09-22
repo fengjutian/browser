@@ -164,3 +164,92 @@
 }
 
 .app-content { min-width: 0; }
+
+// Browser-style tab strip: tabs stay content-sized on the left while the
+// new-tab action anchors to the far edge of the window.
+.browser-tabs {
+  position: relative;
+  align-items: stretch !important;
+  gap: 0 !important;
+  height: 46px !important;
+  padding: 5px 0 0 10px !important;
+  border-bottom: 1px solid #d8ded9;
+  background: #e7ebe7 !important;
+
+  > .ant-tabs { width: 100%; }
+
+  .ant-tabs-nav {
+    width: 100%;
+    height: 40px;
+    margin: 0 !important;
+
+    &::before { border-bottom: 0 !important; }
+  }
+
+  .ant-tabs-nav-wrap { min-width: 0; }
+
+  .ant-tabs-nav-list {
+    align-items: end;
+    gap: 4px;
+  }
+
+  .ant-tabs-tab {
+    min-width: 156px !important;
+    max-width: 220px !important;
+    height: 38px;
+    margin: 0 !important;
+    padding: 0 10px 0 13px !important;
+    border: 1px solid transparent !important;
+    border-bottom: 0 !important;
+    border-radius: 9px 9px 0 0 !important;
+    background: transparent !important;
+    transition: background-color .15s, border-color .15s;
+
+    &:not(.ant-tabs-tab-active):hover { background: rgba(255, 255, 255, .48) !important; }
+
+    &.ant-tabs-tab-active {
+      z-index: 1;
+      border-color: #d8ded9 !important;
+      background: #fafbf9 !important;
+    }
+  }
+
+  .ant-tabs-tab-btn,
+  .browser-tab-title { width: 100%; }
+
+  .ant-tabs-tab-remove {
+    display: grid;
+    place-items: center;
+    width: 22px;
+    height: 22px;
+    margin-left: 5px;
+    border-radius: 50%;
+
+    &:hover { background: #e2e7e3; }
+  }
+
+  .ant-tabs-extra-content {
+    display: flex;
+    align-items: center;
+    align-self: stretch;
+    margin-left: auto;
+    padding: 0 8px 4px 10px;
+  }
+
+  .browser-tabs__new-tab {
+    width: 32px !important;
+    height: 32px !important;
+    border-radius: 7px !important;
+    font-size: 17px;
+
+    &:focus-visible {
+      outline: 2px solid #4c9167;
+      outline-offset: 1px;
+    }
+  }
+
+  .ant-tabs-nav-operations {
+    align-items: center;
+    padding-bottom: 4px;
+  }
+}
