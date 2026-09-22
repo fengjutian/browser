@@ -283,6 +283,25 @@ select {
   font-variant-numeric: tabular-nums;
 }
 
+.browser-downloads {
+  width: 340px;
+  max-height: 420px;
+  overflow: auto;
+
+  &__head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 2px 4px 8px;
+  }
+
+  .ant-list-item { padding-inline: 4px; }
+  .ant-list-item-meta-avatar { margin-inline-end: 10px; color: #748078; }
+  .ant-list-item-meta-title { max-width: 270px; margin-bottom: 0 !important; }
+  .is-success { color: #347851; }
+  .is-error { color: #b53a36; }
+}
+
 // Browser-style tab strip: the new-tab action follows the last tab; when the
 // row fills, tabs shrink and Ant's overflow control takes over.
 .browser-tabs {
