@@ -92,4 +92,29 @@ describe('crossAsk helpers', () => {
     expect(request.messages[0].role).toBe('system')
     expect(request.messages[1].role).toBe('user')
   })
+
+  it('keeps every document when total count is at or below topK', () => {
+    const docs = [
+      makeDoc({ id: 'a', title: 'A', markdown: 'A body' }),
+      makeDoc({ id: 'b', title: 'B', markdown: 'B body' }),
+    ]
+    const request = buildCrossAskPrompt(docs, 'anything', undefined, { topK: 8 })
+    expect(request.messages[1].content).toContain('[doc-1] A')
+    expect(request.messages[1].content).toContain('[doc-2] B')
+  })
+
+  it('picks top-K by BM25 and preserves original document index in citations', () => {
+    const docs = [
+      makeDoc({ id: 'noise-1', title: 'Noise One', markdown: 'lorem ipsum dolor' }),
+      makeDoc({ id: 'noise-2', title: 'Noise Two', markdown: 'foo bar baz qux' }),
+      makeDoc({ id: 'match', title: 'Database Article', markdown: '数据库 事务 索引 SQLite FTS5' }),
+      makeDoc({ id: 'noise-3', title: 'Noise Three', markdown: 'the quick brown fox' }),
+    ]
+    const request = buildCrossAskPrompt(docs, '数据库 事务', undefined, { topK: 1 })
+    const user = request.messages[1].content
+    expect(user).toContain('[doc-3] Database Article')
+    expect(user).not.toContain('Noise One')
+    expect(user).not.toContain('Noise Two')
+    expect(user).not.toContain('Noise Three')
+  })
 })

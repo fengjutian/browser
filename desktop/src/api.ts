@@ -204,6 +204,25 @@ export async function setSession(key: string, value: string): Promise<void> {
   await invoke('local_set_session', { key, value })
 }
 
+export const BROWSER_SHORTCUTS_ENABLED_KEY = 'browser.shortcuts.enabled'
+
+export async function getBrowserShortcutsEnabled(): Promise<boolean> {
+  if (!isTauri()) return true
+  const raw = await getSession(BROWSER_SHORTCUTS_ENABLED_KEY)
+  if (raw === null) return true
+  try {
+    const parsed = JSON.parse(raw) as { enabled?: boolean }
+    return parsed.enabled !== false
+  } catch {
+    return true
+  }
+}
+
+export async function setBrowserShortcutsEnabled(enabled: boolean): Promise<void> {
+  if (!isTauri()) return
+  await setSession(BROWSER_SHORTCUTS_ENABLED_KEY, JSON.stringify({ enabled }))
+}
+
 export interface BackupDocument {
   id: string
   title: string

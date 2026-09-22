@@ -1,4 +1,5 @@
 import type { ChatRequest, Document } from '../../types'
+import { rankByBm25 } from './bm25'
 
 const SYSTEM_PROMPT = [
   'You answer questions using ONLY the numbered documents from the user’s personal knowledge base.',
@@ -12,6 +13,7 @@ const SYSTEM_PROMPT = [
 
 const NOT_FOUND_MARKER = '知识库中未找到相关信息'
 export const MAX_CHARS_PER_DOC = 1500
+export const DEFAULT_TOP_K = 8
 
 export interface CrossAskDoc {
   index: number
@@ -27,21 +29,44 @@ export interface CrossAskParse {
   notFound: boolean
 }
 
+export interface CrossAskOptions {
+  topK?: number
+  maxCharsPerDoc?: number
+}
+
+function excerptFor(doc: Document, maxChars: number): string {
+  const raw = (doc.markdown && doc.markdown.trim()) || (doc.summary && doc.summary.trim()) || ''
+  return raw.slice(0, maxChars)
+}
+
 export function buildCrossAskPrompt(
   documents: readonly Document[],
   question: string,
   history?: readonly { role: 'user' | 'assistant'; content: string }[],
+  options?: CrossAskOptions,
 ): ChatRequest {
+  const topK = options?.topK ?? DEFAULT_TOP_K
+  const maxChars = options?.maxCharsPerDoc ?? MAX_CHARS_PER_DOC
+
+  let chosen: { document: Document; originalIndex: number }[]
+  if (documents.length <= topK) {
+    chosen = documents.map((doc, index) => ({ document: doc, originalIndex: index }))
+  } else {
+    chosen = rankByBm25(question, documents, doc => `${doc.title}\n${excerptFor(doc, maxChars)}`)
+      .slice(0, topK)
+      .map(entry => ({ document: entry.document, originalIndex: entry.originalIndex }))
+  }
+
   const cited: CrossAskDoc[] = []
-  documents.forEach((doc, position) => {
-    const raw = (doc.markdown && doc.markdown.trim()) || (doc.summary && doc.summary.trim()) || ''
-    if (!raw && !doc.title.trim()) return
+  chosen.forEach(({ document, originalIndex }) => {
+    const excerpt = excerptFor(document, maxChars)
+    if (!excerpt && !document.title.trim()) return
     cited.push({
-      index: position + 1,
-      id: doc.id,
-      title: doc.title,
-      url: doc.url,
-      excerpt: raw.slice(0, MAX_CHARS_PER_DOC),
+      index: originalIndex + 1,
+      id: document.id,
+      title: document.title,
+      url: document.url,
+      excerpt,
     })
   })
 

@@ -4,7 +4,19 @@ const { invoke } = vi.hoisted(() => ({ invoke: vi.fn() }))
 
 vi.mock('@tauri-apps/api/core', () => ({ invoke }))
 
-import { deleteDocument, exportBackup, getDocument, getSession, importBackup, listDocuments, saveDocument, setSession, toggleStarred } from './api'
+import {
+  deleteDocument,
+  exportBackup,
+  getBrowserShortcutsEnabled,
+  getDocument,
+  getSession,
+  importBackup,
+  listDocuments,
+  saveDocument,
+  setBrowserShortcutsEnabled,
+  setSession,
+  toggleStarred,
+} from './api'
 
 const setTauri = (present: boolean) => {
   if (present) {
@@ -172,6 +184,35 @@ describe('api', () => {
         backup: { version: 1, exportedAt: '', documents: [], session: [] },
       })
       expect(summary).toEqual({ documentsInserted: 3, documentsSkipped: 1, sessionInserted: 2 })
+    })
+
+    it('getBrowserShortcutsEnabled defaults to true when Tauri has no session entry', async () => {
+      setTauri(true)
+      invoke.mockResolvedValueOnce(null)
+      await expect(getBrowserShortcutsEnabled()).resolves.toBe(true)
+      expect(invoke).toHaveBeenCalledWith('local_get_session', { key: 'browser.shortcuts.enabled' })
+    })
+
+    it('getBrowserShortcutsEnabled returns false when persisted value is false', async () => {
+      setTauri(true)
+      invoke.mockResolvedValueOnce(JSON.stringify({ enabled: false }))
+      await expect(getBrowserShortcutsEnabled()).resolves.toBe(false)
+    })
+
+    it('getBrowserShortcutsEnabled falls back to true on malformed JSON', async () => {
+      setTauri(true)
+      invoke.mockResolvedValueOnce('not json {')
+      await expect(getBrowserShortcutsEnabled()).resolves.toBe(true)
+    })
+
+    it('setBrowserShortcutsEnabled persists JSON payload via local_set_session', async () => {
+      setTauri(true)
+      invoke.mockResolvedValueOnce(undefined)
+      await setBrowserShortcutsEnabled(false)
+      expect(invoke).toHaveBeenCalledWith('local_set_session', {
+        key: 'browser.shortcuts.enabled',
+        value: JSON.stringify({ enabled: false }),
+      })
     })
   })
 

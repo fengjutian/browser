@@ -289,7 +289,7 @@ button,
 input,
 textarea,
 select {
-  font-family: 'Source Han Serif SC', 'Noto Serif CJK SC', 'Noto Serif SC', 'Songti SC', SimSun, serif;
+  font-family: Inter, 'PingFang SC', 'Microsoft YaHei', system-ui, sans-serif;
 }
 
 .app-sider {
@@ -447,6 +447,151 @@ select {
 }
 
 .browser-toolbar form > .ant-select { width: 100%; }
+
+// Cohesive application shell and content rhythm.
+body[data-theme='green'] { --accent:#347851; --accent-soft:#e2eee6; --accent-border:#c9ddcf; --page:#f5f7f4; }
+body[data-theme='beige'] { --accent:#8a6846; --accent-soft:#eee2d1; --accent-border:#ddcbb4; --page:#f7f2e9; }
+body[data-theme='light'] { --accent:#3f6f5a; --accent-soft:#e7ece9; --accent-border:#d1dad5; --page:#f7f8f7; }
+body[data-theme='dark'] { --accent:#65a77d; --accent-soft:#24372c; --accent-border:#375342; --page:#111714; }
+
+.page {
+  width: min(100%, 1360px);
+  margin-inline: auto;
+  padding: 34px 40px 56px;
+}
+
+.page-header {
+  align-items: center;
+  margin-bottom: 26px;
+
+  h1.ant-typography {
+    font-family: 'Source Han Serif SC', 'Noto Serif CJK SC', 'Songti SC', SimSun, serif;
+    font-size: 32px;
+    letter-spacing: -.02em;
+  }
+
+  p { color: #6f7973; }
+  .ant-btn { height: 40px; padding-inline: 18px; box-shadow: none; }
+}
+
+.app-sider.ant-layout-sider {
+  padding: 14px 10px !important;
+
+  .brand { height: 48px !important; padding-inline: 8px; }
+  .brand__mark { width: 36px; height: 36px; border-radius: 11px; }
+}
+
+.nav-menu {
+  border-inline-end: 0 !important;
+
+  .ant-menu-item {
+    height: 48px !important;
+    margin: 4px 0 !important;
+    padding-inline: 9px !important;
+    border-radius: 12px !important;
+    transition: background-color .16s ease, color .16s ease, transform .16s ease;
+
+    &:hover { transform: translateX(1px); }
+  }
+
+  .nav-glyph {
+    width: 32px;
+    height: 32px;
+    display: inline-grid;
+    place-items: center;
+    flex: none;
+    border-radius: 10px;
+    color: currentColor;
+    transition: background-color .16s ease, color .16s ease;
+  }
+
+  .nav-glyph svg {
+    width: 21px;
+    height: 21px;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 1.75;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+
+  .ant-menu-item-selected .nav-glyph { background: rgba(255,255,255,.48); }
+}
+
+.nav-menu--utility { margin-top: 10px; padding-top: 10px; border-top: 1px solid rgba(100,115,106,.14) !important; }
+
+.app-sider--collapsed {
+  .ant-menu-item { padding-inline: 10px !important; }
+  .ant-menu-item .ant-menu-item-icon { margin-inline: 0 !important; }
+}
+
+.library-stats {
+  gap: 12px;
+  margin-bottom: 20px;
+
+  .ant-col {
+    flex: 1;
+    max-width: none;
+    min-height: 82px;
+    padding: 14px 18px;
+    border: 1px solid var(--accent-border);
+    border-radius: 14px;
+    background: var(--accent-soft);
+  }
+
+  .ant-statistic-title { margin-bottom: 7px; font-size: 13px; }
+  .ant-statistic-content { gap: 10px; font-size: 24px; }
+}
+
+.library-stat-icon,
+.library-list-icon {
+  border-color: var(--accent-border);
+  color: var(--accent);
+  background: rgba(255,255,255,.45);
+}
+
+.library-tabs > .ant-tabs-nav { margin-bottom: 26px !important; }
+.library-module { min-height: 360px; }
+
+.document-card {
+  min-height: 250px;
+  overflow: hidden;
+  border-color: color-mix(in srgb, var(--accent-border) 72%, transparent);
+  box-shadow: 0 5px 18px rgba(31,45,37,.045);
+
+  .ant-card-body { min-height: 142px; padding: 16px 18px; }
+  h4.ant-typography {
+    margin: 10px 0 6px;
+    font-family: 'Source Han Serif SC', 'Noto Serif CJK SC', 'Songti SC', SimSun, serif;
+    font-size: 19px;
+    line-height: 1.45;
+  }
+}
+
+.document-cover {
+  height: 60px;
+  color: var(--accent);
+  background: var(--accent-soft) !important;
+}
+
+.document-tag {
+  border-color: var(--accent-border);
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+
+body[data-theme='dark'] {
+  .page-header p { color: #96a39b; }
+  .nav-menu .ant-menu-item-selected .nav-glyph { background: rgba(255,255,255,.08); }
+  .library-stats .ant-col { background: #1b2620; }
+  .library-stat-icon,
+  .library-list-icon { background: rgba(255,255,255,.04); }
+  .document-card { box-shadow: none; }
+}
+
+@media (max-width: 1200px) {
+  .page { padding-inline: 28px; }
+}
 
 .address-suggestion {
   min-width: 0;
