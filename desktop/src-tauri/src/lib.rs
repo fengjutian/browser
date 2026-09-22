@@ -10,6 +10,7 @@ use std::collections::HashMap;
 use std::sync::Mutex;
 use std::time::Duration;
 use tauri::image::Image;
+use tauri::webview::DownloadEvent;
 use tauri::{Emitter, Manager};
 
 use crate::providers::{AiProvider, ChatMessage, ChatRequest, ChatResponse};
@@ -30,6 +31,15 @@ struct BrowserBounds {
 struct NewTabRequest {
     opener_label: String,
     url: String,
+}
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DownloadUpdate {
+    tab_label: String,
+    url: String,
+    path: Option<String>,
+    status: String,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -128,6 +138,8 @@ async fn browser_create(
     let nav_url = url.to_string();
     let opener_label = label.clone();
     let event_app = app.clone();
+    let download_app = app.clone();
+    let download_label = label.clone();
     let builder = tauri::webview::WebviewBuilder::new(&label, tauri::WebviewUrl::External(url))
         .on_new_window(move |url, _features| {
             if matches!(url.scheme(), "http" | "https") {
@@ -141,6 +153,25 @@ async fn browser_create(
                 );
             }
             tauri::webview::NewWindowResponse::Deny
+        })
+        .on_download(move |_webview, event| {
+            let update = match event {
+                DownloadEvent::Requested { url, destination } => DownloadUpdate {
+                    tab_label: download_label.clone(),
+                    url: url.to_string(),
+                    path: Some(destination.to_string_lossy().into_owned()),
+                    status: "downloading".into(),
+                },
+                DownloadEvent::Finished { url, path, success } => DownloadUpdate {
+                    tab_label: download_label.clone(),
+                    url: url.to_string(),
+                    path: path.map(|value| value.to_string_lossy().into_owned()),
+                    status: if success { "completed" } else { "failed" }.into(),
+                },
+                _ => return true,
+            };
+            let _ = download_app.emit_to("main", "browser://download", update);
+            true
         });
     let window = app
         .get_window("main")

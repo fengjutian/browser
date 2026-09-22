@@ -7,6 +7,7 @@ export interface BrowserBounds { x: number; y: number; width: number; height: nu
 export interface NativeBrowserState { url: string; title: string; favicon?: string; loading: boolean; canGoBack: boolean; canGoForward: boolean }
 export interface NativePageSnapshot { url: string; html: string }
 interface NativeNewTabRequest { openerLabel: string; url: string }
+export interface NativeDownloadUpdate { tabLabel: string; url: string; path?: string; status: 'downloading'|'completed'|'failed' }
 const labels = new Map<string, string>()
 const isTauri = () => '__TAURI_INTERNALS__' in window
 const labelFor = (tabId: string) => `browser-${tabId.replace(/[^a-zA-Z0-9-]/g, '-')}`
@@ -60,4 +61,8 @@ export function hasNativeTab(tabId: string): boolean { return labels.has(tabId) 
 export async function onNativeNewTab(handler: (url: string) => void): Promise<UnlistenFn> {
   if (!isTauri()) return () => undefined
   return listen<NativeNewTabRequest>('browser://new-tab', event => handler(event.payload.url))
+}
+export async function onNativeDownload(handler: (download: NativeDownloadUpdate) => void): Promise<UnlistenFn> {
+  if (!isTauri()) return () => undefined
+  return listen<NativeDownloadUpdate>('browser://download', event => handler(event.payload))
 }
