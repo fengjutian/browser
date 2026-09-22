@@ -5,7 +5,7 @@ import { Webview } from '@tauri-apps/api/webview'
 import { readSitePermissions } from '../features/browser/sitePermissions'
 
 export interface BrowserBounds { x: number; y: number; width: number; height: number }
-export interface NativeBrowserState { url: string; title: string; favicon?: string; loading: boolean; canGoBack: boolean; canGoForward: boolean }
+export interface NativeBrowserState { url: string; title: string; favicon?: string; loading: boolean; scrollX: number; scrollY: number; canGoBack: boolean; canGoForward: boolean }
 export interface NativePageSnapshot { url: string; html: string }
 interface NativeNewTabRequest { openerLabel: string; url: string }
 export interface NativeDownloadUpdate { tabLabel: string; url: string; path?: string; status: 'downloading'|'completed'|'failed' }
@@ -57,6 +57,8 @@ export async function zoomNativeTab(tabId: string, scale: number): Promise<void>
 export async function printNativeTab(tabId: string): Promise<void> { const label=labels.get(tabId);if(label)await invoke('browser_print',{label}) }
 export async function navigateHistory(tabId: string, delta: -1|1): Promise<void> { const label=labels.get(tabId);if(label)await invoke('browser_history',{label,delta}) }
 export async function readNativeState(tabId: string): Promise<NativeBrowserState | null> { const label=labels.get(tabId);return label ? invoke<NativeBrowserState>('browser_state',{label}) : null }
+export async function restoreNativeScroll(tabId: string, x: number, y: number): Promise<void> { const label=labels.get(tabId);if(label)await invoke('browser_restore_scroll',{label,x,y}) }
+export async function isNativeTabAlive(tabId: string): Promise<boolean> { const label=labels.get(tabId) ?? labelFor(tabId);return !!(await Webview.getByLabel(label)) }
 export async function captureNativePage(tabId: string): Promise<NativePageSnapshot> { const label=labels.get(tabId);if(!label)throw new Error('native webview is not available');return invoke<NativePageSnapshot>('browser_snapshot',{label}) }
 export function hasNativeTab(tabId: string): boolean { return labels.has(tabId) }
 export async function onNativeNewTab(handler: (url: string) => void): Promise<UnlistenFn> {

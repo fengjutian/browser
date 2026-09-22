@@ -183,6 +183,25 @@
   }
 }
 
+// Keep the navigation rail visually connected to the soft page canvas.
+.app-sider.ant-layout-sider {
+  border-right: 1px solid #dce4de;
+  color: #31483a;
+}
+
+.privacy-status {
+  border-color: #d5e1d8;
+  background: #f5f8f5;
+
+  .ant-typography { color: #718078; }
+}
+
+.user-card {
+  border-top-color: #d7e0d9;
+
+  small { color: #718078; }
+}
+
 .route-view:not(.is-hidden) {
   min-height: 100%;
   height: auto;

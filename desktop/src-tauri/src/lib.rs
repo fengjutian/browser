@@ -91,6 +91,10 @@ struct BrowserState {
     favicon: Option<String>,
     loading: bool,
     #[serde(default)]
+    scroll_x: f64,
+    #[serde(default)]
+    scroll_y: f64,
+    #[serde(default)]
     can_go_back: bool,
     #[serde(default)]
     can_go_forward: bool,
@@ -378,7 +382,7 @@ async fn browser_state(app: tauri::AppHandle, label: String) -> Result<BrowserSt
         .ok_or_else(|| "browser tab webview not found".to_string())?;
     let mut state: BrowserState = eval_json(
         webview,
-        "({url:location.href,title:document.title,favicon:(document.querySelector('link[rel~=icon]')?.href??null),loading:document.readyState!=='complete'})",
+        "({url:location.href,title:document.title,favicon:(document.querySelector('link[rel~=icon]')?.href??null),loading:document.readyState!=='complete',scrollX:window.scrollX,scrollY:window.scrollY})",
     )
     .await?;
     let navs = app.state::<NavStacks>();
@@ -388,6 +392,17 @@ async fn browser_state(app: tauri::AppHandle, label: String) -> Result<BrowserSt
     state.can_go_back = stack.can_go_back();
     state.can_go_forward = stack.can_go_forward();
     Ok(state)
+}
+
+#[tauri::command]
+fn browser_restore_scroll(app: tauri::AppHandle, label: String, x: f64, y: f64) -> Result<(), String> {
+    if !x.is_finite() || !y.is_finite() {
+        return Err("invalid scroll position".into());
+    }
+    app.get_webview(&label)
+        .ok_or_else(|| "browser tab webview not found".to_string())?
+        .eval(format!("window.scrollTo({}, {})", x.max(0.0), y.max(0.0)))
+        .map_err(|error| error.to_string())
 }
 
 #[tauri::command]
@@ -530,6 +545,7 @@ pub fn run() {
             browser_print,
             browser_history,
             browser_state,
+            browser_restore_scroll,
             browser_snapshot,
             local_store::local_list_documents,
             local_store::local_save_document,
