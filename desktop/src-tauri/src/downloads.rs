@@ -20,7 +20,6 @@ use crate::local_store;
 use rusqlite::{params, Connection, Row};
 use serde::{Deserialize, Serialize};
 use std::path::{Component, Path, PathBuf};
-use tauri::AppHandle;
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
@@ -299,31 +298,21 @@ fn row_download(row: &Row<'_>) -> rusqlite::Result<DownloadRecord> {
 
 /// Validate that a path coming out of the `downloads` table is safe to feed
 /// to the system shell. We never trust a frontend-supplied path; this helper
-/// only sees values that `on_download` previously persisted. Two rules:
+/// only sees values that `on_download` previously persisted. Rules:
 /// 1. The path must exist on disk.
-/// 2. The path must NOT live inside the OS's privileged directories
-///    (Windows / System32, /etc, /var, …). Those are blocked even if a
-///    record somehow points there.
+/// 2. The path must point at a regular file (not a directory, device, or pipe).
+/// 3. The path must not start with the Windows device namespace prefix
+///    (`\\.\` or `\\?\`), which can alias block devices on legacy Windows.
 fn validate_user_path(path: &Path) -> Result<(), String> {
     let metadata = std::fs::metadata(path)
         .map_err(|error| format!("path is not accessible: {error}"))?;
     if !metadata.is_file() {
         return Err("path is not a regular file".into());
     }
-    let mut components = path.components();
-    while let Some(component) = components.next() {
-        if let Component::Prefix(prefix) = component {
-            if let Some(kind) = unsafe { prefix.kind() } {
-                if matches!(kind, std::path::Prefix::DeviceNS | std::path::Prefix::VerbatimDisk | std::path::Prefix::Verbatim) {
-                    // NT-style device/verbatim paths are blocked by default.
-                    return Err("path uses a privileged NT prefix".into());
-                }
-            }
-        }
-        if let Component::RootDir = component {
-            // Reject anything mounted at the filesystem root (e.g. /etc/x).
-            // We allow /home, /Users, /tmp, etc., but never the root itself.
-            return Err("path is anchored at the filesystem root".into());
+    if let Some(Component::Prefix(prefix)) = path.components().next() {
+        let raw = prefix.as_os_str().to_string_lossy().to_ascii_lowercase();
+        if raw.starts_with("\\\\.\\") || raw.starts_with("\\\\?\\") {
+            return Err("path uses a device-namespace prefix".into());
         }
     }
     Ok(())

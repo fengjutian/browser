@@ -62,10 +62,15 @@ struct DownloadProgress {
 }
 
 const EVENT_PAYLOAD_VERSION: u32 = 2;
+#[allow(dead_code)] // referenced via string literal in started/finished handlers
 const DOWNLOAD_EVENT_KIND_STARTED: &str = "started";
+#[allow(dead_code)] // referenced via string literal in started/finished handlers
 const DOWNLOAD_EVENT_KIND_FINISHED: &str = "finished";
+#[allow(dead_code)] // referenced via string literal in started/finished handlers
 const DOWNLOAD_EVENT_KIND_FAILED: &str = "failed";
+#[allow(dead_code)] // wired up once reqwest streaming lands in batch 1 sub-batch B
 const DOWNLOAD_EVENT_KIND_CANCELLED: &str = "cancelled";
+#[allow(dead_code)]
 const DOWNLOAD_EVENT_KIND_PROGRESS: &str = "progress";
 
 #[derive(Default)]
