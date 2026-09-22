@@ -509,7 +509,7 @@ export function BrowserPage() {
   }
 
   return <div className="browser-page">{contextHolder}
-    <div className="browser-tabs"><Tabs type="editable-card" hideAdd items={tabs.map((tab, index) => {
+    <div className="browser-tabs"><Tabs type="editable-card" items={tabs.map((tab, index) => {
           const isDragging = draggingIndex === index
           const isDropTarget = dragOverIndex === index && draggingIndex !== null && draggingIndex !== index
           return {
@@ -526,7 +526,7 @@ export function BrowserPage() {
             </Tooltip>,
             closable: tabs.length > 1,
           }
-        })} activeKey={activeTabId} onChange={activateTab} onEdit={(target, action) => action === 'remove' && closeTab(String(target))} tabBarExtraContent={<Tooltip title="新建标签页 (Ctrl+T)"><button type="button" aria-label="新建标签页" className="browser-tabs__new-tab" onClick={() => openNewTab()}><PlusOutlined/></button></Tooltip>}/></div>
+        })} activeKey={activeTabId} onChange={activateTab} addIcon={<Tooltip title="新建标签页 (Ctrl+T)"><PlusOutlined aria-label="新建标签页"/></Tooltip>} onEdit={(target, action) => action === 'add' ? openNewTab() : closeTab(String(target))}/></div>
     <div className="browser-toolbar"><Space><Button type="text" aria-label="后退" title="后退 (Alt+←)" icon={<ArrowLeftOutlined/>} disabled={!nativeMode || !active.canGoBack} onClick={() => void navigateHistory(active.id,-1)}/><Button type="text" aria-label="前进" title="前进 (Alt+→)" icon={<ArrowRightOutlined/>} disabled={!nativeMode || !active.canGoForward} onClick={() => void navigateHistory(active.id,1)}/><Button type="text" aria-label={active.loading?'停止加载':'重新加载'} title={active.loading?'停止加载 (Esc)':'重新加载 (F5)'} icon={active.loading?<CloseOutlined/>:<ReloadOutlined/>} disabled={!nativeMode} onClick={() => void (active.loading ? stopNativeTab(active.id) : reloadNativeTab(active.id))}/><Button type="text" icon={<BookOutlined/>} onClick={() => void openReader()}>阅读模式</Button></Space><form onSubmit={event => { event.preventDefault(); void navigate(address) }}><Input ref={addressRef} prefix={<SafetyCertificateOutlined/>} suffix={<button type="button" className={`browser-star${starredDocId ? ' is-active' : ''}`} disabled={!active.url} aria-label={starredDocId ? '取消收藏' : '收藏当前页'} title={starredDocId ? '取消收藏' : '收藏当前页'} onClick={event => { event.preventDefault(); event.stopPropagation(); void toggleStarCurrent() }}><StarOutlined/></button>} value={address} onFocus={event=>event.currentTarget.select()} onChange={event=>setAddress(event.target.value)} placeholder="搜索或输入网址"/></form><Tag icon={<SafetyCertificateOutlined/>} color="green">43</Tag><Button type={aiOpen?'primary':'text'} ghost={aiOpen} icon={<RobotOutlined/>} onClick={()=>setAiOpen(value=>!value)}/></div>
     <div className="browser-content"><div className="web-surface" ref={surfaceRef}>{readerArticle
       ? <ReaderArticleView article={readerArticle}/>

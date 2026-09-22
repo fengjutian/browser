@@ -165,8 +165,8 @@
 
 .app-content { min-width: 0; }
 
-// Browser-style tab strip: tabs stay content-sized on the left while the
-// new-tab action anchors to the far edge of the window.
+// Browser-style tab strip: the new-tab action follows the last tab; when the
+// row fills, tabs shrink and Ant's overflow control takes over.
 .browser-tabs {
   position: relative;
   align-items: stretch !important;
@@ -186,7 +186,10 @@
     &::before { border-bottom: 0 !important; }
   }
 
-  .ant-tabs-nav-wrap { min-width: 0; }
+  .ant-tabs-nav-wrap {
+    flex: 0 1 auto;
+    min-width: 0;
+  }
 
   .ant-tabs-nav-list {
     align-items: end;
@@ -228,19 +231,25 @@
     &:hover { background: #e2e7e3; }
   }
 
-  .ant-tabs-extra-content {
-    display: flex;
-    align-items: center;
-    align-self: stretch;
-    margin-left: auto;
-    padding: 0 8px 4px 10px;
-  }
-
-  .browser-tabs__new-tab {
-    width: 32px !important;
-    height: 32px !important;
+  .ant-tabs-nav-add {
+    display: grid;
+    place-items: center;
+    align-self: center;
+    flex: none;
+    width: 32px;
+    height: 32px;
+    margin: 0 8px 4px 5px !important;
+    padding: 0 !important;
+    border: 0 !important;
     border-radius: 7px !important;
+    background: transparent !important;
     font-size: 17px;
+    transition: background-color .15s, color .15s;
+
+    &:hover {
+      background: rgba(255, 255, 255, .55) !important;
+      color: #1f6f3e;
+    }
 
     &:focus-visible {
       outline: 2px solid #4c9167;

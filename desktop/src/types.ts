@@ -9,3 +9,4 @@ export interface AIProvider { id:string; type:AIProviderType; baseUrl:string; mo
 export interface ChatMessage { role: string; content: string }
 export interface ChatRequest { messages: ChatMessage[]; temperature?: number; maxTokens?: number }
 export interface ChatResponse { content: string; promptTokens?: number; completionTokens?: number }
+export interface ProviderTestResult { ok: boolean; endpoint: string; status?: number; models: string[]; message: string }

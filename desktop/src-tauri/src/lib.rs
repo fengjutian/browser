@@ -305,6 +305,72 @@ async fn ai_chat(
     provider.chat(request).await.map_err(|error| error.to_string())
 }
 
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ProviderTestResult {
+    ok: bool,
+    endpoint: String,
+    status: Option<u16>,
+    models: Vec<String>,
+    message: String,
+}
+
+#[tauri::command]
+async fn ai_test_provider(
+    app: tauri::AppHandle,
+    provider_id: String,
+) -> Result<ProviderTestResult, String> {
+    let database = local_store::connection(&app)?;
+    let (provider_type, base_url, timeout_seconds): (String, String, i64) = database
+        .prepare("SELECT provider_type,base_url,timeout_seconds FROM ai_providers WHERE id=?")
+        .map_err(|error| error.to_string())?
+        .query_row(params![provider_id], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))
+        .map_err(|error| error.to_string())?;
+    let timeout = Duration::from_secs(timeout_seconds.clamp(1, 600) as u64);
+    let client = reqwest::Client::builder().timeout(timeout).build().map_err(|error| error.to_string())?;
+    let (endpoint, needs_auth) = match provider_type.as_str() {
+        "openai-compatible" => (format!("{}/models", base_url.trim_end_matches('/')), true),
+        "ollama" => (format!("{}/api/tags", base_url.trim_end_matches('/')), false),
+        other => return Err(format!("unknown provider type: {other}")),
+    };
+    let mut request_builder = client.get(&endpoint);
+    if needs_auth {
+        if let Ok(entry) = keyring::Entry::new(KEYRING_SERVICE, &provider_id) {
+            if let Ok(key) = entry.get_password() {
+                if !key.is_empty() {
+                    request_builder = request_builder.bearer_auth(key);
+                } else {
+                    return Ok(ProviderTestResult { ok: false, endpoint, status: None, models: vec![], message: "API Key 未配置".into() });
+                }
+            } else {
+                return Ok(ProviderTestResult { ok: false, endpoint, status: None, models: vec![], message: "API Key 未配置".into() });
+            }
+        } else {
+            return Ok(ProviderTestResult { ok: false, endpoint, status: None, models: vec![], message: "API Key 未配置".into() });
+        }
+    }
+    let response = request_builder.send().await.map_err(|error| error.to_string())?;
+    let status = response.status();
+    let text = response.text().await.map_err(|error| error.to_string())?;
+    if !status.is_success() {
+        return Ok(ProviderTestResult { ok: false, endpoint, status: Some(status.as_u16()), models: vec![], message: format!("HTTP {}", status.as_u16()) });
+    }
+    let models = match provider_type.as_str() {
+        "openai-compatible" => serde_json::from_str::<serde_json::Value>(&text)
+            .ok()
+            .and_then(|v| v.get("data").and_then(|d| d.as_array().map(|arr| arr.clone())))
+            .map(|arr| arr.into_iter().filter_map(|m| m.get("id").and_then(|v| v.as_str()).map(String::from)).collect())
+            .unwrap_or_default(),
+        "ollama" => serde_json::from_str::<serde_json::Value>(&text)
+            .ok()
+            .and_then(|v| v.get("models").and_then(|d| d.as_array().map(|arr| arr.clone())))
+            .map(|arr| arr.into_iter().filter_map(|m| m.get("name").and_then(|v| v.as_str()).map(String::from)).collect())
+            .unwrap_or_default(),
+        _ => vec![],
+    };
+    Ok(ProviderTestResult { ok: true, endpoint, status: Some(status.as_u16()), models, message: format!("连接成功，发现 {} 个模型", match provider_type.as_str() { "openai-compatible" => serde_json::from_str::<serde_json::Value>(&text).ok().and_then(|v| v.get("data").and_then(|d| d.as_array()).map(|a| a.len())).unwrap_or(0), "ollama" => serde_json::from_str::<serde_json::Value>(&text).ok().and_then(|v| v.get("models").and_then(|d| d.as_array()).map(|a| a.len())).unwrap_or(0), _ => 0 }) })
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -354,6 +420,7 @@ pub fn run() {
             local_store::local_list_ai_providers,
             local_store::local_delete_ai_provider,
             ai_chat,
+            ai_test_provider,
             local_store::local_get_session,
             local_store::local_set_session,
             local_store::local_export_backup,

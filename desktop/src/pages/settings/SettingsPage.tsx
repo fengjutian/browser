@@ -1,8 +1,8 @@
 import { Alert, Button, Card, Form, Input, InputNumber, List, Select, Space, Tabs, Tag, Typography, message } from 'antd'
-import { DeleteOutlined, KeyOutlined, SafetyCertificateOutlined, SaveOutlined } from '@ant-design/icons'
+import { DeleteOutlined, KeyOutlined, SafetyCertificateOutlined, SaveOutlined, ThunderboltOutlined } from '@ant-design/icons'
 import { useEffect, useState } from 'react'
 import { PageHeader } from '../../shared/components/PageHeader'
-import { deleteAIProvider, exportBackup, getAIProvider, importBackup, listAIProviders, saveAIProvider, type AIProviderInput } from '../../api'
+import { deleteAIProvider, exportBackup, getAIProvider, importBackup, listAIProviders, saveAIProvider, aiTestProvider, type AIProviderInput } from '../../api'
 import type { AIProvider, AIProviderType } from '../../types'
 
 const PROVIDER_OPTIONS: { label: string; value: AIProviderType }[] = [
@@ -54,6 +54,21 @@ function AIProviderSettings() {
     }
   }
 
+  async function handleTest(provider: AIProvider) {
+    const key = `test-${provider.id}`
+    messageApi.open({ key, type: 'loading', content: '正在测试连接…', duration: 0 })
+    try {
+      const result = await aiTestProvider(provider.id)
+      if (result.ok) {
+        messageApi.open({ key, type: 'success', content: `${result.message}（${result.endpoint}）`, duration: 3 })
+      } else {
+        messageApi.open({ key, type: 'error', content: result.message, duration: 3 })
+      }
+    } catch (error) {
+      messageApi.open({ key, type: 'error', content: error instanceof Error ? error.message : '测试失败', duration: 3 })
+    }
+  }
+
   async function handleSubmit(values: ProviderFormValues) {
     setSaving(true)
     try {
@@ -99,7 +114,7 @@ function AIProviderSettings() {
     <Typography.Title level={4} style={{marginTop:24}}>已配置 Provider</Typography.Title>
     {providers.length === 0
       ? <Typography.Text type="secondary">尚未配置。</Typography.Text>
-      : <List size="small" dataSource={providers} renderItem={provider => <List.Item key={provider.id} actions={[<Button size="small" onClick={()=>void handleEdit(provider)}>编辑</Button>,<Button size="small" danger icon={<DeleteOutlined/>} onClick={()=>void handleDelete(provider)}>删除</Button>]}>
+      : <List size="small" dataSource={providers} renderItem={provider => <List.Item key={provider.id} actions={[<Button size="small" icon={<ThunderboltOutlined/>} onClick={()=>void handleTest(provider)}>测试连接</Button>,<Button size="small" onClick={()=>void handleEdit(provider)}>编辑</Button>,<Button size="small" danger icon={<DeleteOutlined/>} onClick={()=>void handleDelete(provider)}>删除</Button>]}>
           <List.Item.Meta title={<Space><Tag color={provider.type === 'ollama' ? 'geekblue' : 'purple'}>{provider.type}</Tag><span>{provider.model}</span><Tag>{provider.baseUrl}</Tag>{provider.hasApiKey && <Tag color="green" icon={<KeyOutlined/>}>密钥已配置</Tag>}</Space>} description={`超时 ${provider.timeoutSeconds}s${provider.embeddingModel ? ` · embedding ${provider.embeddingModel}` : ''} · 更新于 ${new Date(provider.updatedAt).toLocaleString()}`}/>
         </List.Item>}/>}
     <Alert className="security-alert" icon={<SafetyCertificateOutlined/>} showIcon type="success" message="密钥只保存在本机" description="凭据由操作系统安全存储，不会写入应用日志或数据库。"/>
