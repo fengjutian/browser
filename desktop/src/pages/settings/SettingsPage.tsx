@@ -239,18 +239,18 @@ function SitePermissionSettings() {
     const origin = normalizeOrigin(site)
     if (!origin) { messageApi.error('请输入有效的网站域名'); return }
     if (rules.some(rule => rule.origin === origin)) { messageApi.info('该站点已存在'); return }
-    persist([...rules, { origin, camera: false, microphone: false, location: false, notifications: false, clipboard: false }])
+    persist([...rules, { origin, camera: 'ask', microphone: 'ask', location: 'ask', notifications: 'ask', clipboard: 'ask' }])
     setSite('')
   }
 
-  function toggle(origin: string, kind: SitePermissionKind, allowed: boolean) {
-    persist(rules.map(rule => rule.origin === origin ? { ...rule, [kind]: allowed } : rule))
+  function toggle(origin: string, kind: SitePermissionKind, value: 'allow' | 'deny' | 'ask') {
+    persist(rules.map(rule => rule.origin === origin ? { ...rule, [kind]: value } : rule))
   }
 
   return <>{contextHolder}<Card title="站点权限" className="settings-card site-permissions">
-    <Alert type="warning" showIcon message="敏感权限默认拒绝" description="只有下方明确允许的站点才能请求摄像头、麦克风、位置、通知或读取剪贴板。权限修改对新打开的标签生效。"/>
+    <Alert type="warning" showIcon message="敏感权限默认询问" description="每次允许都会弹出提示；选择「始终允许」才会持久化为 allow。权限修改对新打开的标签生效。" />
     <Space.Compact block style={{margin:'18px 0'}}><Input value={site} onChange={event=>setSite(event.target.value)} onPressEnter={addSite} placeholder="example.com 或 https://example.com"/><Button type="primary" onClick={addSite}>添加站点</Button></Space.Compact>
-    {rules.length===0?<Typography.Text type="secondary">尚未授权任何站点。</Typography.Text>:<List dataSource={rules} renderItem={rule=><List.Item actions={[<Button danger type="link" onClick={()=>persist(rules.filter(item=>item.origin!==rule.origin))}>移除</Button>]}><List.Item.Meta title={rule.origin} description={<Space wrap>{(Object.keys(PERMISSION_LABELS) as SitePermissionKind[]).map(kind=><span className="site-permission-toggle" key={kind}><Switch size="small" checked={rule[kind]} onChange={checked=>toggle(rule.origin,kind,checked)}/><span>{PERMISSION_LABELS[kind]}</span></span>)}</Space>}/></List.Item>}/>} 
+    {rules.length===0?<Typography.Text type="secondary">尚未配置任何站点。</Typography.Text>:<List dataSource={rules} renderItem={rule=><List.Item actions={[<Button danger type="link" onClick={()=>persist(rules.filter(item=>item.origin!==rule.origin))}>移除</Button>]}><List.Item.Meta title={rule.origin} description={<Space wrap>{(Object.keys(PERMISSION_LABELS) as SitePermissionKind[]).map(kind=><span className="site-permission-toggle" key={kind}><Segmented<'allow' | 'deny' | 'ask'> size="small" value={rule[kind]} onChange={value=>toggle(rule.origin,kind,value as 'allow' | 'deny' | 'ask')} options={[{label:'允许',value:'allow'},{label:'询问',value:'ask'},{label:'拒绝',value:'deny'}]} /><span>{PERMISSION_LABELS[kind]}</span></span>)}</Space>}/></List.Item>}/>}
   </Card></>
 }
 

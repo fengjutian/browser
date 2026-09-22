@@ -138,6 +138,23 @@ export function isAllowedExternalUrl(value: string): boolean {
 }
 
 /**
+ * Permission request payload emitted by the JS-level guard script (see
+ * `permission_guard_script` in `src-tauri/src/lib.rs`). The host shows an
+ * inline prompt and replies via `respond_permission_request`.
+ */
+export interface PermissionRequest {
+  version: number
+  requestId: string
+  origin: string
+  kind: 'camera' | 'microphone' | 'location' | 'notifications' | 'clipboard' | 'media'
+}
+
+export async function onPermissionRequest(handler: (request: PermissionRequest) => void): Promise<UnlistenFn> {
+  if (!isTauri()) return () => undefined
+  return listen<PermissionRequest>('browser://permission-request', event => handler(event.payload))
+}
+
+/**
  * Forward of `browser_capabilities` from the Rust side. Re-exposed so consumers
  * can stay on the `services/nativeBrowser.ts` import surface.
  */

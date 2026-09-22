@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { listDownloads, removeDownloadRecord, showDownloadInFolder, openDownloadFile, type DownloadRecord } from '../../services/downloads'
+import { listDownloads, removeDownloadRecord, showDownloadInFolder, openDownloadFile, cancelDownload, pauseDownload, retryDownload, type DownloadRecord } from '../../services/downloads'
 import { applyDownloadUpdate, DOWNLOAD_FEED_LIMIT, normalizeDownloadPayload, type DownloadFeedEntry } from './downloadFeed'
 import { onNativeDownload } from '../../services/nativeBrowser'
 
@@ -21,6 +21,9 @@ export interface UseDownloadCenterResult {
   remove: (id: string, deleteFile?: boolean) => Promise<void>
   open: (id: string) => Promise<void>
   reveal: (id: string) => Promise<void>
+  pause: (id: string) => Promise<void>
+  cancel: (id: string) => Promise<void>
+  retry: (id: string) => Promise<string>
 }
 
 /**
@@ -103,5 +106,29 @@ export function useDownloadCenter(options: UseDownloadCenterOptions = {}): UseDo
     await showDownloadInFolder(id)
   }, [])
 
-  return { records, hydrated, feed, remove, open, reveal, refresh }
+  const pause = useCallback(async (id: string) => {
+    try {
+      await pauseDownload(id)
+    } finally {
+      await refresh()
+    }
+  }, [refresh])
+
+  const cancel = useCallback(async (id: string) => {
+    try {
+      await cancelDownload(id)
+    } finally {
+      await refresh()
+    }
+  }, [refresh])
+
+  const retry = useCallback(async (id: string) => {
+    try {
+      return await retryDownload(id)
+    } finally {
+      await refresh()
+    }
+  }, [refresh])
+
+  return { records, hydrated, feed, remove, open, reveal, pause, cancel, refresh, retry }
 }

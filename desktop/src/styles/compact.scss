@@ -455,9 +455,10 @@ body[data-theme='light'] { --accent:#3f6f5a; --accent-soft:#e7ece9; --accent-bor
 body[data-theme='dark'] { --accent:#65a77d; --accent-soft:#24372c; --accent-border:#375342; --page:#111714; }
 
 .page {
-  width: min(100%, 1360px);
-  margin-inline: auto;
-  padding: 34px 40px 56px;
+  width: 100%;
+  max-width: none;
+  margin: 0;
+  padding: 20px;
 }
 
 .page-header {
@@ -675,7 +676,7 @@ body[data-theme='dark'] {
 }
 
 @media (max-width: 1200px) {
-  .page { padding-inline: 28px; }
+  .page { padding: 20px; }
 }
 
 // Browser chrome uses one compact control size across native and Ant controls.
@@ -747,8 +748,6 @@ body[data-theme='dark'] {
 
 // The assistant is an application workspace, not a scrolling document.
 .assistant-page {
-  width: min(100%, 1220px);
-  padding: 26px 30px 32px;
   height: 100vh;
   min-height: 0;
   display: flex;

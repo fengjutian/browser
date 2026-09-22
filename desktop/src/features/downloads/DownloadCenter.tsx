@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react'
 import { Button, Empty, List, Popconfirm, Progress, Space, Table, Tag, Tooltip, Typography } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
-import { CheckCircleOutlined, CloseCircleOutlined, DeleteOutlined, ExclamationCircleOutlined, FileOutlined, FolderOpenOutlined, LoadingOutlined, MinusCircleOutlined } from '@ant-design/icons'
+import { CheckCircleOutlined, CloseCircleOutlined, DeleteOutlined, ExclamationCircleOutlined, FileOutlined, FolderOpenOutlined, LoadingOutlined, MinusCircleOutlined, PauseOutlined, ReloadOutlined, StopOutlined } from '@ant-design/icons'
 import type { DownloadRecord } from '../../services/downloads'
 import { fileNameOf } from '../../services/downloads'
 import type { UseDownloadCenterResult } from './useDownloadCenter'
@@ -78,7 +78,7 @@ function isTerminal(status: DownloadRecord['status']): boolean {
  * toolbar popover renders its own narrower view via {@link DownloadSummary}.
  */
 export function DownloadCenter({ center, limit = 200 }: DownloadCenterProps) {
-  const { records, hydrated, remove, open, reveal } = center
+  const { records, hydrated, remove, open, reveal, pause, cancel, retry } = center
   const filtered = useMemo(() => records.slice(0, limit), [records, limit])
   const [busyId, setBusyId] = useState<string | null>(null)
 
@@ -196,6 +196,51 @@ export function DownloadCenter({ center, limit = 200 }: DownloadCenterProps) {
               onClick={async () => { setBusyId(record.id); try { await reveal(record.id) } finally { setBusyId(null) } }}
             />
           </Tooltip>
+          {record.status === 'downloading' && (
+            <Tooltip title="暂停（保留已下载的部分）">
+              <Button
+                size="small"
+                type="text"
+                icon={<PauseOutlined />}
+                loading={busyId === record.id}
+                onClick={async () => { setBusyId(record.id); try { await pause(record.id) } finally { setBusyId(null) } }}
+              />
+            </Tooltip>
+          )}
+          {record.status === 'paused' && (
+            <Tooltip title="重试（从头开始）">
+              <Button
+                size="small"
+                type="text"
+                icon={<ReloadOutlined />}
+                loading={busyId === record.id}
+                onClick={async () => { setBusyId(record.id); try { await retry(record.id) } finally { setBusyId(null) } }}
+              />
+            </Tooltip>
+          )}
+          {(record.status === 'downloading' || record.status === 'paused' || record.status === 'queued') && (
+            <Tooltip title="取消下载">
+              <Button
+                size="small"
+                type="text"
+                danger
+                icon={<StopOutlined />}
+                loading={busyId === record.id}
+                onClick={async () => { setBusyId(record.id); try { await cancel(record.id) } finally { setBusyId(null) } }}
+              />
+            </Tooltip>
+          )}
+          {(record.status === 'failed' || record.status === 'cancelled' || record.status === 'blocked') && (
+            <Tooltip title="重试">
+              <Button
+                size="small"
+                type="text"
+                icon={<ReloadOutlined />}
+                loading={busyId === record.id}
+                onClick={async () => { setBusyId(record.id); try { await retry(record.id) } finally { setBusyId(null) } }}
+              />
+            </Tooltip>
+          )}
           <Popconfirm
             title="移除这条记录？"
             description="可同时删除磁盘上的文件"

@@ -35,6 +35,15 @@ struct NewTabRequest {
     url: String,
 }
 
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PermissionRequestPayload {
+    version: u32,
+    request_id: String,
+    origin: String,
+    kind: String,
+}
+
 /// v2 download progress payload. The legacy v1 fields (`tabLabel`, `url`,
 /// `path`, `status`) are preserved so existing consumers keep working; new
 /// fields (`id`, `receivedBytes`, `totalBytes`, `progressKnown`,
@@ -76,6 +85,29 @@ const DOWNLOAD_EVENT_KIND_PROGRESS: &str = "progress";
 #[derive(Default)]
 struct DownloadIndex {
     by_url: Mutex<HashMap<String, String>>,
+}
+
+/// Round-trip registry for browser permission requests. The WebView's
+/// permission_guard_script invokes `browser_permission_request`, which
+/// generates a request id and emits `browser://permission-request` to the
+/// main window. The host UI calls `respond(request_id, allow)` and we look
+/// up the pending oneshot to deliver the verdict back to the WebView.
+#[derive(Default)]
+struct PermissionWaiters {
+    pending: Mutex<HashMap<String, tokio::sync::oneshot::Sender<bool>>>,
+}
+
+impl PermissionWaiters {
+    fn register(&self, request_id: String) -> tokio::sync::oneshot::Receiver<bool> {
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        if let Ok(mut guard) = self.pending.lock() {
+            guard.insert(request_id, tx);
+        }
+        rx
+    }
+    fn resolve(&self, request_id: &str, allow: bool) -> bool {
+        self.pending.lock().ok().and_then(|mut guard| guard.remove(request_id).map(|tx| tx.send(allow).is_ok())).unwrap_or(false)
+    }
 }
 
 impl DownloadIndex {
@@ -149,11 +181,11 @@ fn webview_backend_label() -> &'static str { "unknown" }
 #[serde(rename_all = "camelCase")]
 struct SitePermissionRule {
     origin: String,
-    camera: bool,
-    microphone: bool,
-    location: bool,
-    notifications: bool,
-    clipboard: bool,
+    camera: String, // "allow" | "deny" | "ask"
+    microphone: String,
+    location: String,
+    notifications: String,
+    clipboard: String,
 }
 
 /// Initialization script that intercepts the WebView's `contextmenu` event
@@ -231,30 +263,81 @@ mod context_menu_tests {
 
 fn permission_guard_script(rules: &[SitePermissionRule]) -> String {
     let rules = serde_json::to_string(rules).unwrap_or_else(|_| "[]".into());
+    // Each sensitive JS API is wrapped: the wrapper inspects the current
+    // rule for (origin, kind). `allow` keeps the original behaviour;
+    // `deny` rejects the call; `ask` invokes `browser_permission_request`
+    // which round-trips through the host UI and resolves / rejects based
+    // on the user's verdict.
     format!(r#"(()=>{{
       const rules={rules};
-      const rule=rules.find(item=>item.origin===location.origin);
+      const origin=location.origin;
+      const rule=rules.find(item=>item.origin===origin) || {{}};
       const denied=name=>new DOMException(name+' permission denied by Arcadia','NotAllowedError');
-      if(!rule?.camera&&!rule?.microphone&&navigator.mediaDevices?.getUserMedia){{
-        navigator.mediaDevices.getUserMedia=()=>Promise.reject(denied('Media'));
-      }} else if(navigator.mediaDevices?.getUserMedia){{
+      const decide=(kind)=>{{
+        const value=rule[kind];
+        if(value==='allow') return 'allow';
+        if(value==='deny') return 'deny';
+        return 'ask';
+      }};
+      const ask=(kind)=>async ()=>{{
+        const id=globalThis.crypto?.randomUUID ? crypto.randomUUID() : String(Math.random());
+        try {{
+          const allow=await window.__TAURI_INTERNALS__.invoke('browser_permission_request', {{ requestId: id, origin, kind, timeoutMs: 15000 }});
+          if(!allow) throw denied(kind);
+          return true;
+        }} catch (error) {{ throw error instanceof Error ? error : denied(kind); }}
+      }};
+      if(navigator.mediaDevices?.getUserMedia){{
         const original=navigator.mediaDevices.getUserMedia.bind(navigator.mediaDevices);
-        navigator.mediaDevices.getUserMedia=constraints=>{{
-          if(constraints?.video&&!rule?.camera)return Promise.reject(denied('Camera'));
-          if(constraints?.audio&&!rule?.microphone)return Promise.reject(denied('Microphone'));
+        navigator.mediaDevices.getUserMedia=async (constraints)=>{{
+          const wantsCamera=!!(constraints && constraints.video);
+          const wantsMic=!!(constraints && constraints.audio);
+          const camDecision=wantsCamera ? decide('camera') : 'allow';
+          const micDecision=wantsMic ? decide('microphone') : 'allow';
+          if(camDecision==='deny'||micDecision==='deny') throw denied('Media');
+          if(camDecision==='ask'||micDecision==='ask') {{
+            const kind = wantsCamera&&wantsMic ? 'media' : (wantsCamera ? 'camera' : 'microphone');
+            await ask(kind)();
+          }}
           return original(constraints);
         }};
       }}
-      if(!rule?.location&&navigator.geolocation){{
+      if(navigator.geolocation){{
         const reject=(_,error)=>error?.({{code:1,message:'Location permission denied by Arcadia'}});
-        navigator.geolocation.getCurrentPosition=reject;
-        navigator.geolocation.watchPosition=reject;
+        const wrap=(original)=>(success,error)=>{{
+          const decision=decide('location');
+          if(decision==='deny') return reject(success, error);
+          if(decision==='ask') {{
+            ask('location')().then(()=>{{ try {{ original(success,error); }} catch {{}} }}).catch(()=>reject(success, error));
+            return;
+          }}
+          try {{ original(success,error); }} catch {{ reject(success,error); }}
+        }};
+        navigator.geolocation.getCurrentPosition=wrap(navigator.geolocation.getCurrentPosition.bind(navigator.geolocation));
+        navigator.geolocation.watchPosition=wrap(navigator.geolocation.watchPosition.bind(navigator.geolocation));
       }}
-      if(!rule?.notifications&&globalThis.Notification){{
-        try{{Notification.requestPermission=()=>Promise.resolve('denied')}}catch{{}}
+      if(globalThis.Notification){{
+        try {{
+          const decision=decide('notifications');
+          if(decision==='deny') {{
+            Notification.requestPermission=()=>Promise.resolve('denied');
+          }} else if(decision==='ask') {{
+            Notification.requestPermission=()=>ask('notifications')().then(()=>'granted').catch(()=>'denied');
+          }}
+          // `allow`: pass through; WebView2 stable will still return 'denied' without extra crate.
+        }} catch {{}}
       }}
-      if(!rule?.clipboard&&navigator.clipboard){{
-        try{{navigator.clipboard.read=()=>Promise.reject(denied('Clipboard'));navigator.clipboard.readText=()=>Promise.reject(denied('Clipboard'))}}catch{{}}
+      if(navigator.clipboard){{
+        try {{
+          const wrap=(method)=>async ()=>{{
+            const decision=decide('clipboard');
+            if(decision==='deny') throw denied('Clipboard');
+            if(decision==='ask') await ask('clipboard')();
+            return method.call(navigator.clipboard);
+          }};
+          navigator.clipboard.read=wrap(navigator.clipboard.read);
+          navigator.clipboard.readText=wrap(navigator.clipboard.readText);
+        }} catch {{}}
       }}
     }})()"#)
 }
@@ -837,6 +920,7 @@ pub fn run() {
         .manage(NavStacks::default())
         .manage(DownloadIndex::default())
         .manage(downloads::DownloadManager::default())
+        .manage(PermissionWaiters::default())
         .setup(|app| {
             // Set the runtime window icon explicitly as well as the bundled executable
             // icon. This keeps `tauri dev` and packaged Windows builds consistent.
@@ -860,6 +944,8 @@ pub fn run() {
             browser_restore_scroll,
             browser_snapshot,
             browser_capabilities,
+            browser_permission_request,
+            browser_permission_respond,
             downloads::download_list,
             downloads::download_get,
             downloads::download_remove_record,
@@ -902,10 +988,60 @@ pub fn run() {
             local_store::local_set_session,
             local_store::local_export_backup,
             local_store::local_import_backup,
-            local_store::local_migration_status
+            local_store::local_migration_status,
+            browser_permission_request,
+            browser_permission_respond
         ])
         .run(tauri::generate_context!())
         .expect("error while running AI Knowledge Browser");
+}
+
+#[tauri::command]
+async fn browser_permission_request(
+    app: tauri::AppHandle,
+    request_id: String,
+    origin: String,
+    kind: String,
+    timeout_ms: Option<u64>,
+) -> Result<bool, String> {
+    if request_id.is_empty() || origin.is_empty() || kind.is_empty() {
+        return Err("request_id, origin and kind are required".into());
+    }
+    let waiters = app.state::<PermissionWaiters>();
+    let receiver = waiters.register(request_id.clone());
+    let _ = app.emit_to(
+        "main",
+        "browser://permission-request",
+        PermissionRequestPayload {
+            version: 1,
+            request_id: request_id.clone(),
+            origin: origin.clone(),
+            kind: kind.clone(),
+        },
+    );
+    let timeout = Duration::from_millis(timeout_ms.unwrap_or(15_000));
+    let verdict = match tokio::time::timeout(timeout, receiver).await {
+        Ok(Ok(allow)) => allow,
+        _ => {
+            // Drop the waiter so a late response is ignored instead of writing
+            // into a stale oneshot.
+            if let Ok(mut guard) = waiters.pending.lock() {
+                guard.remove(&request_id);
+            }
+            false
+        }
+    };
+    Ok(verdict)
+}
+
+#[tauri::command]
+fn browser_permission_respond(
+    app: tauri::AppHandle,
+    request_id: String,
+    allow: bool,
+) -> Result<bool, String> {
+    let waiters = app.state::<PermissionWaiters>();
+    Ok(waiters.resolve(&request_id, allow))
 }
 
 #[cfg(test)]
