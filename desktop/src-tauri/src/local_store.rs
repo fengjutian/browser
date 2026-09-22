@@ -39,6 +39,57 @@ const MIGRATIONS: &[(i64, &str)] = &[
             updated_at INTEGER NOT NULL
         );",
     ),
+    (
+        4,
+        "CREATE TABLE collections (
+            id TEXT PRIMARY KEY,
+            name TEXT NOT NULL UNIQUE,
+            description TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+        CREATE TABLE collection_documents (
+            collection_id TEXT NOT NULL,
+            document_id TEXT NOT NULL,
+            added_at TEXT NOT NULL,
+            PRIMARY KEY (collection_id, document_id),
+            FOREIGN KEY (collection_id) REFERENCES collections(id) ON DELETE CASCADE,
+            FOREIGN KEY (document_id) REFERENCES local_documents(id) ON DELETE CASCADE
+        );
+        CREATE INDEX idx_collection_documents_document ON collection_documents(document_id);",
+    ),
+    (
+        5,
+        "CREATE TABLE tasks (
+            id TEXT PRIMARY KEY,
+            kind TEXT NOT NULL,
+            document_id TEXT,
+            payload TEXT NOT NULL DEFAULT '{}',
+            status TEXT NOT NULL DEFAULT 'PENDING',
+            attempts INTEGER NOT NULL DEFAULT 0,
+            max_attempts INTEGER NOT NULL DEFAULT 5,
+            available_at TEXT NOT NULL,
+            started_at TEXT,
+            finished_at TEXT,
+            last_error TEXT
+        );
+        CREATE INDEX idx_tasks_status_available ON tasks(status, available_at);
+        CREATE INDEX idx_tasks_document ON tasks(document_id);",
+    ),
+    (
+        6,
+        "CREATE TABLE ai_providers (
+            id TEXT PRIMARY KEY,
+            provider_type TEXT NOT NULL,
+            base_url TEXT NOT NULL,
+            model TEXT NOT NULL,
+            embedding_model TEXT,
+            timeout_seconds INTEGER NOT NULL DEFAULT 60,
+            has_api_key INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );",
+    ),
 ];
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -63,6 +114,47 @@ pub struct LocalDocument {
 pub struct LocalMigrationStatus {
     version: i64,
     pending: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LocalCollection {
+    id: String,
+    name: String,
+    description: Option<String>,
+    created_at: String,
+    updated_at: String,
+    document_count: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LocalTask {
+    id: String,
+    kind: String,
+    document_id: Option<String>,
+    payload: String,
+    status: String,
+    attempts: i64,
+    max_attempts: i64,
+    available_at: String,
+    started_at: Option<String>,
+    finished_at: Option<String>,
+    last_error: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LocalAIProvider {
+    id: String,
+    provider_type: String,
+    base_url: String,
+    model: String,
+    embedding_model: Option<String>,
+    timeout_seconds: i64,
+    has_api_key: bool,
+    created_at: String,
+    updated_at: String,
 }
 
 fn connection(app: &tauri::AppHandle) -> Result<Connection, String> {
@@ -219,6 +311,503 @@ pub fn local_delete_document(app: tauri::AppHandle, id: String) -> Result<(), St
         .execute("DELETE FROM local_documents WHERE id=?", params![id])
         .map_err(|error| error.to_string())?;
     Ok(())
+}
+
+#[tauri::command]
+pub fn local_update_document(
+    app: tauri::AppHandle,
+    id: String,
+    title: Option<String>,
+    summary: Option<String>,
+    tags: Option<Vec<String>>,
+    starred: Option<bool>,
+    status: Option<String>,
+) -> Result<LocalDocument, String> {
+    let database = connection(&app)?;
+    let tags_json = match tags {
+        Some(values) => Some(serde_json::to_string(&values).map_err(|error| error.to_string())?),
+        None => None,
+    };
+    let updated = database
+        .execute(
+            "UPDATE local_documents SET
+                title = COALESCE(?2, title),
+                summary = COALESCE(?3, summary),
+                tags = COALESCE(?4, tags),
+                starred = COALESCE(?5, starred),
+                status = COALESCE(?6, status)
+             WHERE id = ?1",
+            params![
+                id,
+                title,
+                summary,
+                tags_json,
+                starred.map(|value| value as i64),
+                status,
+            ],
+        )
+        .map_err(|error| error.to_string())?;
+    if updated == 0 {
+        return Err(format!("document not found: {id}"));
+    }
+    let mut statement = database
+        .prepare("SELECT id,title,url,source,author,summary,markdown,word_count,status,tags,created_at,starred FROM local_documents WHERE id=?1")
+        .map_err(|error| error.to_string())?;
+    statement
+        .query_row(params![id], row_document)
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub fn local_update_tags(
+    app: tauri::AppHandle,
+    id: String,
+    tags: Vec<String>,
+) -> Result<(), String> {
+    let database = connection(&app)?;
+    let tags_json = serde_json::to_string(&tags).map_err(|error| error.to_string())?;
+    let updated = database
+        .execute("UPDATE local_documents SET tags=? WHERE id=?", params![tags_json, id])
+        .map_err(|error| error.to_string())?;
+    if updated == 0 {
+        return Err(format!("document not found: {id}"));
+    }
+    Ok(())
+}
+
+#[tauri::command]
+pub fn local_archive_document(app: tauri::AppHandle, id: String) -> Result<(), String> {
+    let database = connection(&app)?;
+    let updated = database
+        .execute(
+            "UPDATE local_documents SET status='ARCHIVED' WHERE id=?",
+            params![id],
+        )
+        .map_err(|error| error.to_string())?;
+    if updated == 0 {
+        return Err(format!("document not found: {id}"));
+    }
+    Ok(())
+}
+
+#[tauri::command]
+pub fn local_create_collection(
+    app: tauri::AppHandle,
+    name: String,
+    description: Option<String>,
+) -> Result<LocalCollection, String> {
+    let trimmed = name.trim();
+    if trimmed.is_empty() {
+        return Err("collection name must not be empty".into());
+    }
+    let database = connection(&app)?;
+    let id = format!("col-{}", uuid::Uuid::new_v4());
+    let now = chrono::Utc::now().to_rfc3339();
+    database
+        .execute(
+            "INSERT INTO collections(id,name,description,created_at,updated_at) VALUES(?,?,?,?,?)",
+            params![id, trimmed, description, now, now],
+        )
+        .map_err(|error| error.to_string())?;
+    Ok(LocalCollection { id, name: trimmed.to_string(), description, created_at: now.clone(), updated_at: now, document_count: 0 })
+}
+
+#[tauri::command]
+pub fn local_list_collections(app: tauri::AppHandle) -> Result<Vec<LocalCollection>, String> {
+    let database = connection(&app)?;
+    let mut statement = database
+        .prepare("SELECT c.id,c.name,c.description,c.created_at,c.updated_at,COUNT(cd.document_id) AS document_count FROM collections c LEFT JOIN collection_documents cd ON cd.collection_id=c.id GROUP BY c.id ORDER BY c.updated_at DESC")
+        .map_err(|error| error.to_string())?;
+    let rows = statement
+        .query_map([], |row| {
+            Ok(LocalCollection {
+                id: row.get(0)?,
+                name: row.get(1)?,
+                description: row.get(2)?,
+                created_at: row.get(3)?,
+                updated_at: row.get(4)?,
+                document_count: row.get(5)?,
+            })
+        })
+        .map_err(|error| error.to_string())?;
+    rows.collect::<Result<Vec<_>, _>>().map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub fn local_delete_collection(app: tauri::AppHandle, id: String) -> Result<(), String> {
+    connection(&app)?
+        .execute("DELETE FROM collections WHERE id=?", params![id])
+        .map_err(|error| error.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+pub fn local_add_to_collection(
+    app: tauri::AppHandle,
+    collection_id: String,
+    document_id: String,
+) -> Result<(), String> {
+    let database = connection(&app)?;
+    let now = chrono::Utc::now().to_rfc3339();
+    database
+        .execute(
+            "INSERT OR REPLACE INTO collection_documents(collection_id,document_id,added_at) VALUES(?,?,?)",
+            params![collection_id, document_id, now],
+        )
+        .map_err(|error| error.to_string())?;
+    database
+        .execute(
+            "UPDATE collections SET updated_at=? WHERE id=?",
+            params![now, collection_id],
+        )
+        .map_err(|error| error.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+pub fn local_remove_from_collection(
+    app: tauri::AppHandle,
+    collection_id: String,
+    document_id: String,
+) -> Result<(), String> {
+    connection(&app)?
+        .execute(
+            "DELETE FROM collection_documents WHERE collection_id=? AND document_id=?",
+            params![collection_id, document_id],
+        )
+        .map_err(|error| error.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+pub fn local_list_collections_for_document(
+    app: tauri::AppHandle,
+    document_id: String,
+) -> Result<Vec<LocalCollection>, String> {
+    let database = connection(&app)?;
+    let mut statement = database
+        .prepare("SELECT c.id,c.name,c.description,c.created_at,c.updated_at,COUNT(cd2.document_id) AS document_count FROM collections c JOIN collection_documents cd ON cd.collection_id=c.id LEFT JOIN collection_documents cd2 ON cd2.collection_id=c.id WHERE cd.document_id=?1 GROUP BY c.id ORDER BY c.updated_at DESC")
+        .map_err(|error| error.to_string())?;
+    let rows = statement
+        .query_map(params![document_id], |row| {
+            Ok(LocalCollection {
+                id: row.get(0)?,
+                name: row.get(1)?,
+                description: row.get(2)?,
+                created_at: row.get(3)?,
+                updated_at: row.get(4)?,
+                document_count: row.get(5)?,
+            })
+        })
+        .map_err(|error| error.to_string())?;
+    rows.collect::<Result<Vec<_>, _>>().map_err(|error| error.to_string())
+}
+
+fn row_task(row: &rusqlite::Row<'_>) -> rusqlite::Result<LocalTask> {
+    Ok(LocalTask {
+        id: row.get(0)?,
+        kind: row.get(1)?,
+        document_id: row.get(2)?,
+        payload: row.get(3)?,
+        status: row.get(4)?,
+        attempts: row.get(5)?,
+        max_attempts: row.get(6)?,
+        available_at: row.get(7)?,
+        started_at: row.get(8)?,
+        finished_at: row.get(9)?,
+        last_error: row.get(10)?,
+    })
+}
+
+#[tauri::command]
+pub fn local_enqueue_task(
+    app: tauri::AppHandle,
+    kind: String,
+    document_id: Option<String>,
+    payload: Option<String>,
+    max_attempts: Option<i64>,
+) -> Result<LocalTask, String> {
+    let database = connection(&app)?;
+    let id = format!("task-{}", uuid::Uuid::new_v4());
+    let now = chrono::Utc::now().to_rfc3339();
+    let payload = payload.unwrap_or_else(|| "{}".to_string());
+    let max_attempts = max_attempts.unwrap_or(5);
+    database
+        .execute(
+            "INSERT INTO tasks(id,kind,document_id,payload,status,attempts,max_attempts,available_at) VALUES(?,?,?,?,?,0,?,?)",
+            params![id, kind, document_id, payload, "PENDING", max_attempts, now],
+        )
+        .map_err(|error| error.to_string())?;
+    Ok(LocalTask {
+        id,
+        kind,
+        document_id,
+        payload,
+        status: "PENDING".to_string(),
+        attempts: 0,
+        max_attempts,
+        available_at: now,
+        started_at: None,
+        finished_at: None,
+        last_error: None,
+    })
+}
+
+#[tauri::command]
+pub fn local_claim_pending_task(app: tauri::AppHandle) -> Result<Option<LocalTask>, String> {
+    let database = connection(&app)?;
+    let now = chrono::Utc::now().to_rfc3339();
+    let mut statement = database
+        .prepare(
+            "UPDATE tasks SET status='PROCESSING', started_at=?1, attempts=attempts+1
+             WHERE id = (SELECT id FROM tasks WHERE status='PENDING' AND available_at<=?1 ORDER BY available_at LIMIT 1)
+             RETURNING id,kind,document_id,payload,status,attempts,max_attempts,available_at,started_at,finished_at,last_error",
+        )
+        .map_err(|error| error.to_string())?;
+    let mut rows = statement.query(params![now]).map_err(|error| error.to_string())?;
+    match rows.next().map_err(|error| error.to_string())? {
+        Some(row) => Ok(Some(row_task(&row).map_err(|error| error.to_string())?)),
+        None => Ok(None),
+    }
+}
+
+#[tauri::command]
+pub fn local_complete_task(app: tauri::AppHandle, id: String) -> Result<(), String> {
+    let database = connection(&app)?;
+    let now = chrono::Utc::now().to_rfc3339();
+    database
+        .execute("UPDATE tasks SET status='COMPLETED', finished_at=? WHERE id=?", params![now, id])
+        .map_err(|error| error.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+pub fn local_fail_task(
+    app: tauri::AppHandle,
+    id: String,
+    error: String,
+    backoff_seconds: i64,
+) -> Result<(), String> {
+    let database = connection(&app)?;
+    let now = chrono::Utc::now();
+    let next_available = (now + chrono::Duration::seconds(backoff_seconds)).to_rfc3339();
+    let updated = database
+        .execute(
+            "UPDATE tasks SET
+                status = CASE WHEN attempts >= max_attempts THEN 'FAILED' ELSE 'PENDING' END,
+                last_error = ?2,
+                available_at = ?3,
+                started_at = NULL
+             WHERE id = ?1",
+            params![id, error, next_available],
+        )
+        .map_err(|error| error.to_string())?;
+    if updated == 0 {
+        return Err(format!("task not found: {id}"));
+    }
+    Ok(())
+}
+
+#[tauri::command]
+pub fn local_recover_stale_tasks(
+    app: tauri::AppHandle,
+    timeout_seconds: i64,
+) -> Result<i64, String> {
+    let database = connection(&app)?;
+    let now = chrono::Utc::now();
+    let threshold = (now - chrono::Duration::seconds(timeout_seconds)).to_rfc3339();
+    let updated = database
+        .execute(
+            "UPDATE tasks SET status='PENDING', started_at=NULL WHERE status='PROCESSING' AND started_at < ?",
+            params![threshold],
+        )
+        .map_err(|error| error.to_string())?;
+    Ok(updated as i64)
+}
+
+#[tauri::command]
+pub fn local_retry_task(app: tauri::AppHandle, id: String) -> Result<(), String> {
+    let database = connection(&app)?;
+    let now = chrono::Utc::now().to_rfc3339();
+    let updated = database
+        .execute(
+            "UPDATE tasks SET status='PENDING', available_at=?1, last_error=NULL, started_at=NULL, finished_at=NULL WHERE id=?2 AND status='FAILED'",
+            params![now, id],
+        )
+        .map_err(|error| error.to_string())?;
+    if updated == 0 {
+        return Err(format!("task not found or not failed: {id}"));
+    }
+    Ok(())
+}
+
+#[tauri::command]
+pub fn local_list_recent_tasks(
+    app: tauri::AppHandle,
+    limit: i64,
+) -> Result<Vec<LocalTask>, String> {
+    let database = connection(&app)?;
+    let mut statement = database
+        .prepare("SELECT id,kind,document_id,payload,status,attempts,max_attempts,available_at,started_at,finished_at,last_error FROM tasks ORDER BY COALESCE(started_at, available_at) DESC LIMIT ?")
+        .map_err(|error| error.to_string())?;
+    let rows = statement
+        .query_map(params![limit], row_task)
+        .map_err(|error| error.to_string())?;
+    rows.collect::<Result<Vec<_>, _>>().map_err(|error| error.to_string())
+}
+
+const KEYRING_SERVICE: &str = "ai-knowledge-browser";
+
+fn keyring_set(account: &str, password: &str) -> Result<(), String> {
+    let entry = keyring::Entry::new(KEYRING_SERVICE, account).map_err(|e| e.to_string())?;
+    entry.set_password(password).map_err(|e| e.to_string())
+}
+
+fn keyring_delete(account: &str) -> Result<bool, String> {
+    let entry = keyring::Entry::new(KEYRING_SERVICE, account).map_err(|e| e.to_string())?;
+    match entry.delete_credential() {
+        Ok(()) => Ok(true),
+        Err(keyring::Error::NoEntry) => Ok(false),
+        Err(error) => Err(error.to_string()),
+    }
+}
+
+fn row_provider(row: &rusqlite::Row<'_>) -> rusqlite::Result<LocalAIProvider> {
+    let has_api_key: i64 = row.get(6)?;
+    Ok(LocalAIProvider {
+        id: row.get(0)?,
+        provider_type: row.get(1)?,
+        base_url: row.get(2)?,
+        model: row.get(3)?,
+        embedding_model: row.get(4)?,
+        timeout_seconds: row.get(5)?,
+        has_api_key: has_api_key != 0,
+        created_at: row.get(7)?,
+        updated_at: row.get(8)?,
+    })
+}
+
+#[tauri::command]
+pub fn local_save_ai_provider(
+    app: tauri::AppHandle,
+    id: Option<String>,
+    provider_type: String,
+    base_url: String,
+    model: String,
+    embedding_model: Option<String>,
+    timeout_seconds: i64,
+    api_key: Option<String>,
+    clear_api_key: bool,
+) -> Result<LocalAIProvider, String> {
+    let trimmed_type = provider_type.trim();
+    let trimmed_base = base_url.trim();
+    let trimmed_model = model.trim();
+    if trimmed_type.is_empty() || trimmed_base.is_empty() || trimmed_model.is_empty() {
+        return Err("provider type, base url and model are required".into());
+    }
+    if !(1..=600).contains(&timeout_seconds) {
+        return Err("timeout must be between 1 and 600 seconds".into());
+    }
+    let parsed_base = url::Url::parse(trimmed_base).map_err(|e| e.to_string())?;
+    if !matches!(parsed_base.scheme(), "http" | "https") {
+        return Err("base url must use http or https".into());
+    }
+    let database = connection(&app)?;
+    let now = chrono::Utc::now().to_rfc3339();
+    let provider_id = id.unwrap_or_else(|| format!("provider-{}", uuid::Uuid::new_v4()));
+    let key_change = if clear_api_key {
+        keyring_delete(&provider_id)?;
+        false
+    } else if let Some(key) = api_key.as_deref() {
+        if key.is_empty() {
+            false
+        } else {
+            keyring_set(&provider_id, key)?;
+            true
+        }
+    } else {
+        // no change requested, infer has_api_key by checking the keyring
+        keyring::Entry::new(KEYRING_SERVICE, &provider_id)
+            .ok()
+            .and_then(|entry| entry.get_password().ok().map(|_| true))
+            .unwrap_or(false)
+    };
+    let existing: Option<(String, String)> = database
+        .prepare("SELECT created_at, id FROM ai_providers WHERE id=?")
+        .map_err(|e| e.to_string())?
+        .query_row(params![provider_id], |row| Ok((row.get(0)?, row.get(1)?)))
+        .ok();
+    let created_at = existing.as_ref().map(|row| row.0.clone()).unwrap_or_else(|| now.clone());
+    database
+        .execute(
+            "INSERT INTO ai_providers(id,provider_type,base_url,model,embedding_model,timeout_seconds,has_api_key,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET provider_type=excluded.provider_type, base_url=excluded.base_url, model=excluded.model, embedding_model=excluded.embedding_model, timeout_seconds=excluded.timeout_seconds, has_api_key=excluded.has_api_key, updated_at=excluded.updated_at",
+            params![provider_id, trimmed_type, trimmed_base, trimmed_model, embedding_model, timeout_seconds, key_change as i64, created_at, now],
+        )
+        .map_err(|e| e.to_string())?;
+    let mut statement = database
+        .prepare("SELECT id,provider_type,base_url,model,embedding_model,timeout_seconds,has_api_key,created_at,updated_at FROM ai_providers WHERE id=?")
+        .map_err(|e| e.to_string())?;
+    statement
+        .query_row(params![provider_id], row_provider)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn local_get_ai_provider(
+    app: tauri::AppHandle,
+    id: String,
+) -> Result<Option<LocalAIProvider>, String> {
+    let database = connection(&app)?;
+    let mut statement = database
+        .prepare("SELECT id,provider_type,base_url,model,embedding_model,timeout_seconds,has_api_key,created_at,updated_at FROM ai_providers WHERE id=?")
+        .map_err(|e| e.to_string())?;
+    let mut rows = statement
+        .query(params![id])
+        .map_err(|e| e.to_string())?;
+    match rows.next().map_err(|e| e.to_string())? {
+        Some(row) => Ok(Some(row_provider(&row).map_err(|e| e.to_string())?)),
+        None => Ok(None),
+    }
+}
+
+#[tauri::command]
+pub fn local_list_ai_providers(app: tauri::AppHandle) -> Result<Vec<LocalAIProvider>, String> {
+    let database = connection(&app)?;
+    let mut statement = database
+        .prepare("SELECT id,provider_type,base_url,model,embedding_model,timeout_seconds,has_api_key,created_at,updated_at FROM ai_providers ORDER BY updated_at DESC")
+        .map_err(|e| e.to_string())?;
+    let rows = statement
+        .query_map([], row_provider)
+        .map_err(|e| e.to_string())?;
+    rows.collect::<Result<Vec<_>, _>>().map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn local_delete_ai_provider(app: tauri::AppHandle, id: String) -> Result<(), String> {
+    let _ = keyring_delete(&id);
+    connection(&app)?
+        .execute("DELETE FROM ai_providers WHERE id=?", params![id])
+        .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+pub fn local_find_document_by_url(
+    app: tauri::AppHandle,
+    url: String,
+) -> Result<Option<LocalDocument>, String> {
+    let database = connection(&app)?;
+    let mut statement = database
+        .prepare("SELECT id,title,url,source,author,summary,markdown,word_count,status,tags,created_at,starred FROM local_documents WHERE url = ?1 ORDER BY created_at DESC LIMIT 1")
+        .map_err(|error| error.to_string())?;
+    let mut rows = statement
+        .query_map(params![url], row_document)
+        .map_err(|error| error.to_string())?;
+    match rows.next() {
+        Some(Ok(document)) => Ok(Some(document)),
+        Some(Err(error)) => Err(error.to_string()),
+        None => Ok(None),
+    }
 }
 
 #[tauri::command]

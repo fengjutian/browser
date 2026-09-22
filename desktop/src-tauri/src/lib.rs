@@ -1,6 +1,7 @@
 pub mod browser;
 pub mod local_store;
 pub mod plugins;
+pub mod providers;
 
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
@@ -9,6 +10,10 @@ use std::sync::Mutex;
 use std::time::Duration;
 use tauri::image::Image;
 use tauri::{Emitter, Manager};
+
+use crate::providers::{AiProvider, ChatMessage, ChatRequest, ChatResponse};
+
+const KEYRING_SERVICE: &str = "ai-knowledge-browser";
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -265,6 +270,40 @@ async fn browser_snapshot(app: tauri::AppHandle, label: String) -> Result<PageSn
     Ok(snapshot)
 }
 
+#[tauri::command]
+async fn ai_chat(
+    app: tauri::AppHandle,
+    provider_id: String,
+    request: ChatRequest,
+) -> Result<ChatResponse, String> {
+    let database = local_store::connection(&app)?;
+    let (provider_type, base_url, model, timeout_seconds): (String, String, String, i64) = database
+        .prepare("SELECT provider_type,base_url,model,timeout_seconds FROM ai_providers WHERE id=?")
+        .map_err(|error| error.to_string())?
+        .query_row(params![provider_id], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)))
+        .map_err(|error| error.to_string())?;
+    let timeout = Duration::from_secs(timeout_seconds.clamp(1, 600) as u64);
+    let api_key = keyring::Entry::new(KEYRING_SERVICE, &provider_id)
+        .ok()
+        .and_then(|entry| entry.get_password().ok())
+        .filter(|value| !value.is_empty());
+    let provider: Box<dyn AiProvider> = match provider_type.as_str() {
+        "openai-compatible" => Box::new(providers::openai::OpenAICompatibleProvider {
+            base_url,
+            model,
+            api_key: api_key.clone(),
+            timeout,
+        }),
+        "ollama" => Box::new(providers::ollama::OllamaProvider { base_url, model, timeout }),
+        other => return Err(format!("unknown provider type: {other}")),
+    };
+    if provider.type_id() == "openai-compatible" && api_key.is_none() {
+        return Err("missing api key for openai-compatible provider".into());
+    }
+    let _ = ChatMessage { role: "system".into(), content: String::new() }; // keep types referenced
+    provider.chat(request).await.map_err(|error| error.to_string())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -291,7 +330,29 @@ pub fn run() {
             local_store::local_save_document,
             local_store::local_get_document,
             local_store::local_delete_document,
+            local_store::local_find_document_by_url,
             local_store::local_toggle_starred,
+            local_store::local_update_document,
+            local_store::local_update_tags,
+            local_store::local_archive_document,
+            local_store::local_create_collection,
+            local_store::local_list_collections,
+            local_store::local_delete_collection,
+            local_store::local_add_to_collection,
+            local_store::local_remove_from_collection,
+            local_store::local_list_collections_for_document,
+            local_store::local_enqueue_task,
+            local_store::local_claim_pending_task,
+            local_store::local_complete_task,
+            local_store::local_fail_task,
+            local_store::local_recover_stale_tasks,
+            local_store::local_retry_task,
+            local_store::local_list_recent_tasks,
+            local_store::local_save_ai_provider,
+            local_store::local_get_ai_provider,
+            local_store::local_list_ai_providers,
+            local_store::local_delete_ai_provider,
+            ai_chat,
             local_store::local_get_session,
             local_store::local_set_session,
             local_store::local_export_backup,

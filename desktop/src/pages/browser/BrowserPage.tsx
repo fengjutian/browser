@@ -2,7 +2,7 @@ import { MouseEvent, useEffect, useRef, useState } from 'react'
 import { Button, Card, Input, Segmented, Space, Tabs, Tag, Tooltip, Typography, message, type InputRef } from 'antd'
 import { ArrowLeftOutlined, ArrowRightOutlined, BookOutlined, CloseOutlined, CopyOutlined, GlobalOutlined, LoadingOutlined, PlusOutlined, ReloadOutlined, RobotOutlined, SafetyCertificateOutlined, SaveOutlined, SearchOutlined, StarOutlined, ThunderboltOutlined, TranslationOutlined } from '@ant-design/icons'
 import type { BrowserTab } from '../../types'
-import { getDocument, getSession, saveDocument, setSession } from '../../api'
+import { findDocumentByUrl, getDocument, getSession, saveDocument, setSession, toggleStarred } from '../../api'
 import { captureNativePage, closeNativeTab, ensureNativeTab, hasNativeTab, hideNativeTab, navigateHistory, onNativeNewTab, openNativeTab, readNativeState, reloadNativeTab, resizeNativeTab, showNativeTab, stopNativeTab } from '../../services/nativeBrowser'
 import { extractArticle } from '../../features/reader/extractArticle'
 import type { ReaderArticle } from '../../features/reader/types'
@@ -74,6 +74,16 @@ function parseClosedTabs(raw: string | null): ClosedTab[] {
   } catch { return [] }
 }
 
+function classifyNavigationError(error: unknown): BrowserTabError {
+  const message = String(error)
+  const protocolMatch = /^(external|blocked|unknown)-protocol:([a-z]+)/i.exec(message)
+  if (protocolMatch) {
+    const scheme = protocolMatch[2]
+    return { kind: 'unsupported-protocol', message: `不支持的协议：${scheme}://（应用仅打开 http/https 链接）` }
+  }
+  return { kind: 'load-failed', message }
+}
+
 export function BrowserPage() {
   const [tabs, setTabs] = useState<BrowserTab[]>([newTab('new')])
   const [activeTabId, setActiveTabId] = useState('new')
@@ -83,6 +93,7 @@ export function BrowserPage() {
   const [hydrated, setHydrated] = useState(false)
   const [history, setHistory] = useState<HistoryEntry[]>([])
   const [closedTabs, setClosedTabs] = useState<ClosedTab[]>([])
+  const [starredDocId, setStarredDocId] = useState<string | null>(null)
   const [draggingIndex, setDraggingIndex] = useState<number | null>(null)
   const [dragOverIndex, setDragOverIndex] = useState<number | null>(null)
   const [messageApi, contextHolder] = message.useMessage()
@@ -167,6 +178,17 @@ export function BrowserPage() {
   useEffect(() => { activeTabIdRef.current = activeTabId }, [activeTabId])
   useEffect(() => { tabsRef.current = tabs }, [tabs])
   useEffect(() => { closedTabsRef.current = closedTabs }, [closedTabs])
+
+  useEffect(() => {
+    const url = active.url
+    if (!url) { setStarredDocId(null); return }
+    let cancelled = false
+    void findDocumentByUrl(url).then(doc => {
+      if (cancelled) return
+      setStarredDocId(doc?.starred ? doc.id : null)
+    }).catch(() => { if (!cancelled) setStarredDocId(null) })
+    return () => { cancelled = true }
+  }, [active.url])
 
   const bounds = () => {
     const rect = surfaceRef.current?.getBoundingClientRect()
@@ -441,18 +463,36 @@ export function BrowserPage() {
       if (!article && hasNativeTab(active.id)) article = extractArticle(await captureNativePage(active.id))
       if (!article?.markdown?.trim()) throw new Error('reader_content_not_found')
       const created = await saveDocument({ title: article.title || active.title, url: active.url || 'about:blank', markdown: article.markdown, tags: ['Inbox'] })
+      setStarredDocId(created.id)
       for (let attempt = 0; attempt < 30; attempt++) {
         const document = await getDocument(created.id)
-        if (document.status === 'READY') { messageApi.open({ key, type: 'success', content: '已保存并完成索引' }); return }
+        if (document.status === 'READY') { messageApi.open({ key, type: 'success', content: '已收藏并完成索引' }); return }
         if (document.status === 'FAILED') throw new Error('processing failed')
         await new Promise(resolve => window.setTimeout(resolve, 200))
       }
-      messageApi.open({ key, type: 'info', content: '已保存，后台仍在处理中' })
+      messageApi.open({ key, type: 'info', content: '已收藏，后台仍在处理中' })
     } catch (error) {
       const kind = classifySaveError(error)
       const contentEmpty = kind === 'reader_content_not_found'
       messageApi.open({ key, type: contentEmpty ? 'error' : 'warning', content: contentEmpty ? '无法识别该页面正文，已取消保存' : '后端离线或处理失败，请稍后重试' })
     }
+  }
+
+  async function toggleStarCurrent() {
+    const url = active.url
+    if (!url) return
+    const key = 'star-toggle'
+    if (starredDocId) {
+      try {
+        await toggleStarred(starredDocId, false)
+        setStarredDocId(null)
+        messageApi.open({ key, type: 'success', content: '已取消收藏', duration: 2 })
+      } catch {
+        messageApi.open({ key, type: 'error', content: '取消收藏失败', duration: 2 })
+      }
+      return
+    }
+    await save()
   }
 
   async function openReader() {
@@ -485,8 +525,8 @@ export function BrowserPage() {
             </Tooltip>,
             closable: tabs.length > 1,
           }
-        })} activeKey={activeTabId} onChange={activateTab} onEdit={(target, action) => action === 'remove' && closeTab(String(target))}/><Tooltip title="新建标签页 (Ctrl+T)"><button type="button" aria-label="新建标签页" className="browser-tabs__new-tab" onClick={() => openNewTab()}><PlusOutlined/></button></Tooltip></div>
-    <div className="browser-toolbar"><Space><Button type="text" aria-label="后退" title="后退 (Alt+←)" icon={<ArrowLeftOutlined/>} disabled={!nativeMode || !active.canGoBack} onClick={() => void navigateHistory(active.id,-1)}/><Button type="text" aria-label="前进" title="前进 (Alt+→)" icon={<ArrowRightOutlined/>} disabled={!nativeMode || !active.canGoForward} onClick={() => void navigateHistory(active.id,1)}/><Button type="text" aria-label={active.loading?'停止加载':'重新加载'} title={active.loading?'停止加载 (Esc)':'重新加载 (F5)'} icon={active.loading?<CloseOutlined/>:<ReloadOutlined/>} disabled={!nativeMode} onClick={() => void (active.loading ? stopNativeTab(active.id) : reloadNativeTab(active.id))}/><Button type="text" icon={<BookOutlined/>} onClick={() => void openReader()}>阅读模式</Button></Space><form onSubmit={event => { event.preventDefault(); void navigate(address) }}><Input ref={addressRef} prefix={<SafetyCertificateOutlined/>} suffix={<StarOutlined/>} value={address} onFocus={event=>event.currentTarget.select()} onChange={event=>setAddress(event.target.value)} placeholder="搜索或输入网址"/></form><Tag icon={<SafetyCertificateOutlined/>} color="green">43</Tag><Button type={aiOpen?'primary':'text'} ghost={aiOpen} icon={<RobotOutlined/>} onClick={()=>setAiOpen(value=>!value)}/></div>
+        })} activeKey={activeTabId} onChange={activateTab} onEdit={(target, action) => action === 'remove' && closeTab(String(target))} tabBarExtraContent={<Tooltip title="新建标签页 (Ctrl+T)"><button type="button" aria-label="新建标签页" className="browser-tabs__new-tab" onClick={() => openNewTab()}><PlusOutlined/></button></Tooltip>}/></div>
+    <div className="browser-toolbar"><Space><Button type="text" aria-label="后退" title="后退 (Alt+←)" icon={<ArrowLeftOutlined/>} disabled={!nativeMode || !active.canGoBack} onClick={() => void navigateHistory(active.id,-1)}/><Button type="text" aria-label="前进" title="前进 (Alt+→)" icon={<ArrowRightOutlined/>} disabled={!nativeMode || !active.canGoForward} onClick={() => void navigateHistory(active.id,1)}/><Button type="text" aria-label={active.loading?'停止加载':'重新加载'} title={active.loading?'停止加载 (Esc)':'重新加载 (F5)'} icon={active.loading?<CloseOutlined/>:<ReloadOutlined/>} disabled={!nativeMode} onClick={() => void (active.loading ? stopNativeTab(active.id) : reloadNativeTab(active.id))}/><Button type="text" icon={<BookOutlined/>} onClick={() => void openReader()}>阅读模式</Button></Space><form onSubmit={event => { event.preventDefault(); void navigate(address) }}><Input ref={addressRef} prefix={<SafetyCertificateOutlined/>} suffix={<button type="button" className={`browser-star${starredDocId ? ' is-active' : ''}`} disabled={!active.url} aria-label={starredDocId ? '取消收藏' : '收藏当前页'} title={starredDocId ? '取消收藏' : '收藏当前页'} onClick={event => { event.preventDefault(); event.stopPropagation(); void toggleStarCurrent() }}><StarOutlined/></button>} value={address} onFocus={event=>event.currentTarget.select()} onChange={event=>setAddress(event.target.value)} placeholder="搜索或输入网址"/></form><Tag icon={<SafetyCertificateOutlined/>} color="green">43</Tag><Button type={aiOpen?'primary':'text'} ghost={aiOpen} icon={<RobotOutlined/>} onClick={()=>setAiOpen(value=>!value)}/></div>
     <div className="browser-content"><div className="web-surface" ref={surfaceRef}>{readerArticle
       ? <ReaderArticleView article={readerArticle}/>
       : active.error
@@ -507,14 +547,23 @@ function BrowserErrorView({tab, onRetry, onNewTab, onCopy}:{tab:BrowserTab;onRet
   const error = tab.error
   const kind = error?.kind ?? 'load-failed'
   const message = error?.message ?? '未知错误'
-  const title = kind === 'web-mode-required' ? '请在 Tauri 桌面应用中打开网页' : '无法加载该网页'
+  const title = kind === 'web-mode-required'
+    ? '请在 Tauri 桌面应用中打开网页'
+    : kind === 'unsupported-protocol'
+      ? '应用不支持该协议'
+      : '无法加载该网页'
+  const eyebrow = kind === 'web-mode-required'
+    ? '需要桌面应用'
+    : kind === 'unsupported-protocol'
+      ? '协议被拦截'
+      : '加载失败'
   return <div className="browser-error">
-    <Typography.Text className="eyebrow">{kind === 'web-mode-required' ? '需要桌面应用' : '加载失败'}</Typography.Text>
+    <Typography.Text className="eyebrow">{eyebrow}</Typography.Text>
     <Typography.Title level={3}>{title}</Typography.Title>
     <Typography.Paragraph type="secondary">{message}</Typography.Paragraph>
     {tab.url && <Typography.Text code className="browser-error__url">{tab.url}</Typography.Text>}
     <Space wrap>
-      {kind !== 'web-mode-required' && <Button type="primary" icon={<ReloadOutlined/>} onClick={onRetry}>重试</Button>}
+      {kind === 'load-failed' && <Button type="primary" icon={<ReloadOutlined/>} onClick={onRetry}>重试</Button>}
       <Button icon={<PlusOutlined/>} onClick={onNewTab}>返回新标签页</Button>
       {tab.url && <Button icon={<CopyOutlined/>} onClick={onCopy}>复制 URL</Button>}
     </Space>

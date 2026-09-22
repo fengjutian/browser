@@ -5,12 +5,11 @@ import type { View } from '../types'
 
 const items = [{ key: 'browser', icon: <GlobalOutlined />, label: '浏览器' }, { key: 'library', icon: <BookOutlined />, label: '知识库' }, { key: 'search', icon: <SearchOutlined />, label: '搜索' }, { key: 'ai', icon: <RobotOutlined />, label: 'AI Research' }]
 
-const MIN_SIDER_WIDTH = 72
+const MIN_SIDER_WIDTH = 56
 const MAX_SIDER_WIDTH = 320
-const DEFAULT_SIDER_WIDTH = 190
 
 export function AppLayout({ view, onViewChange, children }: { view: View; onViewChange: (view: View) => void; children: ReactNode }) {
-  const [siderWidth, setSiderWidth] = useState(DEFAULT_SIDER_WIDTH)
+  const [siderWidth, setSiderWidth] = useState(MIN_SIDER_WIDTH)
   const collapsed = siderWidth === MIN_SIDER_WIDTH
 
   useEffect(() => {
