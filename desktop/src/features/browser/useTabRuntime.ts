@@ -6,12 +6,10 @@ import {
   restoreNativeScroll,
   type NativeBrowserState,
 } from '../../services/nativeBrowser'
-import { decideTabSync, TAB_SYNC_FAILURE_THRESHOLD } from './tabSyncReducer'
+import { decideTabSync } from './tabSyncReducer'
 
 export interface TabRuntimeInputs {
   tab: BrowserTab
-  /** Resize observer bounds for when we need to reopen the underlying webview. */
-  getBounds: () => { x: number; y: number; width: number; height: number } | undefined
   /** Called when polling succeeds. */
   onApply: (patch: Partial<BrowserTab>, restoreScroll?: { x: number; y: number }) => void
   /** Called when the polling loop decides the webview should be reopened. */
@@ -22,6 +20,13 @@ export interface TabRuntimeInputs {
   visible: boolean
 }
 
+export interface TabRuntimeHandle {
+  /** Queue a scroll restore for the next poll where loading is false. */
+  enqueueScroll: (tabId: string, position: { x: number; y: number }) => void
+  /** Current consecutive failure count for a tab — exposed for diagnostics/tests. */
+  getFailureCount: (tabId: string) => number
+}
+
 /**
  * Polls `browser_state` for the active tab, applies patches, restores scroll
  * once the page finishes loading, and reopens the underlying webview after
@@ -29,12 +34,14 @@ export interface TabRuntimeInputs {
  * reported as dead). Pure decision logic lives in `./tabSyncReducer` so the
  * recovery threshold is unit-testable.
  */
-export function useTabRuntime(inputs: TabRuntimeInputs): void {
+export function useTabRuntime(inputs: TabRuntimeInputs): TabRuntimeHandle {
   const { tab, onApply, onReopen, intervalMs = 750, visible } = inputs
   const failureCountRef = useRef(new Map<string, number>())
   const pendingScrollRef = useRef(new Map<string, { x: number; y: number }>())
-  const inputsRef = useRef(inputs)
-  inputsRef.current = inputs
+  const onApplyRef = useRef(onApply)
+  const onReopenRef = useRef(onReopen)
+  onApplyRef.current = onApply
+  onReopenRef.current = onReopen
 
   useEffect(() => {
     if (!visible) return
@@ -62,7 +69,7 @@ export function useTabRuntime(inputs: TabRuntimeInputs): void {
         })
         if (decision.kind === 'reopen') {
           failureCountRef.current.delete(tab.id)
-          onReopen('crash-or-stuck')
+          onReopenRef.current('crash-or-stuck')
         } else if (decision.kind === 'bumpFailure') {
           failureCountRef.current.set(tab.id, decision.failures)
         }
@@ -80,7 +87,7 @@ export function useTabRuntime(inputs: TabRuntimeInputs): void {
         fallbackTitle: safeHostname(state.url),
       })
       if (decision.kind !== 'apply') return
-      onApply(decision.patch, decision.restoreScroll)
+      onApplyRef.current(decision.patch, decision.restoreScroll)
       if (pending && !state.loading && decision.restoreScroll) {
         pendingScrollRef.current.delete(tab.id)
         await restoreNativeScroll(tab.id, pending.x, pending.y).catch(() => undefined)
@@ -93,28 +100,12 @@ export function useTabRuntime(inputs: TabRuntimeInputs): void {
       cancelled = true
       if (timer !== undefined) window.clearInterval(timer)
     }
-  }, [tab.id, tab.url, intervalMs, visible, onApply, onReopen])
+  }, [tab.id, tab.url, intervalMs, visible])
 
-  /**
-   * Imperative API used by callers (BrowserPage, useTabSession) to enqueue a
-   * scroll restore for a tab they're about to open — kept on the hook instance
-   * via a stable ref so callers don't have to track refs themselves.
-   */
-  useTabRuntime.enqueueScroll = (tabId: string, position: { x: number; y: number }) => {
-    pendingScrollRef.current.set(tabId, position)
+  return {
+    enqueueScroll: (tabId, position) => { pendingScrollRef.current.set(tabId, position) },
+    getFailureCount: tabId => failureCountRef.current.get(tabId) ?? 0,
   }
-
-  useTabRuntime.getFailureCount = (tabId: string) => failureCountRef.current.get(tabId) ?? 0
-
-  // Force the threshold symbol to remain referenced from this module even
-  // when consumers only destructure the hook — useful for tree-shaking guards.
-  void TAB_SYNC_FAILURE_THRESHOLD
-}
-
-// eslint-disable-next-line @typescript-eslint/no-namespace
-declare namespace useTabRuntime {
-  function enqueueScroll(tabId: string, position: { x: number; y: number }): void
-  function getFailureCount(tabId: string): number
 }
 
 function safeHostname(url: string): string {

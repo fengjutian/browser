@@ -29,6 +29,7 @@ struct BrowserBounds {
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct NewTabRequest {
+    version: u32,
     opener_label: String,
     url: String,
 }
@@ -36,11 +37,67 @@ struct NewTabRequest {
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct DownloadUpdate {
+    version: u32,
     tab_label: String,
     url: String,
     path: Option<String>,
     status: String,
 }
+
+const EVENT_PAYLOAD_VERSION: u32 = 1;
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct BrowserCapabilities {
+    /// True when granular byte-level download progress is observable.
+    download_progress_bytes: bool,
+    /// True when downloads can be paused/resumed through Tauri/WebView APIs.
+    download_pause_resume: bool,
+    /// True when in-flight downloads can be cancelled from the host.
+    download_cancel: bool,
+    /// True when a native permission-requested event is observable.
+    native_permission_events: bool,
+    /// True when a native context menu can be hooked to the webview.
+    native_context_menu: bool,
+    /// True when site data can be cleared through the host webview profile.
+    clear_site_data: bool,
+    /// True when TLS/certificate errors can be intercepted from code.
+    certificate_error_interceptor: bool,
+    /// Best-effort backend label for diagnostics ("webview2", "wkwebview", ...).
+    webview_backend: Option<&'static str>,
+    /// Tauri crate version compiled into the binary.
+    tauri_runtime_version: Option<&'static str>,
+}
+
+#[tauri::command]
+fn browser_capabilities() -> BrowserCapabilities {
+    // Each flag reflects what the bundled Tauri 2 + wry + platform runtime can
+    // do without extra native crates. See docs/browser-native-capability-matrix.md
+    // for the source-of-truth citations.
+    BrowserCapabilities {
+        download_progress_bytes: true,   // tauri::webview::DownloadEvent::Progress
+        download_pause_resume: false,    // not exposed by Tauri 2 stable; would need reqwest streaming
+        download_cancel: true,           // return false from on_download Requested
+        native_permission_events: false, // Tauri 2 stable does not surface PermissionRequested
+        native_context_menu: false,      // wry has no context-menu integration in stable
+        clear_site_data: false,          // wry does not expose WebView2 profile; webview2-com needed
+        certificate_error_interceptor: false, // needs ICoreWebView2_5 ServerCertificateErrorDetected
+        webview_backend: Some(webview_backend_label()),
+        tauri_runtime_version: Some(env!("CARGO_PKG_VERSION")),
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn webview_backend_label() -> &'static str { "webview2" }
+
+#[cfg(target_os = "macos")]
+fn webview_backend_label() -> &'static str { "wkwebview" }
+
+#[cfg(target_os = "linux")]
+fn webview_backend_label() -> &'static str { "webkitgtk" }
+
+#[cfg(not(any(target_os = "windows", target_os = "macos", target_os = "linux")))]
+fn webview_backend_label() -> &'static str { "unknown" }
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -213,6 +270,7 @@ async fn browser_create(
                     "main",
                     "browser://new-tab",
                     NewTabRequest {
+                        version: EVENT_PAYLOAD_VERSION,
                         opener_label: opener_label.clone(),
                         url: url.to_string(),
                     },
@@ -223,12 +281,14 @@ async fn browser_create(
         .on_download(move |_webview, event| {
             let update = match event {
                 DownloadEvent::Requested { url, destination } => DownloadUpdate {
+                    version: EVENT_PAYLOAD_VERSION,
                     tab_label: download_label.clone(),
                     url: url.to_string(),
                     path: Some(destination.to_string_lossy().into_owned()),
                     status: "downloading".into(),
                 },
                 DownloadEvent::Finished { url, path, success } => DownloadUpdate {
+                    version: EVENT_PAYLOAD_VERSION,
                     tab_label: download_label.clone(),
                     url: url.to_string(),
                     path: path.map(|value| value.to_string_lossy().into_owned()),
@@ -547,6 +607,7 @@ pub fn run() {
             browser_state,
             browser_restore_scroll,
             browser_snapshot,
+            browser_capabilities,
             local_store::local_list_documents,
             local_store::local_save_document,
             local_store::local_get_document,
@@ -618,5 +679,25 @@ mod tests {
         assert!(stack.can_go_forward());
         stack.observe("https://example.com/c".into());
         assert_eq!(stack.index, 2);
+    }
+
+    #[test]
+    fn capability_flags_match_matrix_expectations() {
+        let caps = browser_capabilities();
+        // Reflect docs/browser-native-capability-matrix.md — change in lockstep.
+        assert!(caps.download_progress_bytes, "Tauri 2 DownloadEvent::Progress is observable");
+        assert!(!caps.download_pause_resume, "no pause/resume API in stable");
+        assert!(caps.download_cancel, "Requested handler returning false cancels");
+        assert!(!caps.native_permission_events, "PermissionRequested not in Tauri 2 stable");
+        assert!(!caps.native_context_menu, "wry has no context menu integration");
+        assert!(!caps.clear_site_data, "WebView2 profile API not in wry");
+        assert!(!caps.certificate_error_interceptor, "needs ICoreWebView2_5 + webview2-com");
+        assert!(caps.webview_backend.is_some(), "backend label must be set on every target");
+        assert!(caps.tauri_runtime_version.is_some(), "tauri runtime version must be set");
+    }
+
+    #[test]
+    fn event_payload_version_is_v1() {
+        assert_eq!(EVENT_PAYLOAD_VERSION, 1);
     }
 }

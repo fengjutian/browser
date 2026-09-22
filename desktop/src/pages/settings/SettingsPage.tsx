@@ -2,7 +2,7 @@ import { Alert, Button, Card, Form, Input, InputNumber, List, Segmented, Select,
 import { BgColorsOutlined, DeleteOutlined, KeyOutlined, MoonOutlined, SafetyCertificateOutlined, SaveOutlined, SunOutlined, ThunderboltOutlined } from '@ant-design/icons'
 import { useEffect, useState } from 'react'
 import { PageHeader } from '../../shared/components/PageHeader'
-import { deleteAIProvider, exportBackup, getAIProvider, importBackup, listAIProviders, saveAIProvider, aiTestProvider, type AIProviderInput } from '../../api'
+import { deleteAIProvider, exportBackup, getAIProvider, getBrowserShortcutsEnabled, importBackup, listAIProviders, saveAIProvider, aiTestProvider, setBrowserShortcutsEnabled, type AIProviderInput } from '../../api'
 import type { AIProvider, AIProviderType } from '../../types'
 import { normalizeOrigin, readSitePermissions, writeSitePermissions, type SitePermissionKind, type SitePermissionRule } from '../../features/browser/sitePermissions'
 import { readThemePreference, writeThemePreference, type ThemePreference } from '../../features/settings/theme'
@@ -40,6 +40,35 @@ function GeneralSettings() {
       { label: <Space><SunOutlined/>浅色</Space>, value: 'light' },
       { label: <Space><MoonOutlined/>深色</Space>, value: 'dark' },
     ]}/>
+  </Card>
+}
+
+const SHORTCUTS_EVENT = 'arcadia-shortcuts-change'
+
+function BrowserSettings() {
+  const [enabled, setEnabled] = useState<boolean>(() => getBrowserShortcutsEnabled())
+
+  useEffect(() => {
+    function onChange(event: Event) {
+      const detail = (event as CustomEvent<{ enabled: boolean }>).detail
+      setEnabled(detail.enabled)
+    }
+    window.addEventListener(SHORTCUTS_EVENT, onChange)
+    return () => window.removeEventListener(SHORTCUTS_EVENT, onChange)
+  }, [])
+
+  function toggle(next: boolean) {
+    setEnabled(next)
+    setBrowserShortcutsEnabled(next)
+  }
+
+  return <Card title="浏览器" className="settings-card">
+    <Typography.Title level={5}>键盘快捷键</Typography.Title>
+    <Typography.Paragraph type="secondary">关闭后,浏览器视图不再拦截 Ctrl/Cmd + T、W、Tab、1-9、Alt + ←/→ 等全局快捷键,改由各 WebView 自行处理。</Typography.Paragraph>
+    <Space>
+      <Switch checked={enabled} onChange={toggle} />
+      <Typography.Text>{enabled ? '已启用' : '已禁用'}</Typography.Text>
+    </Space>
   </Card>
 }
 
@@ -229,7 +258,7 @@ export function SettingsPage() {
   const items = ['通用','浏览器','隐私','AI Provider','知识库','插件','高级'].map((label, index) => ({
     key: label,
     label,
-    children: index === 0 ? <GeneralSettings/> : index === 2 ? <SitePermissionSettings/> : index === 3 ? <AIProviderSettings/> : index === 4 ? <KnowledgeBaseSettings/> : <Card><Typography.Title level={4}>{label}</Typography.Title><Typography.Paragraph type="secondary">该设置模块将在对应开发阶段开放。</Typography.Paragraph></Card>,
+    children: index === 0 ? <GeneralSettings/> : index === 1 ? <BrowserSettings/> : index === 2 ? <SitePermissionSettings/> : index === 3 ? <AIProviderSettings/> : index === 4 ? <KnowledgeBaseSettings/> : <Card><Typography.Title level={4}>{label}</Typography.Title><Typography.Paragraph type="secondary">该设置模块将在对应开发阶段开放。</Typography.Paragraph></Card>,
   }))
   return <section className="page"><PageHeader eyebrow="PREFERENCES" title="设置" description="调整浏览器、隐私、AI Provider 与知识库工作流。"/><Tabs tabPosition="left" items={items} defaultActiveKey="通用"/></section>
 }

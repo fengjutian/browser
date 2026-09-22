@@ -7,8 +7,18 @@ import { readSitePermissions } from '../features/browser/sitePermissions'
 export interface BrowserBounds { x: number; y: number; width: number; height: number }
 export interface NativeBrowserState { url: string; title: string; favicon?: string; loading: boolean; scrollX: number; scrollY: number; canGoBack: boolean; canGoForward: boolean }
 export interface NativePageSnapshot { url: string; html: string }
-interface NativeNewTabRequest { openerLabel: string; url: string }
-export interface NativeDownloadUpdate { tabLabel: string; url: string; path?: string; status: 'downloading'|'completed'|'failed' }
+/**
+ * v1: openerLabel + url. Future revisions may add origin, gesture, etc. The
+ * `version` field is always present on Rust-emitted events; consumers should
+ * treat missing fields as v1.
+ */
+interface NativeNewTabRequest { version: number; openerLabel: string; url: string }
+/**
+ * v1: tabLabel + url + path? + status. Future revisions may add byte-level
+ * progress, paused/resumed signalling, danger classification, etc.
+ */
+export interface NativeDownloadUpdate { version: number; tabLabel: string; url: string; path?: string; status: 'downloading'|'completed'|'failed' }
+export const EVENT_PAYLOAD_VERSION = 1
 const labels = new Map<string, string>()
 const isTauri = () => '__TAURI_INTERNALS__' in window
 const labelFor = (tabId: string) => `browser-${tabId.replace(/[^a-zA-Z0-9-]/g, '-')}`
@@ -69,3 +79,9 @@ export async function onNativeDownload(handler: (download: NativeDownloadUpdate)
   if (!isTauri()) return () => undefined
   return listen<NativeDownloadUpdate>('browser://download', event => handler(event.payload))
 }
+
+/**
+ * Forward of `browser_capabilities` from the Rust side. Re-exposed so consumers
+ * can stay on the `services/nativeBrowser.ts` import surface.
+ */
+export { getBrowserCapabilities, peekBrowserCapabilities, BROWSER_CAPABILITIES_FALLBACK, type BrowserCapabilities } from './browserCapabilities'

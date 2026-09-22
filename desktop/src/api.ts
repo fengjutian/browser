@@ -204,13 +204,12 @@ export async function setSession(key: string, value: string): Promise<void> {
   await invoke('local_set_session', { key, value })
 }
 
-export const BROWSER_SHORTCUTS_ENABLED_KEY = 'browser.shortcuts.enabled'
+export const BROWSER_SHORTCUTS_STORAGE_KEY = 'arcadia-browser-shortcuts-enabled'
 
-export async function getBrowserShortcutsEnabled(): Promise<boolean> {
-  if (!isTauri()) return true
-  const raw = await getSession(BROWSER_SHORTCUTS_ENABLED_KEY)
-  if (raw === null) return true
+export function getBrowserShortcutsEnabled(): boolean {
   try {
+    const raw = localStorage.getItem(BROWSER_SHORTCUTS_STORAGE_KEY)
+    if (raw === null) return true
     const parsed = JSON.parse(raw) as { enabled?: boolean }
     return parsed.enabled !== false
   } catch {
@@ -218,9 +217,9 @@ export async function getBrowserShortcutsEnabled(): Promise<boolean> {
   }
 }
 
-export async function setBrowserShortcutsEnabled(enabled: boolean): Promise<void> {
-  if (!isTauri()) return
-  await setSession(BROWSER_SHORTCUTS_ENABLED_KEY, JSON.stringify({ enabled }))
+export function setBrowserShortcutsEnabled(enabled: boolean): void {
+  localStorage.setItem(BROWSER_SHORTCUTS_STORAGE_KEY, JSON.stringify({ enabled }))
+  window.dispatchEvent(new CustomEvent('arcadia-shortcuts-change', { detail: { enabled } }))
 }
 
 export interface BackupDocument {

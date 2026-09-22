@@ -185,35 +185,6 @@ describe('api', () => {
       })
       expect(summary).toEqual({ documentsInserted: 3, documentsSkipped: 1, sessionInserted: 2 })
     })
-
-    it('getBrowserShortcutsEnabled defaults to true when Tauri has no session entry', async () => {
-      setTauri(true)
-      invoke.mockResolvedValueOnce(null)
-      await expect(getBrowserShortcutsEnabled()).resolves.toBe(true)
-      expect(invoke).toHaveBeenCalledWith('local_get_session', { key: 'browser.shortcuts.enabled' })
-    })
-
-    it('getBrowserShortcutsEnabled returns false when persisted value is false', async () => {
-      setTauri(true)
-      invoke.mockResolvedValueOnce(JSON.stringify({ enabled: false }))
-      await expect(getBrowserShortcutsEnabled()).resolves.toBe(false)
-    })
-
-    it('getBrowserShortcutsEnabled falls back to true on malformed JSON', async () => {
-      setTauri(true)
-      invoke.mockResolvedValueOnce('not json {')
-      await expect(getBrowserShortcutsEnabled()).resolves.toBe(true)
-    })
-
-    it('setBrowserShortcutsEnabled persists JSON payload via local_set_session', async () => {
-      setTauri(true)
-      invoke.mockResolvedValueOnce(undefined)
-      await setBrowserShortcutsEnabled(false)
-      expect(invoke).toHaveBeenCalledWith('local_set_session', {
-        key: 'browser.shortcuts.enabled',
-        value: JSON.stringify({ enabled: false }),
-      })
-    })
   })
 
   describe('createDocument payload shape', () => {
@@ -275,6 +246,47 @@ describe('api', () => {
           }),
         }),
       )
+    })
+  })
+
+  describe('browser shortcuts preference (localStorage)', () => {
+    beforeEach(() => {
+      localStorage.clear()
+    })
+
+    it('defaults to enabled when no value is stored', () => {
+      expect(getBrowserShortcutsEnabled()).toBe(true)
+    })
+
+    it('returns false after persisting disabled', () => {
+      setBrowserShortcutsEnabled(false)
+      expect(getBrowserShortcutsEnabled()).toBe(false)
+    })
+
+    it('returns true after persisting enabled', () => {
+      setBrowserShortcutsEnabled(false)
+      setBrowserShortcutsEnabled(true)
+      expect(getBrowserShortcutsEnabled()).toBe(true)
+    })
+
+    it('falls back to enabled when stored value is malformed', () => {
+      localStorage.setItem('arcadia-browser-shortcuts-enabled', 'not json {')
+      expect(getBrowserShortcutsEnabled()).toBe(true)
+    })
+
+    it('falls back to enabled when explicit false is missing', () => {
+      localStorage.setItem('arcadia-browser-shortcuts-enabled', JSON.stringify({}))
+      expect(getBrowserShortcutsEnabled()).toBe(true)
+    })
+
+    it('dispatches a change event when toggled', () => {
+      const listener = vi.fn()
+      window.addEventListener('arcadia-shortcuts-change', listener)
+      setBrowserShortcutsEnabled(false)
+      expect(listener).toHaveBeenCalled()
+      const event = listener.mock.calls[0][0] as CustomEvent<{ enabled: boolean }>
+      expect(event.detail.enabled).toBe(false)
+      window.removeEventListener('arcadia-shortcuts-change', listener)
     })
   })
 })
