@@ -2,13 +2,33 @@ import { FormEvent, useEffect, useRef, useState } from 'react'
 import { Button, Card, Input, Segmented, Space, Tabs, Tag, Tooltip, Typography, message, type InputRef } from 'antd'
 import { ArrowLeftOutlined, ArrowRightOutlined, BookOutlined, CloseOutlined, GlobalOutlined, LoadingOutlined, PlusOutlined, ReloadOutlined, RobotOutlined, SafetyCertificateOutlined, SaveOutlined, SearchOutlined, StarOutlined, ThunderboltOutlined, TranslationOutlined } from '@ant-design/icons'
 import type { BrowserTab } from '../../types'
-import { getDocument, saveDocument } from '../../api'
+import { getDocument, getSession, saveDocument, setSession } from '../../api'
 import { captureNativePage, closeNativeTab, hasNativeTab, hideNativeTab, navigateHistory, onNativeNewTab, openNativeTab, readNativeState, reloadNativeTab, resizeNativeTab, showNativeTab, stopNativeTab } from '../../services/nativeBrowser'
 import { extractArticle } from '../../features/reader/extractArticle'
 import type { ReaderArticle } from '../../features/reader/types'
 import { classifySaveError } from '../../features/documents/saveClassifier'
+import { useDebouncedValue } from '../../shared/hooks/useDebouncedValue'
+
+const SESSION_KEY = 'browser.tabs'
+const SESSION_DEBOUNCE_MS = 500
 
 const newTab = (id: string = crypto.randomUUID()): BrowserTab => ({ id, url: '', title: '新标签页', loading: false, active: true, pinned: false })
+
+interface PersistedSession {
+  tabs: BrowserTab[]
+  activeTabId: string
+}
+
+function parsePersistedSession(raw: string | null): PersistedSession | null {
+  if (!raw) return null
+  try {
+    const value = JSON.parse(raw) as Partial<PersistedSession>
+    if (!value || !Array.isArray(value.tabs) || value.tabs.length === 0) return null
+    if (typeof value.activeTabId !== 'string') return null
+    if (!value.tabs.some(tab => tab.id === value.activeTabId)) return null
+    return { tabs: value.tabs as BrowserTab[], activeTabId: value.activeTabId }
+  } catch { return null }
+}
 
 export function BrowserPage() {
   const [tabs, setTabs] = useState<BrowserTab[]>([newTab('new')])
@@ -17,6 +37,7 @@ export function BrowserPage() {
   const [aiOpen, setAiOpen] = useState(false)
   const [nativeMode, setNativeMode] = useState(false)
   const [readerArticle, setReaderArticle] = useState<ReaderArticle | null>(null)
+  const [hydrated, setHydrated] = useState(false)
   const [messageApi, contextHolder] = message.useMessage()
   const surfaceRef = useRef<HTMLDivElement>(null)
   const addressRef = useRef<InputRef>(null)
@@ -24,6 +45,27 @@ export function BrowserPage() {
   const activeTabIdRef = useRef(activeTabId)
   const tabsRef = useRef(tabs)
   const active = tabs.find(tab => tab.id === activeTabId) ?? tabs[0]
+
+  useEffect(() => {
+    let cancelled = false
+    void getSession(SESSION_KEY).then(raw => {
+      if (cancelled) return
+      const parsed = parsePersistedSession(raw)
+      if (parsed) {
+        setTabs(parsed.tabs)
+        setActiveTabId(parsed.activeTabId)
+        setAddress(parsed.tabs.find(tab => tab.id === parsed.activeTabId)?.url ?? '')
+      }
+      setHydrated(true)
+    })
+    return () => { cancelled = true }
+  }, [])
+
+  const sessionJson = useDebouncedValue(JSON.stringify({ tabs, activeTabId }), SESSION_DEBOUNCE_MS)
+  useEffect(() => {
+    if (!hydrated) return
+    void setSession(SESSION_KEY, sessionJson)
+  }, [sessionJson, hydrated])
 
   useEffect(() => { activeTabIdRef.current = activeTabId }, [activeTabId])
   useEffect(() => { tabsRef.current = tabs }, [tabs])

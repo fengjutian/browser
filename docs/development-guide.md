@@ -209,6 +209,8 @@ sequenceDiagram
 | `getDocument(id)` | `local_get_document` | 读取详情 |
 | `deleteDocument(id)` | `local_delete_document` | 删除文档 |
 | `toggleStarred(id, starred)` | `local_toggle_starred` | 切换收藏标记，文档不存在时报错 |
+| `getSession(key)` / `setSession(key, value)` | `local_get_session` / `local_set_session` | 通用 K/V；非 Tauri 模式 get 返回 null、set no-op |
+| `exportBackup()` / `importBackup(backup)` | `local_export_backup` / `local_import_backup` | 导出 / 导入本地文档 + 会话状态为备份；版本号必须为 1；非 Tauri 模式导出空、导入返回零计数 |
 
 本地文档 ID 为 `local-{crypto.randomUUID()}`，保存时直接标记为 `READY`。当前保存逻辑仍保留状态轮询，但本地路径第一次读取通常即可得到 `READY`。
 
@@ -233,6 +235,10 @@ sequenceDiagram
 | `local_get_document` | `id` | 文档或 `null` | 本地详情 |
 | `local_delete_document` | `id` | `()` | 本地删除 |
 | `local_toggle_starred` | `id, starred` | `bool` | 更新收藏标记；0 行更新则返回错误 |
+| `local_get_session` | `key` | `string` 或 `null` | 通用 K/V 读取 |
+| `local_set_session` | `key, value` | `()` | 通用 K/V 写入（upsert） |
+| `local_export_backup` | — | `LocalBackup` | 导出 `{ version, exportedAt, documents, session }` |
+| `local_import_backup` | `backup` | `LocalImportSummary` | 导入文档 + 会话；非 v1 版本返回错误 |
 | `local_migration_status` | — | `{ version, pending }` | 当前 schema 版本与待迁移数 |
 
 WebView 脚本通过 `eval_with_callback` 执行，等待上限为 5 秒。command 错误目前以字符串传回前端。
@@ -276,7 +282,11 @@ font-src https://fonts.gstatic.com
 | `created_at` | TEXT | ISO 时间字符串 |
 | `starred` | INTEGER | 收藏标记，0/1，索引 `idx_local_documents_starred (starred DESC, created_at DESC)`（v2 迁移加入） |
 
-查询使用 `LIKE '%query%'` 匹配 title、markdown、summary 和序列化后的 tags，按 `starred DESC, created_at DESC` 排序，收藏文档优先。Schema 版本与迁移由 `schema_version` 表 + `MIGRATIONS` 常量管理，每次 `connection()` 调用 `run_migrations` 自动推进；`local_migration_status` command 暴露当前版本与 pending 数量。FTS5、分页、备份恢复命令仍未引入。
+查询使用 `LIKE '%query%'` 匹配 title、markdown、summary 和序列化后的 tags，按 `starred DESC, created_at DESC` 排序，收藏文档优先。Schema 版本与迁移由 `schema_version` 表 + `MIGRATIONS` 常量管理，每次 `connection()` 调用 `run_migrations` 自动推进；`local_migration_status` command 暴露当前版本与 pending 数量。
+
+通用 K/V 表 `local_session (key, value, updated_at)`（v3 迁移加入）支持 `local_get_session` / `local_set_session` commands，用于 BrowserPage 在挂载时恢复 tabs 与 activeTabId，变更后 500ms debounce 落盘。
+
+`local_documents` + `local_session` 全量导出为 JSON（`local_export_backup`），按文档 id 做 upsert 导入（`local_import_backup`），设置页"知识库"标签内提供"导出备份" / "从文件恢复"按钮（基于 Blob 下载 + HTML input file，无需 fs 插件）。备份结构 `version=1`、保留时间戳与两类数据。FTS5、分页仍未引入。
 
 ### 7.2 Go 服务数据库
 
@@ -524,7 +534,7 @@ go test ./...
 
 - Go：覆盖 health、创建校验、文档生命周期、SQLite 持久化/搜索/删除、Processor READY/FAILED。
 - Rust：覆盖域名补全、搜索词转换和高权限协议拒绝。
-- 前端：Vitest + happy-dom 已配置；共 25 个用例（`extractArticle` 6、`api.ts` 14、`useDebouncedValue` 5），`npm run test` 通过。
+- 前端：Vitest + happy-dom 已配置；共 41 个用例（`extractArticle` 6、`api.ts` 26、`useDebouncedValue` 5、`saveClassifier` 4），`npm run test` 通过。
 - TypeScript 检查和 Vite 生产构建当前通过。
 
 优先补充的前端测试：
@@ -580,15 +590,15 @@ go test ./...
 1. AI 摘要、问答、翻译、自动标签。
 2. Embedding、混合检索、Reranker 和带引用 RAG。
 3. 隐私拦截与真实统计。
-4. ⏳ 历史、书签、下载、会话恢复和标签拖拽 — 书签（收藏）已部分实现：`local_documents.starred` 列 + `local_toggle_starred` command + 卡片星标按钮 + 列表置顶。剩余：历史下载、会话恢复、标签拖拽。
+4. ⏳ 历史、书签、下载、会话恢复和标签拖拽 — 书签（收藏）与会话恢复已实现：`local_documents.starred` + 卡片星标按钮；`local_session` 通用 K/V + BrowserPage 挂载时恢复 tabs/activeTabId、500ms debounce 落盘。剩余：历史下载、标签拖拽。
 5. 插件 Runtime、集合管理和归档入口。
 
 ## 15. 推荐演进顺序
 
 1. 修复空正文保存：提取失败时明确失败，不写占位数据。
-2. ✅ 桌面 SQLite 版本化迁移已完成；备份/恢复机制待补。
+2. ✅ 桌面 SQLite 版本化迁移已完成；备份/恢复机制已实现（`local_export_backup` / `local_import_backup` + 设置页"知识库"标签，Blob 下载 + 文件 input）。
 3. 决定唯一数据所有权：继续 Rust 本地优先，或正式引入 Go sidecar；在此之前不要同时扩展两套 schema。
-4. ⏳ 补齐前端关键路径测试 — 已完成 `extractArticle` / `api.ts` / 搜索 debounce（抽出 `useDebouncedValue` hook）；剩 §12 优先级列表的标签快捷键 + 保存回归测试，需要组件级测试基础设施（@testing-library/react）后才能补。
+4. ⏳ 补齐前端关键路径测试 — 已完成 `extractArticle` / `api.ts` / 搜索 debounce（抽出 `useDebouncedValue` hook）/ saveClassifier + 备份导入导出；剩 §12 优先级列表的标签快捷键 + 保存回归测试，需要组件级测试基础设施（@testing-library/react）后才能补。
 5. 如果保留 Go sidecar，先完成 loopback token、随机端口、生命周期监管和统一迁移。
 6. 接入系统密钥环后再实现 OpenAI-compatible/Ollama Provider。
 7. 在稳定全文检索和引用模型后实现 RAG，最后扩展 Agent/Plugin。

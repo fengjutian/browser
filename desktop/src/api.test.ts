@@ -4,7 +4,7 @@ const { invoke } = vi.hoisted(() => ({ invoke: vi.fn() }))
 
 vi.mock('@tauri-apps/api/core', () => ({ invoke }))
 
-import { deleteDocument, getDocument, listDocuments, saveDocument, toggleStarred } from './api'
+import { deleteDocument, exportBackup, getDocument, getSession, importBackup, listDocuments, saveDocument, setSession, toggleStarred } from './api'
 
 const setTauri = (present: boolean) => {
   if (present) {
@@ -59,6 +59,28 @@ describe('api', () => {
 
     it('toggleStarred throws "Document unavailable" without calling invoke', async () => {
       await expect(toggleStarred('local-x', true)).rejects.toThrow('Document unavailable')
+      expect(invoke).not.toHaveBeenCalled()
+    })
+
+    it('getSession returns null without calling invoke in non-Tauri mode', async () => {
+      await expect(getSession('any.key')).resolves.toBeNull()
+      expect(invoke).not.toHaveBeenCalled()
+    })
+
+    it('setSession is a no-op without calling invoke in non-Tauri mode', async () => {
+      await expect(setSession('any.key', 'value')).resolves.toBeUndefined()
+      expect(invoke).not.toHaveBeenCalled()
+    })
+
+    it('exportBackup returns an empty backup in non-Tauri mode without invoking', async () => {
+      const result = await exportBackup()
+      expect(result).toEqual({ version: 1, exportedAt: '', documents: [], session: [] })
+      expect(invoke).not.toHaveBeenCalled()
+    })
+
+    it('importBackup returns zero summary in non-Tauri mode without invoking', async () => {
+      const summary = await importBackup({ version: 1, exportedAt: '', documents: [], session: [] })
+      expect(summary).toEqual({ documentsInserted: 0, documentsSkipped: 0, sessionInserted: 0 })
       expect(invoke).not.toHaveBeenCalled()
     })
   })
@@ -118,6 +140,38 @@ describe('api', () => {
     it('toggleStarred surfaces backend "document not found" error', async () => {
       invoke.mockRejectedValueOnce(new Error('document not found: local-missing'))
       await expect(toggleStarred('local-missing', false)).rejects.toThrow('document not found')
+    })
+
+    it('getSession forwards key and returns the stored value', async () => {
+      invoke.mockResolvedValueOnce('{"tabs":[1,2,3]}')
+      await expect(getSession('browser.tabs')).resolves.toBe('{"tabs":[1,2,3]}')
+      expect(invoke).toHaveBeenCalledWith('local_get_session', { key: 'browser.tabs' })
+    })
+
+    it('getSession returns null when backend has no entry', async () => {
+      invoke.mockResolvedValueOnce(null)
+      await expect(getSession('missing.key')).resolves.toBeNull()
+    })
+
+    it('setSession forwards key and value to invoke', async () => {
+      invoke.mockResolvedValueOnce(undefined)
+      await setSession('browser.tabs', '{"tabs":[]}')
+      expect(invoke).toHaveBeenCalledWith('local_set_session', { key: 'browser.tabs', value: '{"tabs":[]}' })
+    })
+
+    it('exportBackup forwards to invoke in Tauri mode', async () => {
+      invoke.mockResolvedValueOnce({ version: 1, exportedAt: '1', documents: [], session: [] })
+      await exportBackup()
+      expect(invoke).toHaveBeenCalledWith('local_export_backup')
+    })
+
+    it('importBackup forwards backup payload and returns summary', async () => {
+      invoke.mockResolvedValueOnce({ documentsInserted: 3, documentsSkipped: 1, sessionInserted: 2 })
+      const summary = await importBackup({ version: 1, exportedAt: '', documents: [], session: [] })
+      expect(invoke).toHaveBeenCalledWith('local_import_backup', {
+        backup: { version: 1, exportedAt: '', documents: [], session: [] },
+      })
+      expect(summary).toEqual({ documentsInserted: 3, documentsSkipped: 1, sessionInserted: 2 })
     })
   })
 

@@ -212,6 +212,10 @@ pub fn run() {
             local_store::local_get_document,
             local_store::local_delete_document,
             local_store::local_toggle_starred,
+            local_store::local_get_session,
+            local_store::local_set_session,
+            local_store::local_export_backup,
+            local_store::local_import_backup,
             local_store::local_migration_status
         ])
         .run(tauri::generate_context!())
