@@ -241,6 +241,7 @@ go test ./...
 - [系统架构](docs/architecture.md)
 - [API 说明](docs/api.md)
 - [开发路线图](docs/roadmap.md)
+- [开发技术文档](docs/development-guide.md)
 
 ## 贡献
 
