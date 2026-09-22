@@ -193,8 +193,8 @@
   position: relative;
   align-items: stretch !important;
   gap: 0 !important;
-  height: 46px !important;
-  padding: 5px 0 0 10px !important;
+  height: 40px !important;
+  padding: 0 0 0 10px !important;
   border-bottom: 1px solid #d8ded9;
   background: #e7ebe7 !important;
 
@@ -222,7 +222,7 @@
     width: clamp(96px, calc((100vw - var(--sider-width, 56px) - 92px) / var(--tab-count, 1)), 220px);
     min-width: 96px !important;
     max-width: 220px !important;
-    height: 38px;
+    height: 40px;
     margin: 0 !important;
     padding: 0 10px 0 13px !important;
     border: 1px solid transparent !important;
@@ -269,7 +269,7 @@
     align-self: flex-end;
     flex: none;
     width: 34px;
-    height: 38px;
+    height: 40px;
     margin: 0 8px 0 2px !important;
     padding: 0 !important;
     border: 0 !important;
