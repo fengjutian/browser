@@ -133,6 +133,25 @@ impl NavStack {
 
     fn can_go_back(&self) -> bool { self.index > 0 }
     fn can_go_forward(&self) -> bool { self.index + 1 < self.entries.len() }
+
+    fn observe(&mut self, url: String) {
+        if self.entries.is_empty() {
+            self.push(url);
+            return;
+        }
+        if self.entries.get(self.index) == Some(&url) {
+            return;
+        }
+        if self.index > 0 && self.entries.get(self.index - 1) == Some(&url) {
+            self.index -= 1;
+            return;
+        }
+        if self.entries.get(self.index + 1) == Some(&url) {
+            self.index += 1;
+            return;
+        }
+        self.push(url);
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -363,14 +382,11 @@ async fn browser_state(app: tauri::AppHandle, label: String) -> Result<BrowserSt
     )
     .await?;
     let navs = app.state::<NavStacks>();
-    let guard = navs.stacks.lock().map_err(|_| "nav stack poisoned".to_string())?;
-    if let Some(stack) = guard.get(&label) {
-        state.can_go_back = stack.can_go_back();
-        state.can_go_forward = stack.can_go_forward();
-    } else {
-        state.can_go_back = false;
-        state.can_go_forward = false;
-    }
+    let mut guard = navs.stacks.lock().map_err(|_| "nav stack poisoned".to_string())?;
+    let stack = guard.entry(label).or_default();
+    stack.observe(state.url.clone());
+    state.can_go_back = stack.can_go_back();
+    state.can_go_forward = stack.can_go_forward();
     Ok(state)
 }
 
@@ -562,5 +578,29 @@ mod tests {
     fn external_navigation_rejects_privileged_protocols() {
         assert!(external_url("file:///C:/Windows/System32").is_err());
         assert!(external_url("javascript:alert(1)").is_err());
+    }
+
+    #[test]
+    fn nav_stack_observes_page_clicks_and_spa_routes() {
+        let mut stack = NavStack::default();
+        stack.observe("https://example.com/".into());
+        stack.observe("https://example.com/docs".into());
+        stack.observe("https://example.com/docs/intro".into());
+        assert!(stack.can_go_back());
+        assert!(!stack.can_go_forward());
+        assert_eq!(stack.index, 2);
+    }
+
+    #[test]
+    fn nav_stack_recognizes_native_back_and_forward_changes() {
+        let mut stack = NavStack::default();
+        stack.push("https://example.com/a".into());
+        stack.push("https://example.com/b".into());
+        stack.push("https://example.com/c".into());
+        stack.observe("https://example.com/b".into());
+        assert_eq!(stack.index, 1);
+        assert!(stack.can_go_forward());
+        stack.observe("https://example.com/c".into());
+        assert_eq!(stack.index, 2);
     }
 }

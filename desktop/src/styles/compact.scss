@@ -355,6 +355,24 @@ select {
   .is-error { color: #b53a36; }
 }
 
+.browser-toolbar form > .ant-select { width: 100%; }
+
+.address-suggestion {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+
+  b,
+  small {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  small { color: #748078; }
+}
+
 // Browser-style tab strip: the new-tab action follows the last tab; when the
 // row fills, tabs shrink and Ant's overflow control takes over.
 .browser-tabs {

@@ -1,11 +1,11 @@
 import { Alert, Button, Card, Empty, Input, List, Space, Spin, Tag, Typography, message } from 'antd'
-import { ArrowRightOutlined, FileTextOutlined, RobotOutlined } from '@ant-design/icons'
+import { ArrowRightOutlined, FileTextOutlined, RobotOutlined, SettingOutlined } from '@ant-design/icons'
 import { useEffect, useMemo, useState } from 'react'
 import { PageHeader } from '../../shared/components/PageHeader'
 import { aiChat, listAIProviders, listDocuments } from '../../api'
 import { DocumentDetailDrawer } from '../../features/documents/DocumentDetailDrawer'
 import { buildCrossAskPrompt, parseCrossAnswer } from '../../features/ai/crossAsk'
-import type { AIProvider, Document } from '../../types'
+import type { AIProvider, Document, View } from '../../types'
 
 const SUGGESTED_PROMPTS = [
   '总结我最近保存的内容',
@@ -13,7 +13,7 @@ const SUGGESTED_PROMPTS = [
   '从已保存资料生成研究简报',
 ]
 
-export function AssistantPage() {
+export function AssistantPage({ onNavigate }: { onNavigate?: (view: View) => void }) {
   const [messageApi, contextHolder] = message.useMessage()
   const [documents, setDocuments] = useState<Document[]>([])
   const [providers, setProviders] = useState<AIProvider[]>([])
@@ -80,6 +80,10 @@ export function AssistantPage() {
     setQuestion(text)
   }
 
+  function goToProviderSettings() {
+    onNavigate?.('settings')
+  }
+
   const placeholder = noDocuments
     ? '知识库中暂无真实数据'
     : noProvider
@@ -113,9 +117,25 @@ export function AssistantPage() {
                 <span className="assistant-avatar"><RobotOutlined /></span>
                 <Typography.Title level={2}>你想了解什么？</Typography.Title>
                 <Typography.Paragraph>比较观点、发现联系，或把真实浏览资料整理成研究简报。</Typography.Paragraph>
+                {noProvider && (
+                  <Alert
+                    type="warning"
+                    showIcon
+                    style={{ marginBottom: 12, textAlign: 'left' }}
+                    message="尚未配置 AI Provider"
+                    description="提问功能需要在「设置 → AI Provider」中添加 OpenAI 兼容或 Ollama 服务。"
+                    action={
+                      onNavigate ? (
+                        <Button size="small" type="primary" icon={<SettingOutlined />} onClick={goToProviderSettings}>
+                          去设置
+                        </Button>
+                      ) : undefined
+                    }
+                  />
+                )}
                 <Space direction="vertical">
                   {SUGGESTED_PROMPTS.map(text => (
-                    <Button key={text} onClick={() => applySuggestion(text)}>{text}</Button>
+                    <Button key={text} onClick={() => applySuggestion(text)} disabled={noProvider}>{text}</Button>
                   ))}
                 </Space>
               </div>
