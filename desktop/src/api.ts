@@ -32,8 +32,13 @@ export async function deleteDocument(id: string): Promise<void> {
   if (isTauri()) await invoke('local_delete_document', { id })
 }
 
+export async function toggleStarred(id: string, starred: boolean): Promise<boolean> {
+  if (!isTauri()) throw new Error('Document unavailable')
+  return invoke<boolean>('local_toggle_starred', { id, starred })
+}
+
 function createDocument(input: { title: string; url: string; markdown: string; tags: string[] }): Document {
   let source = ''
   try { source = new URL(input.url).hostname } catch { /* keep source empty */ }
-  return { id: `local-${crypto.randomUUID()}`, ...input, source, wordCount: input.markdown.trim() ? input.markdown.trim().split(/\s+/u).length : 0, status: 'READY', createdAt: new Date().toISOString() }
+  return { id: `local-${crypto.randomUUID()}`, ...input, source, wordCount: input.markdown.trim() ? input.markdown.trim().split(/\s+/u).length : 0, status: 'READY', createdAt: new Date().toISOString(), starred: false }
 }

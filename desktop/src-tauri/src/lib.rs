@@ -210,7 +210,9 @@ pub fn run() {
             local_store::local_list_documents,
             local_store::local_save_document,
             local_store::local_get_document,
-            local_store::local_delete_document
+            local_store::local_delete_document,
+            local_store::local_toggle_starred,
+            local_store::local_migration_status
         ])
         .run(tauri::generate_context!())
         .expect("error while running AI Knowledge Browser");

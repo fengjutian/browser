@@ -6,6 +6,7 @@ import { getDocument, saveDocument } from '../../api'
 import { captureNativePage, closeNativeTab, hasNativeTab, hideNativeTab, navigateHistory, onNativeNewTab, openNativeTab, readNativeState, reloadNativeTab, resizeNativeTab, showNativeTab, stopNativeTab } from '../../services/nativeBrowser'
 import { extractArticle } from '../../features/reader/extractArticle'
 import type { ReaderArticle } from '../../features/reader/types'
+import { classifySaveError } from '../../features/documents/saveClassifier'
 
 const newTab = (id: string = crypto.randomUUID()): BrowserTab => ({ id, url: '', title: '新标签页', loading: false, active: true, pinned: false })
 
@@ -202,8 +203,8 @@ export function BrowserPage() {
       messageApi.open({ key, type: 'loading', content: '正在保存并提取…', duration: 0 })
       let article = readerArticle
       if (!article && hasNativeTab(active.id)) article = extractArticle(await captureNativePage(active.id))
-      const markdown = article?.markdown ?? 'Captured by Reader pipeline.'
-      const created = await saveDocument({ title: article?.title || active.title, url: active.url || 'about:blank', markdown, tags: ['Inbox'] })
+      if (!article?.markdown?.trim()) throw new Error('reader_content_not_found')
+      const created = await saveDocument({ title: article.title || active.title, url: active.url || 'about:blank', markdown: article.markdown, tags: ['Inbox'] })
       for (let attempt = 0; attempt < 30; attempt++) {
         const document = await getDocument(created.id)
         if (document.status === 'READY') { messageApi.open({ key, type: 'success', content: '已保存并完成索引' }); return }
@@ -211,7 +212,11 @@ export function BrowserPage() {
         await new Promise(resolve => window.setTimeout(resolve, 200))
       }
       messageApi.open({ key, type: 'info', content: '已保存，后台仍在处理中' })
-    } catch { messageApi.open({ key, type: 'warning', content: '后端离线或处理失败，请稍后重试' }) }
+    } catch (error) {
+      const kind = classifySaveError(error)
+      const contentEmpty = kind === 'reader_content_not_found'
+      messageApi.open({ key, type: contentEmpty ? 'error' : 'warning', content: contentEmpty ? '无法识别该页面正文，已取消保存' : '后端离线或处理失败，请稍后重试' })
+    }
   }
 
   async function openReader() {

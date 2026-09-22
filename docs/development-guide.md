@@ -204,14 +204,15 @@ sequenceDiagram
 
 | 前端函数 | Tauri command | 行为 |
 | --- | --- | --- |
-| `listDocuments(query)` | `local_list_documents` | 列表和字段模糊匹配 |
+| `listDocuments(query)` | `local_list_documents` | 列表和字段模糊匹配，按收藏优先 |
 | `saveDocument(input)` | `local_save_document` | 生成本地 ID 后写入 |
 | `getDocument(id)` | `local_get_document` | 读取详情 |
 | `deleteDocument(id)` | `local_delete_document` | 删除文档 |
+| `toggleStarred(id, starred)` | `local_toggle_starred` | 切换收藏标记，文档不存在时报错 |
 
 本地文档 ID 为 `local-{crypto.randomUUID()}`，保存时直接标记为 `READY`。当前保存逻辑仍保留状态轮询，但本地路径第一次读取通常即可得到 `READY`。
 
-注意：当无法取得 Reader 内容时，`BrowserPage.save()` 仍可能写入占位文本 `Captured by Reader pipeline.`。这是已知缺口，不应把该文本视为真实网页正文。
+`BrowserPage.save()` 已在 Reader 抽取失败或正文为空时抛错并以 `error` 提示取消保存，不再写入占位文本。
 
 ## 6. Tauri/Rust 层
 
@@ -227,10 +228,12 @@ sequenceDiagram
 | `browser_history` | `label, delta` | `()` | 只接受 `-1` 或 `1` |
 | `browser_state` | `label` | `BrowserState` | URL、标题、favicon、加载状态 |
 | `browser_snapshot` | `label` | `PageSnapshot` | URL 和完整 HTML，限制 8 MiB |
-| `local_list_documents` | `query` | `LocalDocument[]` | 本地列表/搜索 |
+| `local_list_documents` | `query` | `LocalDocument[]` | 本地列表/搜索，按 `starred DESC, created_at DESC` |
 | `local_save_document` | `document` | `LocalDocument` | `INSERT OR REPLACE` |
 | `local_get_document` | `id` | 文档或 `null` | 本地详情 |
 | `local_delete_document` | `id` | `()` | 本地删除 |
+| `local_toggle_starred` | `id, starred` | `bool` | 更新收藏标记；0 行更新则返回错误 |
+| `local_migration_status` | — | `{ version, pending }` | 当前 schema 版本与待迁移数 |
 
 WebView 脚本通过 `eval_with_callback` 执行，等待上限为 5 秒。command 错误目前以字符串传回前端。
 
@@ -271,8 +274,9 @@ font-src https://fonts.gstatic.com
 | `status` | TEXT | 前端状态枚举 |
 | `tags` | TEXT | JSON 数组字符串 |
 | `created_at` | TEXT | ISO 时间字符串 |
+| `starred` | INTEGER | 收藏标记，0/1，索引 `idx_local_documents_starred (starred DESC, created_at DESC)`（v2 迁移加入） |
 
-查询使用 `LIKE '%query%'` 匹配 title、markdown、summary 和序列化后的 tags，按 `created_at DESC` 排序。当前没有 schema version、迁移记录、FTS5、分页或备份恢复命令。
+查询使用 `LIKE '%query%'` 匹配 title、markdown、summary 和序列化后的 tags，按 `starred DESC, created_at DESC` 排序，收藏文档优先。Schema 版本与迁移由 `schema_version` 表 + `MIGRATIONS` 常量管理，每次 `connection()` 调用 `run_migrations` 自动推进；`local_migration_status` command 暴露当前版本与 pending 数量。FTS5、分页、备份恢复命令仍未引入。
 
 ### 7.2 Go 服务数据库
 
@@ -520,7 +524,7 @@ go test ./...
 
 - Go：覆盖 health、创建校验、文档生命周期、SQLite 持久化/搜索/删除、Processor READY/FAILED。
 - Rust：覆盖域名补全、搜索词转换和高权限协议拒绝。
-- 前端：Vitest 已配置，但当前没有被发现的 `*.test.*` 或 `*.spec.*` 文件；`npm run test` 会以“无测试文件”退出失败。
+- 前端：Vitest + happy-dom 已配置；共 25 个用例（`extractArticle` 6、`api.ts` 14、`useDebouncedValue` 5），`npm run test` 通过。
 - TypeScript 检查和 Vite 生产构建当前通过。
 
 优先补充的前端测试：
@@ -558,9 +562,9 @@ go test ./...
 
 ### P0：影响数据真实性或可靠性
 
-1. 桌面保存失败时的占位 Markdown 可能造成伪正文。
-2. 桌面数据库没有正式迁移版本，schema 演进风险较高。
-3. 前端没有自动化测试。
+1. ✅ 桌面保存失败时的占位 Markdown 可能造成伪正文（已在 `BrowserPage.save()` 改为 Reader 失败/空正文时直接报错并取消保存）。
+2. ✅ 桌面数据库没有正式迁移版本（已引入 `schema_version` 表 + `MIGRATIONS` 常量 + `run_migrations` 启动钩子，附 `local_migration_status` command；老库自动打 v1 基线）。
+3. ✅ 前端没有自动化测试（Vitest + happy-dom 已配置；`extractArticle` 6 用例 + `api.ts` 14 用例 + `useDebouncedValue` 5 用例，合计 25 个）。
 4. Go Processor 队列不持久化，崩溃会丢失未处理任务。
 
 ### P1：阻碍架构演进
@@ -576,15 +580,15 @@ go test ./...
 1. AI 摘要、问答、翻译、自动标签。
 2. Embedding、混合检索、Reranker 和带引用 RAG。
 3. 隐私拦截与真实统计。
-4. 历史、书签、下载、会话恢复和标签拖拽。
+4. ⏳ 历史、书签、下载、会话恢复和标签拖拽 — 书签（收藏）已部分实现：`local_documents.starred` 列 + `local_toggle_starred` command + 卡片星标按钮 + 列表置顶。剩余：历史下载、会话恢复、标签拖拽。
 5. 插件 Runtime、集合管理和归档入口。
 
 ## 15. 推荐演进顺序
 
 1. 修复空正文保存：提取失败时明确失败，不写占位数据。
-2. 为桌面 SQLite 引入版本化迁移和备份/恢复机制。
+2. ✅ 桌面 SQLite 版本化迁移已完成；备份/恢复机制待补。
 3. 决定唯一数据所有权：继续 Rust 本地优先，或正式引入 Go sidecar；在此之前不要同时扩展两套 schema。
-4. 补齐前端关键路径测试，并将无测试文件视为显式配置问题。
+4. ⏳ 补齐前端关键路径测试 — 已完成 `extractArticle` / `api.ts` / 搜索 debounce（抽出 `useDebouncedValue` hook）；剩 §12 优先级列表的标签快捷键 + 保存回归测试，需要组件级测试基础设施（@testing-library/react）后才能补。
 5. 如果保留 Go sidecar，先完成 loopback token、随机端口、生命周期监管和统一迁移。
 6. 接入系统密钥环后再实现 OpenAI-compatible/Ollama Provider。
 7. 在稳定全文检索和引用模型后实现 RAG，最后扩展 Agent/Plugin。
