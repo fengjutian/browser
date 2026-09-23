@@ -1,6 +1,6 @@
 import { MouseEvent, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
-import { AutoComplete, Badge, Dropdown, Modal, Popover, Segmented, Select, Tooltip, Typography, message, type MenuProps } from 'antd'
-import { Button, Card, Input, Space, Tabs, Tag, type InputRef } from '../../components/ui'
+import { AutoComplete, Badge, Modal, Segmented, Select, Typography, message } from 'antd'
+import { Button, Card, Dropdown, Input, Popover, Space, Tabs, Tag, Tooltip, type InputRef, type MenuProps } from '../../components/ui'
 import { ArrowDownOutlined, ArrowLeftOutlined, ArrowRightOutlined, ArrowUpOutlined, AudioMutedOutlined, BookOutlined, CheckCircleOutlined, CloseCircleOutlined, CloseOutlined, CopyOutlined, DownloadOutlined, FullscreenOutlined, GlobalOutlined, LoadingOutlined, MoreOutlined, PlusOutlined, PrinterOutlined, ReloadOutlined, SafetyCertificateOutlined, SaveOutlined, SearchOutlined, SoundOutlined, StarFilled, StarOutlined, ThunderboltOutlined, TranslationOutlined, WarningOutlined } from '@ant-design/icons'
 import { Sparkles as RobotOutlined } from 'lucide-react'
 import type { BrowserTab, BrowserTabError } from '../../types'
@@ -176,7 +176,7 @@ export function BrowserPage({ visible = true, onSearchKnowledge }: { visible?: b
   const [trackingCleanerEnabled, setTrackingCleanerEnabledState] = useState(isTrackingCleanerEnabled)
   const [adBlockerEnabled, setAdBlockerEnabledState] = useState(isAdBlockerEnabled)
   const [blockedAdsByTab, setBlockedAdsByTab] = useState<Record<string, number>>({})
-  const [toolbarOverlay, setToolbarOverlay] = useState<'downloads' | 'bookmarks' | 'resources' | 'menu' | null>(null)
+  const [toolbarOverlay, setToolbarOverlay] = useState<'downloads' | 'bookmarks' | 'resources' | 'menu' | 'tab-menu' | null>(null)
   const surfaceRef = useRef<HTMLDivElement>(null)
   const addressRef = useRef<InputRef>(null)
   const previousTab = useRef<string | undefined>(undefined)
@@ -214,7 +214,7 @@ export function BrowserPage({ visible = true, onSearchKnowledge }: { visible?: b
   const safetyLevel: SafetyLevel = highestLevel(safetyIssues)
   const showSafety = advancedSettings.safetyWarnings && safetyLevel !== 'safe' && address.trim().length > 0
 
-  function changeToolbarOverlay(kind: 'downloads' | 'bookmarks' | 'resources' | 'menu', open: boolean) {
+  function changeToolbarOverlay(kind: 'downloads' | 'bookmarks' | 'resources' | 'menu' | 'tab-menu', open: boolean) {
     if (open) { setToolbarOverlay(kind); return }
     setToolbarOverlay(current => current === kind ? null : current)
   }
@@ -1162,7 +1162,7 @@ export function BrowserPage({ visible = true, onSearchKnowledge }: { visible?: b
           const groupColor = tabGroupColor(group.groupId)
           return {
             key: tab.id,
-            label: <Dropdown menu={{ items: tabMenu(tab, index) }} trigger={['contextMenu']}>
+            label: <Dropdown menu={{ items: tabMenu(tab, index) }} trigger={['contextMenu']} onOpenChange={open => changeToolbarOverlay('tab-menu', open)}>
               <Tooltip title={tab.url || (tab.private ? '新私密窗口' : '新标签页')} mouseEnterDelay={0.6}>
               <span
                 draggable

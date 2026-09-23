@@ -67,9 +67,21 @@
   &__label { position: absolute; inset-inline: 7px; overflow: hidden; color: #fff; font-size: 10px; }
 }
 
+.ui-floating-trigger { display: inline-flex; min-width: 0; }
+.ui-tooltip__positioner, .ui-popover__positioner, .ui-dropdown__positioner { z-index: 1200; outline: 0; }
+.ui-tooltip { max-width: 320px; padding: 6px 9px; border-radius: 6px; background: #202421; color: #fff; font-size: 12px; line-height: 1.4; box-shadow: 0 4px 14px rgba(0,0,0,.2); transform-origin: var(--transform-origin); &[data-starting-style], &[data-ending-style] { opacity: 0; transform: scale(.96); } transition: opacity .12s, transform .12s; }
+.ui-popover { min-width: 160px; max-width: min(420px, calc(100vw - 24px)); border: 1px solid #d8ded9; border-radius: 10px; background: #fff; color: #252c28; box-shadow: 0 10px 30px rgba(25,40,31,.16); transform-origin: var(--transform-origin); outline: 0; &[data-starting-style], &[data-ending-style] { opacity: 0; transform: translateY(-3px) scale(.98); } transition: opacity .14s, transform .14s; &__title { padding: 10px 12px 0; font-weight: 600; } &__content { padding: 10px 12px; } }
+.ui-dropdown { min-width: 170px; max-width: 320px; padding: 5px; border: 1px solid #d8ded9; border-radius: 9px; background: #fff; color: #252c28; box-shadow: 0 10px 30px rgba(25,40,31,.16); outline: 0;
+  &__item { display: flex; align-items: center; gap: 9px; min-height: 32px; padding: 5px 9px; border-radius: 6px; cursor: default; font-size: 13px; outline: 0; &[data-highlighted] { background: #edf5ef; } &[data-disabled] { opacity: .42; } &.is-danger { color: #c83236; } }
+  &__icon { display: inline-grid; place-items: center; flex: none; }
+  &__separator { height: 1px; margin: 4px 5px; background: #e8ece9; }
+}
+
 [data-theme='dark'] {
   .ui-button { border-color: #46534c; background: #252e29; color: #e1e9e4; &--primary { border-color: #65a77d; background: #3d7752; } &--text, &--link, &.is-ghost { background: transparent; } }
   .ui-tag { border-color: #46534c; background: #28322c; color: #cbd6cf; }
   .ui-card { border-color: #39473f; background: #202823; &__head, &__actions { border-color: #39473f; } }
   .ui-input, .ui-textarea { border-color: #46534c; background: #202823; color: #e1e9e4; }
+  .ui-popover, .ui-dropdown { border-color: #46534c; background: #202823; color: #e1e9e4; }
+  .ui-dropdown__item[data-highlighted] { background: #2d3b33; }
 }
