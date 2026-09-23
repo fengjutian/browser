@@ -1,6 +1,6 @@
 import { useEffect, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react'
-import { Avatar, Badge, Layout, Typography } from 'antd'
-import { Space, Tooltip } from '../components/ui'
+import { Avatar, Badge, Layout } from 'antd'
+import { Space, Tooltip, Typography } from '../components/ui'
 import { SafetyCertificateOutlined, ThunderboltOutlined } from '@ant-design/icons'
 import { Bot, BookOpen, Globe2, Search, Settings } from 'lucide-react'
 import type { View } from '../types'

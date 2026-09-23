@@ -1,5 +1,4 @@
-import { Typography } from 'antd'
-import { Alert, Button, Space } from '../../components/ui'
+import { Alert, Button, Space, Typography } from '../../components/ui'
 import { SafetyCertificateOutlined } from '@ant-design/icons'
 import type { CertificateErrorPayload } from '../../services/nativeBrowser'
 

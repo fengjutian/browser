@@ -22,4 +22,7 @@ export { List, type ListProps, type ListItemProps, type ListItemMetaProps } from
 export { Table, type TableProps, type TableColumn } from './Table'
 export { Descriptions, type DescriptionsProps, type DescriptionItem } from './Descriptions'
 export { Statistic, type StatisticProps } from './Statistic'
+export { Typography } from './Typography'
+export { InputNumber, type InputNumberProps } from './InputNumber'
+export { Upload, type UploadProps, type UploadFile } from './Upload'
 export { UI_MODAL_OVERLAY_EVENT } from './overlayLifecycle'
