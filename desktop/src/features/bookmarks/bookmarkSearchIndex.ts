@@ -71,14 +71,21 @@ export function searchBookmarks(query: string, bookmarks: BookmarkRecord[], opti
 
   const ranked: BookmarkSearchResult[] = []
   for (const bookmark of bookmarks) {
+    const titleProbe = scoreText('API Documentation', 'docs')
+    // eslint-disable-next-line no-console
+    console.log('DEBUG titleProbe', titleProbe)
     const title = scoreText(bookmark.title, trimmed)
     const url = scoreText(bookmark.url, trimmed)
     const note = scoreText(bookmark.note ?? '', trimmed)
+    // eslint-disable-next-line no-console
+    console.log('DEBUG search loop', { id: bookmark.id, hasTitle: !!title, hasUrl: !!url, hasNote: !!note, title: bookmark.title, url: bookmark.url })
     if (!title && !url && !note) continue
     let total = 0
     if (title) total += title.score * 1.6
     if (url) total += url.score
     if (note) total += note.score * 0.6
+    // eslint-disable-next-line no-console
+    console.log('DEBUG total', { id: bookmark.id, total, minScore })
     if (total < minScore) continue
     ranked.push({
       ...bookmark,

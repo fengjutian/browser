@@ -1,10 +1,10 @@
 import { MouseEvent, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import { AutoComplete, Badge, Button, Card, Dropdown, Input, Modal, Popover, Segmented, Select, Space, Tabs, Tag, Tooltip, Typography, message, type InputRef, type MenuProps } from 'antd'
-import { ArrowDownOutlined, ArrowLeftOutlined, ArrowRightOutlined, ArrowUpOutlined, AudioMutedOutlined, BookOutlined, CheckCircleOutlined, CloseCircleOutlined, CloseOutlined, CopyOutlined, DownloadOutlined, FullscreenOutlined, GlobalOutlined, LoadingOutlined, MoreOutlined, PlusOutlined, PrinterOutlined, ReloadOutlined, SafetyCertificateOutlined, SaveOutlined, SearchOutlined, SoundOutlined, StarOutlined, ThunderboltOutlined, TranslationOutlined, WarningOutlined } from '@ant-design/icons'
+import { ArrowDownOutlined, ArrowLeftOutlined, ArrowRightOutlined, ArrowUpOutlined, AudioMutedOutlined, BookOutlined, CheckCircleOutlined, CloseCircleOutlined, CloseOutlined, CopyOutlined, DownloadOutlined, FullscreenOutlined, GlobalOutlined, LoadingOutlined, MoreOutlined, PlusOutlined, PrinterOutlined, ReloadOutlined, SafetyCertificateOutlined, SaveOutlined, SearchOutlined, SoundOutlined, StarFilled, StarOutlined, ThunderboltOutlined, TranslationOutlined, WarningOutlined } from '@ant-design/icons'
 import { Sparkles as RobotOutlined } from 'lucide-react'
 import type { BrowserTab, BrowserTabError } from '../../types'
 import { addBrowserHistory, deleteClosedTab, findDocumentByUrl, getBrowserShortcutsEnabled, getBrowserWorkspace, getDocument, listBrowserHistory, listClosedTabs, listSitePermissions, saveBrowserWorkspace, saveClosedTab, saveDocument, setSession, toggleStarred } from '../../api'
-import { captureNativePage, closeNativeTab, ensureNativeTab, findInNativeTab, hasNativeTab, hideNativeTab, isNativeBrowserAvailable, navigateHistory, onNativeNewTab, openNativeTab, printNativeTab, readNativeState, reloadNativeTab, resizeNativeTab, showNativeTab, stopNativeTab, zoomNativeTab } from '../../services/nativeBrowser'
+import { captureNativePage, closeNativeTab, ensureNativeTab, findInNativeTab, hasNativeTab, hideNativeTab, isNativeBrowserAvailable, navigateHistory, onNativeAdBlockUpdate, onNativeNewTab, openNativeTab, printNativeTab, readNativeState, reloadNativeTab, resizeNativeTab, showNativeTab, stopNativeTab, zoomNativeTab } from '../../services/nativeBrowser'
 import { extractArticle } from '../../features/reader/extractArticle'
 import type { ReaderArticle } from '../../features/reader/types'
 import { classifySaveError } from '../../features/documents/saveClassifier'
@@ -50,6 +50,7 @@ import { readSearchEngineConfig, resolveActiveSearchTemplate, SEARCH_ENGINE_PRES
 import { evaluateUrlSafety, highestLevel, type SafetyIssue, type SafetyLevel } from '../../features/browser/urlSafety'
 import { ADVANCED_SETTINGS_EVENT, readAdvancedSettings, type AdvancedSettings } from '../../features/settings/advanced'
 import { cleanTrackingParameters, isTrackingCleanerEnabled, TRACKING_CLEANER_EVENT } from '../../features/plugins/trackingCleaner'
+import { AD_BLOCKER_EVENT, isAdBlockerEnabled } from '../../features/plugins/adBlocker'
 
 const SESSION_KEY = 'browser.tabs'
 const SESSION_DEBOUNCE_MS = 500
@@ -172,6 +173,8 @@ export function BrowserPage({ visible = true, onSearchKnowledge }: { visible?: b
   const [recoveredZoom, setRecoveredZoom] = useState<Record<string, number>>({})
   const [advancedSettings, setAdvancedSettings] = useState<AdvancedSettings>(readAdvancedSettings)
   const [trackingCleanerEnabled, setTrackingCleanerEnabledState] = useState(isTrackingCleanerEnabled)
+  const [adBlockerEnabled, setAdBlockerEnabledState] = useState(isAdBlockerEnabled)
+  const [blockedAdsByTab, setBlockedAdsByTab] = useState<Record<string, number>>({})
   const surfaceRef = useRef<HTMLDivElement>(null)
   const addressRef = useRef<InputRef>(null)
   const previousTab = useRef<string | undefined>(undefined)
@@ -212,12 +215,24 @@ export function BrowserPage({ visible = true, onSearchKnowledge }: { visible?: b
   useEffect(() => {
     const onAdvancedChange = (event: Event) => setAdvancedSettings((event as CustomEvent<AdvancedSettings>).detail)
     const onCleanerChange = (event: Event) => setTrackingCleanerEnabledState((event as CustomEvent<boolean>).detail)
+    const onAdBlockerChange = (event: Event) => setAdBlockerEnabledState((event as CustomEvent<boolean>).detail)
     window.addEventListener(ADVANCED_SETTINGS_EVENT, onAdvancedChange)
     window.addEventListener(TRACKING_CLEANER_EVENT, onCleanerChange)
+    window.addEventListener(AD_BLOCKER_EVENT, onAdBlockerChange)
     return () => {
       window.removeEventListener(ADVANCED_SETTINGS_EVENT, onAdvancedChange)
       window.removeEventListener(TRACKING_CLEANER_EVENT, onCleanerChange)
+      window.removeEventListener(AD_BLOCKER_EVENT, onAdBlockerChange)
     }
+  }, [])
+
+  useEffect(() => {
+    let unlisten = () => undefined
+    void onNativeAdBlockUpdate(update => {
+      const tabId = update.tabLabel.replace(/^browser-/, '')
+      setBlockedAdsByTab(current => ({ ...current, [tabId]: update.blockedCount }))
+    }).then(dispose => { unlisten = dispose })
+    return () => unlisten()
   }, [])
 
   useEffect(() => {
@@ -621,6 +636,8 @@ export function BrowserPage({ visible = true, onSearchKnowledge }: { visible?: b
     { key: 'find', label: '在页面中查找', extra: 'Ctrl+F', onClick: () => setFindOpen(true) },
     { key: 'tab-search', label: '搜索标签页', extra: 'Ctrl+K', onClick: () => setTabSearchOpen(true) },
     { key: 'history-search', label: '浏览历史记录', extra: 'Ctrl+H', onClick: () => setHistorySearchOpen(true) },
+    { key: 'bookmark-add', label: '收藏当前页', extra: 'Ctrl+D', onClick: () => void addCurrentAsBookmark() },
+    { key: 'bookmarks', label: '打开收藏夹', extra: 'Ctrl+Shift+O', onClick: () => setBookmarkPaletteOpen(true) },
     { key: 'print', label: '打印', icon: <PrinterOutlined/>, extra: 'Ctrl+P', disabled: !nativeMode, onClick: () => void printNativeTab(active.id) },
     { type: 'divider' },
     { key: 'new-private', label: '新建私密窗口', icon: <LockOutlined/>, extra: 'Shift+Ctrl+N', onClick: () => openNewTab(undefined, { private: true }) },
@@ -629,6 +646,24 @@ export function BrowserPage({ visible = true, onSearchKnowledge }: { visible?: b
     { key: 'zoom', label: <Space><Button size="small" onClick={event => { event.stopPropagation(); changeZoom(active.id, -0.1) }}>−</Button><span className="browser-zoom-value">{Math.round((zoomLevels[active.id] ?? 1) * 100)}%</span><Button size="small" onClick={event => { event.stopPropagation(); changeZoom(active.id, 0.1) }}>+</Button></Space> },
     { key: 'zoom-reset', label: '重置缩放', extra: 'Ctrl+0', onClick: () => setZoom(active.id, 1) },
   ]
+
+  const bookmarkBarPanel = (
+    <div className="bookmark-bar-panel" role="menu">
+      {bookmarkActions.bookmarks.length === 0
+        ? <Typography.Text type="secondary">还没有收藏，Ctrl+D 收藏当前页</Typography.Text>
+        : <ul>
+            {bookmarkActions.bookmarks.slice(0, 8).map(bookmark => (
+              <li key={bookmark.id}>
+                <button type="button" title={bookmark.url} onClick={() => void navigate(bookmark.url)}>
+                  <span className="bookmark-bar-panel__title">{bookmark.title}</span>
+                  <Typography.Text type="secondary" className="bookmark-bar-panel__url">{bookmark.url}</Typography.Text>
+                </button>
+              </li>
+            ))}
+            {bookmarkActions.bookmarks.length > 8 && <li><button type="button" onClick={() => setBookmarkPaletteOpen(true)}>查看全部 {bookmarkActions.bookmarks.length} 条…</button></li>}
+          </ul>}
+    </div>
+  )
 
   const downloadPanel = (
     <DownloadSummary
@@ -1000,6 +1035,22 @@ export function BrowserPage({ visible = true, onSearchKnowledge }: { visible?: b
     setTabs(remaining)
   }
 
+  async function addCurrentAsBookmark() {
+    const url = active.url
+    if (!url) { messageApi.warning('当前标签页没有可收藏的网址'); return }
+    try {
+      await bookmarkActions.add({
+        id: crypto.randomUUID(),
+        url,
+        title: active.title || url,
+        favicon: active.favicon ?? null,
+      })
+      messageApi.success('已加入收藏夹', 2)
+    } catch (error) {
+      messageApi.error(`加入收藏夹失败：${String(error)}`)
+    }
+  }
+
   function reopenLastClosed() {
     const result = popClosedTab(closedTabsRef.current)
     if (!result) return
@@ -1117,7 +1168,7 @@ export function BrowserPage({ visible = true, onSearchKnowledge }: { visible?: b
             closable: tabs.length > 1 && !tab.pinned,
           }
         })})()} activeKey={activeTabId} onChange={activateTab} addIcon={<Tooltip title="新建标签页 (Ctrl+T)"><PlusOutlined aria-label="新建标签页"/></Tooltip>} onEdit={(target, action) => action === 'add' ? openNewTab() : closeTab(String(target))}/></div>
-    <div className="browser-toolbar"><Space><Button type="text" aria-label="后退" title="后退 (Alt+←)" icon={<ArrowLeftOutlined/>} disabled={!nativeMode || !active.canGoBack} onClick={() => void navigateHistory(active.id,-1)}/><Button type="text" aria-label="前进" title="前进 (Alt+→)" icon={<ArrowRightOutlined/>} disabled={!nativeMode || !active.canGoForward} onClick={() => void navigateHistory(active.id,1)}/><Button type="text" aria-label={active.loading?'停止加载':'重新加载'} title={active.loading?'停止加载 (Esc)':'重新加载 (F5)'} icon={active.loading?<CloseOutlined/>:<ReloadOutlined/>} disabled={!nativeMode} onClick={() => void (active.loading ? stopNativeTab(active.id) : reloadNativeTab(active.id))}/><Button type="text" icon={<BookOutlined/>} onClick={() => void openReader()}>阅读模式</Button></Space><form onSubmit={event => { event.preventDefault(); void navigate(address) }}><AutoComplete value={address} options={addressSuggestions} onChange={setAddress} onSelect={value=>void navigate(value)}><Input ref={addressRef} prefix={<SafetyCertificateOutlined/>} suffix={<button type="button" className={`browser-star${starredDocId ? ' is-active' : ''}`} disabled={!active.url} aria-label={starredDocId ? '取消收藏' : '收藏当前页'} title={starredDocId ? '取消收藏' : '收藏当前页'} onClick={event => { event.preventDefault(); event.stopPropagation(); void toggleStarCurrent() }}><StarOutlined/></button>} onFocus={event=>event.currentTarget.select()} placeholder="搜索或输入网址"/></AutoComplete></form><Tag icon={<SafetyCertificateOutlined/>} color="green">43</Tag><Button type={aiOpen?'primary':'text'} ghost={aiOpen} icon={<RobotOutlined/>} onClick={()=>setAiOpen(value=>!value)}/><Popover trigger="click" placement="bottomRight" content={downloadPanel}><Badge size="small" count={downloads.filter(item=>item.status==='downloading').length}><Button type="text" aria-label="下载" icon={<DownloadOutlined/>}/></Badge></Popover><Popover trigger="click" placement="bottomRight" content={resourcePanel}><Button type="text" aria-label="资源面板" icon={<ThunderboltOutlined/>} title={`${resourceStats.liveTabs} 个 WebView / ${resourceStats.totalTabs} 标签`}/></Popover><Dropdown menu={{items:browserMenu}} trigger={['click']}><Button type="text" aria-label="浏览器菜单" icon={<MoreOutlined/>}/></Dropdown></div>
+    <div className="browser-toolbar"><Space><Button type="text" aria-label="后退" title="后退 (Alt+←)" icon={<ArrowLeftOutlined/>} disabled={!nativeMode || !active.canGoBack} onClick={() => void navigateHistory(active.id,-1)}/><Button type="text" aria-label="前进" title="前进 (Alt+→)" icon={<ArrowRightOutlined/>} disabled={!nativeMode || !active.canGoForward} onClick={() => void navigateHistory(active.id,1)}/><Button type="text" aria-label={active.loading?'停止加载':'重新加载'} title={active.loading?'停止加载 (Esc)':'重新加载 (F5)'} icon={active.loading?<CloseOutlined/>:<ReloadOutlined/>} disabled={!nativeMode} onClick={() => void (active.loading ? stopNativeTab(active.id) : reloadNativeTab(active.id))}/><Button type="text" icon={<BookOutlined/>} onClick={() => void openReader()}>阅读模式</Button></Space><form onSubmit={event => { event.preventDefault(); void navigate(address) }}><AutoComplete value={address} options={addressSuggestions} onChange={setAddress} onSelect={value=>void navigate(value)}><Input ref={addressRef} prefix={<SafetyCertificateOutlined/>} suffix={<button type="button" className={`browser-star${starredDocId ? ' is-active' : ''}`} disabled={!active.url} aria-label={starredDocId ? '取消收藏' : '收藏当前页'} title={starredDocId ? '取消收藏' : '收藏当前页'} onClick={event => { event.preventDefault(); event.stopPropagation(); void toggleStarCurrent() }}><StarOutlined/></button>} onFocus={event=>event.currentTarget.select()} placeholder="搜索或输入网址"/></AutoComplete></form><Tag icon={<SafetyCertificateOutlined/>} color="green">43</Tag><Button type={aiOpen?'primary':'text'} ghost={aiOpen} icon={<RobotOutlined/>} onClick={()=>setAiOpen(value=>!value)}/><Popover trigger="click" placement="bottomRight" content={downloadPanel}><Badge size="small" count={downloads.filter(item=>item.status==='downloading').length}><Button type="text" aria-label="下载" icon={<DownloadOutlined/>}/></Badge></Popover><Popover trigger="click" placement="bottomRight" content={bookmarkBarPanel}><Button type="text" aria-label="收藏夹" title={`${bookmarkActions.bookmarks.length} 条收藏 (Ctrl+Shift+O)`} icon={<StarFilled style={{ color: bookmarkActions.bookmarks.length ? '#d49a26' : undefined }}/>}/></Popover><Popover trigger="click" placement="bottomRight" content={resourcePanel}><Button type="text" aria-label="资源面板" icon={<ThunderboltOutlined/>} title={`${resourceStats.liveTabs} 个 WebView / ${resourceStats.totalTabs} 标签`}/></Popover><Dropdown menu={{items:browserMenu}} trigger={['click']}><Button type="text" aria-label="浏览器菜单" icon={<MoreOutlined/>}/></Dropdown></div>
     {findOpen&&<div className="browser-find"><Input autoFocus allowClear prefix={<SearchOutlined/>} value={findQuery} status={findStatus==='missing'?'error':undefined} placeholder="在页面中查找" onChange={event=>{setFindQuery(event.target.value);setFindStatus('idle')}} onPressEnter={event=>void runFind(event.shiftKey)}/><Typography.Text type={findStatus==='missing'?'danger':'secondary'}>{findStatus==='missing'?'未找到':findStatus==='found'?'已定位':''}</Typography.Text><Button type="text" aria-label="上一个匹配项" icon={<ArrowUpOutlined/>} onClick={()=>void runFind(true)}/><Button type="text" aria-label="下一个匹配项" icon={<ArrowDownOutlined/>} onClick={()=>void runFind(false)}/><Button type="text" aria-label="关闭查找" icon={<CloseOutlined/>} onClick={closeFind}/></div>}
     <PermissionPromptBar prompt={permissionPrompt} />
     <TabSearchPalette
@@ -1135,6 +1186,14 @@ export function BrowserPage({ visible = true, onSearchKnowledge }: { visible?: b
       onOpen={entry => void navigate(entry.url)}
       onRemove={entry => setHistory(current => removeHistoryEntry(current, entry.url).remaining)}
       onClear={() => setHistory([])}
+    />
+    <BookmarkSearchPalette
+      open={bookmarkPaletteOpen}
+      bookmarks={bookmarkActions.bookmarks}
+      onClose={() => setBookmarkPaletteOpen(false)}
+      onOpen={bookmark => void navigate(bookmark.url)}
+      onRemove={bookmark => void bookmarkActions.remove(bookmark.id)}
+      onUpdate={(bookmark, patch) => bookmarkActions.update(bookmark.id, patch)}
     />
     {certificatePrompt.prompt && <CertificateErrorBar payload={certificatePrompt.prompt} onRespond={allow => void certificatePrompt.respond(allow)} />}
     <RecoveryPanel

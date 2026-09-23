@@ -11,6 +11,8 @@ import { isSearchTemplateValid } from '../../features/browser/navigation'
 import { HISTORY_CHANGE_EVENT, type HistoryEntry } from '../../features/history/dedupeHistory'
 import { DEFAULT_ADVANCED_SETTINGS, readAdvancedSettings, writeAdvancedSettings, type AdvancedSettings } from '../../features/settings/advanced'
 import { isTrackingCleanerEnabled, setTrackingCleanerEnabled } from '../../features/plugins/trackingCleaner'
+import { isAdBlockerEnabled, setAdBlockerEnabled } from '../../features/plugins/adBlocker'
+import { setNativeAdBlocking } from '../../services/nativeBrowser'
 import { getBrowserCapabilities, type BrowserCapabilities } from '../../services/browserCapabilities'
 
 const PROVIDER_OPTIONS: { label: string; value: AIProviderType }[] = [
@@ -504,15 +506,23 @@ function cutoffForScope(scope: 'hour' | 'day' | 'week'): number {
 
 function PluginSettings() {
   const [enabled, setEnabled] = useState(isTrackingCleanerEnabled)
+  const [adBlockEnabled, setAdBlockEnabledState] = useState(isAdBlockerEnabled)
 
   function toggle(next: boolean) {
     setEnabled(next)
     setTrackingCleanerEnabled(next)
   }
 
+  function toggleAdBlock(next: boolean) {
+    setAdBlockEnabledState(next)
+    setAdBlockerEnabled(next)
+    void setNativeAdBlocking(next).catch(() => undefined)
+  }
+
   return <Card title="插件" className="settings-card plugin-settings">
     <Alert type="info" showIcon message="内置示例插件" description="该插件用于演示插件的状态、权限和启停流程；开关会真实影响浏览器导航。"/>
     <List className="plugin-list" itemLayout="horizontal" dataSource={[{ id: 'com.arcadia.tracking-cleaner', name: '链接净化器', version: '0.1.0' }]} renderItem={plugin => <List.Item actions={[<Switch key="enabled" checked={enabled} onChange={toggle}/>]}><List.Item.Meta title={<Space><Typography.Text strong>{plugin.name}</Typography.Text><Tag color="blue">示例</Tag><Tag>{enabled ? '已启用' : '已停用'}</Tag></Space>} description={<div className="plugin-description"><Typography.Paragraph>打开网页前自动移除 utm_*、fbclid、gclid 等常见跟踪参数，同时保留页面正常查询参数。</Typography.Paragraph><Space wrap><Typography.Text type="secondary">{plugin.id} · v{plugin.version}</Typography.Text><Tag>读取导航地址</Tag><Tag>修改导航地址</Tag></Space></div>}/></List.Item>}/>
+    <List className="plugin-list" itemLayout="horizontal" dataSource={[{ id: 'com.arcadia.ad-blocker', name: '广告过滤器', version: '0.1.0' }]} renderItem={plugin => <List.Item actions={[<Switch key="enabled" checked={adBlockEnabled} onChange={toggleAdBlock}/>]}><List.Item.Meta title={<Space><Typography.Text strong>{plugin.name}</Typography.Text><Tag color="green">内置</Tag><Tag>{adBlockEnabled ? '已启用' : '已停用'}</Tag></Space>} description={<div className="plugin-description"><Typography.Paragraph>过滤常见广告域名和广告元素；工具栏盾牌显示当前会话实际过滤数量。关闭后立即停止页面过滤。</Typography.Paragraph><Space wrap><Typography.Text type="secondary">{plugin.id} · v{plugin.version}</Typography.Text><Tag>读取页面资源</Tag><Tag>隐藏广告元素</Tag></Space></div>}/></List.Item>}/>
   </Card>
 }
 

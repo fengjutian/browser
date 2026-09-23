@@ -255,6 +255,58 @@ fn context_menu_script() -> String {
         .into()
 }
 
+fn ad_blocker_script(label: &str, enabled: bool) -> String {
+    let label = serde_json::to_string(label).unwrap_or_else(|_| "\"browser\"".into());
+    format!(r#"(() => {{
+      if (window.__arcadiaAdBlocker) {{ window.__arcadiaAdBlocker.setEnabled({enabled}); return; }}
+      const tabLabel = {label};
+      const blockedHosts = [
+        'doubleclick.net','googlesyndication.com','googleadservices.com','adservice.google.com',
+        'amazon-adsystem.com','scorecardresearch.com','taboola.com','outbrain.com',
+        'pos.baidu.com','cpro.baidu.com','alimama.com','tanx.com','admaster.com.cn'
+      ];
+      const selectors = [
+        '[data-ad-client]','[data-ad-slot]','ins.adsbygoogle','iframe[id^="google_ads"]',
+        'iframe[src*="doubleclick.net"]','iframe[src*="googlesyndication.com"]',
+        '.advertisement','.advertising','[aria-label="Advertisement"]','[aria-label="广告"]'
+      ];
+      const seen = new WeakSet();
+      let blockedCount = 0;
+      let active = {enabled};
+      let style;
+      const emit = () => {{
+        try {{
+          const internals = window.__TAURI_INTERNALS__;
+          if (internals && typeof internals.invoke === 'function')
+            internals.invoke('tauri://emit', {{ event: 'browser://ad-block-update', payload: {{ version: 1, tabLabel, blockedCount }} }}).catch(() => undefined);
+        }} catch (_) {{}}
+      }};
+      const isBlockedUrl = value => {{
+        try {{ const host = new URL(value, location.href).hostname.toLowerCase(); return blockedHosts.some(item => host === item || host.endsWith('.' + item)); }}
+        catch (_) {{ return false; }}
+      }};
+      const block = node => {{
+        if (!active || !(node instanceof Element) || seen.has(node)) return;
+        let matched = selectors.some(selector => {{ try {{ return node.matches(selector); }} catch (_) {{ return false; }} }});
+        const resourceUrl = node.getAttribute('src') || node.getAttribute('href') || '';
+        matched = matched || (!!resourceUrl && isBlockedUrl(resourceUrl));
+        if (matched) {{ seen.add(node); node.remove(); blockedCount += 1; emit(); return; }}
+        node.querySelectorAll('iframe,img,script,link,ins,[data-ad-client],[data-ad-slot]').forEach(block);
+      }};
+      const applyStyle = () => {{
+        if (style || !document.documentElement) return;
+        style = document.createElement('style'); style.id = 'arcadia-ad-blocker-style';
+        style.textContent = selectors.join(',') + '{{display:none!important;visibility:hidden!important}}';
+        (document.head || document.documentElement).appendChild(style);
+      }};
+      const observer = new MutationObserver(records => {{ if (active) records.forEach(record => record.addedNodes.forEach(block)); }});
+      const start = () => {{ applyStyle(); if (document.documentElement) {{ block(document.documentElement); observer.observe(document.documentElement, {{ childList:true, subtree:true }}); }} }};
+      window.__arcadiaAdBlocker = {{ setEnabled(value) {{ active=!!value; if (active) start(); else {{ observer.disconnect(); style?.remove(); style=undefined; }} emit(); }} }};
+      if (active) {{ if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start, {{once:true}}); else start(); }}
+      emit();
+    }})()"#)
+}
+
 #[cfg(test)]
 mod context_menu_tests {
     #[test]
@@ -466,6 +518,7 @@ async fn browser_create(
     url: String,
     bounds: BrowserBounds,
     permissions: Option<Vec<SitePermissionRule>>,
+    ad_block_enabled: Option<bool>,
 ) -> Result<(), String> {
     validate_browser_label(&label)?;
     if app.get_webview(&label).is_some() {
@@ -480,6 +533,7 @@ async fn browser_create(
     let builder = tauri::webview::WebviewBuilder::new(&label, tauri::WebviewUrl::External(url))
         .initialization_script(permission_guard_script(permissions.as_deref().unwrap_or(&[])))
         .initialization_script(context_menu_script())
+        .initialization_script(ad_blocker_script(&label, ad_block_enabled.unwrap_or(true)))
         .on_new_window(move |url, _features| {
             if matches!(url.scheme(), "http" | "https") {
                 let _ = event_app.emit_to(
@@ -541,6 +595,15 @@ async fn browser_create(
     let stack = guard.entry(label).or_default();
     stack.push(nav_url);
     Ok(())
+}
+
+#[tauri::command]
+async fn browser_set_ad_blocking(app: tauri::AppHandle, label: String, enabled: bool) -> Result<(), String> {
+    validate_browser_label(&label)?;
+    app.get_webview(&label)
+        .ok_or_else(|| "browser tab webview not found".to_string())?
+        .eval(format!("window.__arcadiaAdBlocker?.setEnabled({enabled})"))
+        .map_err(|error| error.to_string())
 }
 
 #[tauri::command]
@@ -982,6 +1045,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             validate_navigation,
             browser_create,
+            browser_set_ad_blocking,
             browser_navigate,
             browser_reload,
             browser_stop,
