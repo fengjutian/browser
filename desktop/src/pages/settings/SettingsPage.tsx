@@ -1,4 +1,4 @@
-import { Alert, Button, Card, Form, Input, InputNumber, List, Segmented, Select, Space, Switch, Tabs, Tag, Typography, message } from 'antd'
+import { Alert, Button, Card, Descriptions, Form, Input, InputNumber, List, Segmented, Select, Space, Switch, Tabs, Tag, Typography, message } from 'antd'
 import { BgColorsOutlined, DeleteOutlined, KeyOutlined, MoonOutlined, SafetyCertificateOutlined, SaveOutlined, SunOutlined, ThunderboltOutlined } from '@ant-design/icons'
 import { useEffect, useState } from 'react'
 import { PageHeader } from '../../shared/components/PageHeader'
@@ -9,6 +9,9 @@ import { readThemePreference, writeThemePreference, type ThemePreference } from 
 import { readSearchEngineConfig, resolveActiveSearchTemplate, SEARCH_ENGINE_PRESETS, writeSearchEngineConfig } from '../../features/browser/searchEngine'
 import { isSearchTemplateValid } from '../../features/browser/navigation'
 import { HISTORY_CHANGE_EVENT, parseHistory, type HistoryEntry } from '../../features/history/dedupeHistory'
+import { DEFAULT_ADVANCED_SETTINGS, readAdvancedSettings, writeAdvancedSettings, type AdvancedSettings } from '../../features/settings/advanced'
+import { isTrackingCleanerEnabled, setTrackingCleanerEnabled } from '../../features/plugins/trackingCleaner'
+import { getBrowserCapabilities, type BrowserCapabilities } from '../../services/browserCapabilities'
 
 const PROVIDER_OPTIONS: { label: string; value: AIProviderType }[] = [
   { label: 'OpenAI 兼容（API Key）', value: 'openai-compatible' },
@@ -432,11 +435,57 @@ function cutoffForScope(scope: 'hour' | 'day' | 'week'): number {
   return now - 7 * 24 * 60 * 60 * 1000
 }
 
+function PluginSettings() {
+  const [enabled, setEnabled] = useState(isTrackingCleanerEnabled)
+
+  function toggle(next: boolean) {
+    setEnabled(next)
+    setTrackingCleanerEnabled(next)
+  }
+
+  return <Card title="插件" className="settings-card plugin-settings">
+    <Alert type="info" showIcon message="内置示例插件" description="该插件用于演示插件的状态、权限和启停流程；开关会真实影响浏览器导航。"/>
+    <List className="plugin-list" itemLayout="horizontal" dataSource={[{ id: 'com.arcadia.tracking-cleaner', name: '链接净化器', version: '0.1.0' }]} renderItem={plugin => <List.Item actions={[<Switch key="enabled" checked={enabled} onChange={toggle}/>]}><List.Item.Meta title={<Space><Typography.Text strong>{plugin.name}</Typography.Text><Tag color="blue">示例</Tag><Tag>{enabled ? '已启用' : '已停用'}</Tag></Space>} description={<div className="plugin-description"><Typography.Paragraph>打开网页前自动移除 utm_*、fbclid、gclid 等常见跟踪参数，同时保留页面正常查询参数。</Typography.Paragraph><Space wrap><Typography.Text type="secondary">{plugin.id} · v{plugin.version}</Typography.Text><Tag>读取导航地址</Tag><Tag>修改导航地址</Tag></Space></div>}/></List.Item>}/>
+  </Card>
+}
+
+function AdvancedSettingsPanel() {
+  const [settings, setSettings] = useState<AdvancedSettings>(readAdvancedSettings)
+  const [capabilities, setCapabilities] = useState<BrowserCapabilities | null>(null)
+
+  useEffect(() => { void getBrowserCapabilities().then(setCapabilities) }, [])
+
+  function update(patch: Partial<AdvancedSettings>) {
+    const next = { ...settings, ...patch }
+    setSettings(next)
+    writeAdvancedSettings(next)
+  }
+
+  function reset() {
+    setSettings(DEFAULT_ADVANCED_SETTINGS)
+    writeAdvancedSettings(DEFAULT_ADVANCED_SETTINGS)
+  }
+
+  return <Card title="高级设置" className="settings-card advanced-settings">
+    <div className="advanced-setting-row"><div><Typography.Text strong>活动网页上限</Typography.Text><Typography.Paragraph type="secondary">超过上限的后台标签页会休眠，重新选中时自动恢复，以降低内存占用。</Typography.Paragraph></div><InputNumber min={2} max={16} value={settings.maxLiveWebviews} onChange={value => update({ maxLiveWebviews: value ?? 8 })}/></div>
+    <div className="advanced-setting-row"><div><Typography.Text strong>减少界面动画</Typography.Text><Typography.Paragraph type="secondary">关闭页面切换位移和侧栏动效，适合低性能设备或偏好静态界面。</Typography.Paragraph></div><Switch checked={settings.reduceMotion} onChange={value => update({ reduceMotion: value })}/></div>
+    <div className="advanced-setting-row"><div><Typography.Text strong>危险地址提醒</Typography.Text><Typography.Paragraph type="secondary">在地址包含可疑协议、凭据或不安全 HTTP 时显示提醒。</Typography.Paragraph></div><Switch checked={settings.safetyWarnings} onChange={value => update({ safetyWarnings: value })}/></div>
+    <Typography.Title level={5} style={{ marginTop: 26 }}>运行环境诊断</Typography.Title>
+    <Descriptions size="small" bordered column={2} items={[
+      { key: 'runtime', label: 'Tauri', children: capabilities?.tauriRuntimeVersion ?? '网页预览模式' },
+      { key: 'backend', label: 'WebView', children: capabilities?.webviewBackend ?? '不可用' },
+      { key: 'downloads', label: '下载进度', children: capabilities?.downloadProgressBytes ? '支持' : '基础模式' },
+      { key: 'permissions', label: '原生权限事件', children: capabilities?.nativePermissionEvents ? '支持' : '脚本兼容模式' },
+    ]}/>
+    <Button style={{ marginTop: 18 }} onClick={reset}>恢复高级设置默认值</Button>
+  </Card>
+}
+
 export function SettingsPage() {
   const items = ['通用','浏览器','隐私','AI Provider','知识库','插件','高级'].map((label, index) => ({
     key: label,
     label,
-    children: index === 0 ? <GeneralSettings/> : index === 1 ? <BrowserSettings/> : index === 2 ? <PrivacySettings/> : index === 3 ? <AIProviderSettings/> : index === 4 ? <KnowledgeBaseSettings/> : <Card><Typography.Title level={4}>{label}</Typography.Title><Typography.Paragraph type="secondary">该设置模块将在对应开发阶段开放。</Typography.Paragraph></Card>,
+    children: index === 0 ? <GeneralSettings/> : index === 1 ? <BrowserSettings/> : index === 2 ? <PrivacySettings/> : index === 3 ? <AIProviderSettings/> : index === 4 ? <KnowledgeBaseSettings/> : index === 5 ? <PluginSettings/> : <AdvancedSettingsPanel/>,
   }))
   return <section className="page"><PageHeader eyebrow="PREFERENCES" title="设置" description="调整浏览器、隐私、AI Provider 与知识库工作流。"/><Tabs tabPosition="left" items={items} defaultActiveKey="通用"/></section>
 }

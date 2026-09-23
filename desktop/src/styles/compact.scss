@@ -429,6 +429,32 @@ body[data-theme='dark'] {
   }
 }
 
+body[data-reduce-motion='true'] {
+  .route-view:not(.is-hidden),
+  .route-view:not(.is-hidden) > .page > * { animation: none !important; }
+
+  .app-content,
+  .app-sider.ant-layout-sider,
+  .rail-button .nav-glyph { transition-duration: .01ms !important; }
+}
+
+.plugin-settings .ant-alert { margin-bottom: 16px; }
+.plugin-list { border-top: 1px solid var(--accent-border); }
+.plugin-description .ant-typography { margin-bottom: 8px; }
+
+.advanced-setting-row {
+  min-height: 72px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 24px;
+  padding: 14px 0;
+  border-bottom: 1px solid color-mix(in srgb, var(--accent-border) 72%, transparent);
+
+  .ant-typography { margin-bottom: 0; }
+  p.ant-typography { max-width: 680px; margin-top: 4px; }
+}
+
 html,
 body,
 button,

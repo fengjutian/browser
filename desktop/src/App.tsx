@@ -3,6 +3,7 @@ import zhCN from 'antd/locale/zh_CN'
 import { useEffect, useState } from 'react'
 import { AppRouter } from './app/AppRouter'
 import { readThemePreference, THEME_CHANGE_EVENT, type ThemePreference } from './features/settings/theme'
+import { readAdvancedSettings } from './features/settings/advanced'
 
 const PALETTES = {
   green: { primary: '#347851', sider: '#edf2ee', item: '#68766e', hover: '#e3ebe5', hoverText: '#275f3f', selected: '#d9e8dd', selectedText: '#275f3f' },
@@ -28,6 +29,10 @@ export default function App() {
     document.body.dataset.theme = preference
     document.documentElement.style.colorScheme = preference === 'dark' ? 'dark' : 'light'
   }, [preference])
+
+  useEffect(() => {
+    document.body.dataset.reduceMotion = readAdvancedSettings().reduceMotion ? 'true' : 'false'
+  }, [])
 
   const palette = PALETTES[preference]
   const dark = preference === 'dark'

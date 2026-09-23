@@ -12,6 +12,8 @@ import { useDebouncedValue } from '../../shared/hooks/useDebouncedValue'
 import { dedupeHistory, HISTORY_CHANGE_EVENT, parseHistory, type HistoryEntry } from '../../features/history/dedupeHistory'
 import { reorderTabs } from '../../features/browser/reorderTabs'
 import { groupTabsByOrigin, idsToCloseForSameDomain } from '../../features/browser/tabGrouping'
+import { planLruSweep, type DownloadActivity } from '../../features/browser/lruPolicy'
+import { computeResourceStats } from '../../features/browser/resourceStats'
 import { interpretShortcut } from '../../features/browser/shortcuts'
 import { popClosedTab, recordClosedTab, type ClosedTab } from '../../features/browser/closedTabs'
 import { AssistantPanel } from '../../features/ai/AssistantPanel'
@@ -35,12 +37,13 @@ import { toggleFullscreen as toggleWindowFullscreen } from '../../services/webvi
 import { buildSuggestions, trimSuggestions, type SuggestionItem } from '../../features/browser/suggestionProvider'
 import { readSearchEngineConfig, resolveActiveSearchTemplate, SEARCH_ENGINE_PRESETS } from '../../features/browser/searchEngine'
 import { evaluateUrlSafety, highestLevel, type SafetyIssue, type SafetyLevel } from '../../features/browser/urlSafety'
+import { ADVANCED_SETTINGS_EVENT, readAdvancedSettings, type AdvancedSettings } from '../../features/settings/advanced'
+import { cleanTrackingParameters, isTrackingCleanerEnabled, TRACKING_CLEANER_EVENT } from '../../features/plugins/trackingCleaner'
 
 const SESSION_KEY = 'browser.tabs'
 const SESSION_DEBOUNCE_MS = 500
 const HISTORY_KEY = 'browser.history'
 const CLOSED_KEY = 'browser.closed'
-const MAX_LIVE_WEBVIEWS = 8
 const TAB_GROUP_PALETTE = ['#a7dfbd', '#9bc6e8', '#dfc0a7', '#c8a7df', '#dfb5b5', '#bce0c6']
 const tabGroupColor = (id: string | null | undefined): string => {
   if (!id) return 'transparent'
@@ -166,6 +169,8 @@ export function BrowserPage({ visible = true, onSearchKnowledge }: { visible?: b
   const [recoveredActiveId, setRecoveredActiveId] = useState<string>('')
   const [recoveredScroll, setRecoveredScroll] = useState<Record<string, { x: number; y: number }>>({})
   const [recoveredZoom, setRecoveredZoom] = useState<Record<string, number>>({})
+  const [advancedSettings, setAdvancedSettings] = useState<AdvancedSettings>(readAdvancedSettings)
+  const [trackingCleanerEnabled, setTrackingCleanerEnabledState] = useState(isTrackingCleanerEnabled)
   const surfaceRef = useRef<HTMLDivElement>(null)
   const addressRef = useRef<InputRef>(null)
   const previousTab = useRef<string | undefined>(undefined)
@@ -174,6 +179,7 @@ export function BrowserPage({ visible = true, onSearchKnowledge }: { visible?: b
   const closedTabsRef = useRef(closedTabs)
   const historyRef = useRef(history)
   const zoomLevelsRef = useRef(zoomLevels)
+  const downloadsRef = useRef(downloads)
   const visibleRef = useRef(visible)
   const lastActiveAtRef = useRef(new Map<string, number>([['new', Date.now()]]))
   const lastHistoryUrl = useRef<string>('')
@@ -197,7 +203,18 @@ export function BrowserPage({ visible = true, onSearchKnowledge }: { visible?: b
   }, [address, history, tabs, searchTemplate])
   const safetyIssues = useMemo<SafetyIssue[]>(() => evaluateUrlSafety(address), [address])
   const safetyLevel: SafetyLevel = highestLevel(safetyIssues)
-  const showSafety = safetyLevel !== 'safe' && address.trim().length > 0
+  const showSafety = advancedSettings.safetyWarnings && safetyLevel !== 'safe' && address.trim().length > 0
+
+  useEffect(() => {
+    const onAdvancedChange = (event: Event) => setAdvancedSettings((event as CustomEvent<AdvancedSettings>).detail)
+    const onCleanerChange = (event: Event) => setTrackingCleanerEnabledState((event as CustomEvent<boolean>).detail)
+    window.addEventListener(ADVANCED_SETTINGS_EVENT, onAdvancedChange)
+    window.addEventListener(TRACKING_CLEANER_EVENT, onCleanerChange)
+    return () => {
+      window.removeEventListener(ADVANCED_SETTINGS_EVENT, onAdvancedChange)
+      window.removeEventListener(TRACKING_CLEANER_EVENT, onCleanerChange)
+    }
+  }, [])
 
   useEffect(() => {
     let cancelled = false
@@ -304,6 +321,7 @@ export function BrowserPage({ visible = true, onSearchKnowledge }: { visible?: b
   useEffect(() => { activeTabIdRef.current = activeTabId }, [activeTabId])
   useEffect(() => { tabsRef.current = tabs }, [tabs])
   useEffect(() => { closedTabsRef.current = closedTabs }, [closedTabs])
+  useEffect(() => { downloadsRef.current = downloads }, [downloads])
   useEffect(() => { historyRef.current = history }, [history])
   useEffect(() => {
     const syncHistory = (event: Event) => setHistory((event as CustomEvent<HistoryEntry[]>).detail)
@@ -462,8 +480,9 @@ export function BrowserPage({ visible = true, onSearchKnowledge }: { visible?: b
   }
 
   async function navigate(input: string) {
-    const url = resolveNavigationInput(input, { searchTemplate })
-    if (!url) return
+    const resolved = resolveNavigationInput(input, { searchTemplate })
+    if (!resolved) return
+    const url = trackingCleanerEnabled ? cleanTrackingParameters(resolved) : resolved
     const tabId = active.id
     // Private tabs always deny sensitive permissions for the target origin.
     // The script-level guard enforces this at runtime; pre-denying here
@@ -493,18 +512,36 @@ export function BrowserPage({ visible = true, onSearchKnowledge }: { visible?: b
   }
 
   async function enforceLiveTabLimit(protectedId: string) {
-    const live = tabsRef.current.filter(tab => hasNativeTab(tab.id))
-    if (live.length <= MAX_LIVE_WEBVIEWS) return
-    const candidates = live
-      .filter(tab => tab.id !== protectedId && !tab.pinned)
-      .sort((a, b) => (lastActiveAtRef.current.get(a.id) ?? 0) - (lastActiveAtRef.current.get(b.id) ?? 0))
-    for (const tab of candidates.slice(0, live.length - MAX_LIVE_WEBVIEWS)) {
+    const tabs = tabsRef.current
+    const liveIds = new Set(tabs.filter(tab => hasNativeTab(tab.id)).map(tab => tab.id))
+    const currentSettings = readAdvancedSettings()
+    const activeDownloads: DownloadActivity[] = downloadsRef.current
+      .filter(item => item.status === 'downloading')
+      .map(item => ({ status: 'downloading', sourceOrigin: item.sourceOrigin }))
+    const idleThresholdMs = Math.max(1, currentSettings.idleSuspendMinutes) * 60_000
+    const plan = planLruSweep({
+      tabs,
+      liveIds,
+      lastActiveAt: lastActiveAtRef.current,
+      activeDownloads,
+      protectedId,
+      maxLive: currentSettings.maxLiveWebviews,
+      idleThresholdMs,
+    })
+    for (const id of plan.toClose) {
+      const tab = tabs.find(item => item.id === id)
       try {
-        const state = await readNativeState(tab.id)
-        if (state) setTabs(current => current.map(item => item.id === tab.id ? { ...item, scrollX: Math.round(state.scrollX), scrollY: Math.round(state.scrollY) } : item))
+        const state = await readNativeState(id)
+        if (state) setTabs(current => current.map(item => item.id === id ? { ...item, scrollX: Math.round(state.scrollX), scrollY: Math.round(state.scrollY) } : item))
       } catch { /* retain the last observed position */ }
-      await closeNativeTab(tab.id)
-      setTabs(current => current.map(item => item.id === tab.id ? { ...item, suspended: true, loading: false } : item))
+      await closeNativeTab(id)
+      setTabs(current => current.map(item => item.id === id ? { ...item, suspended: true, loading: false } : item))
+      if (tab?.url) {
+        try {
+          const origin = new URL(tab.url).origin
+          if (origin && origin !== 'null') forceAllDenyFor(origin)
+        } catch { /* ignore non-http urls */ }
+      }
     }
   }
 
@@ -575,6 +612,30 @@ export function BrowserPage({ visible = true, onSearchKnowledge }: { visible?: b
       feed={downloads.map(item => ({ ...item, targetPath: item.targetPath ?? item.path }))}
       inFlight={downloads.filter(item => item.status === 'downloading').length}
     />
+  )
+
+  const resourceStats = useMemo(() => {
+    const liveIds = new Set(tabs.filter(tab => hasNativeTab(tab.id)).map(tab => tab.id))
+    const downloadingOrigins = new Set(downloads.filter(item => item.status === 'downloading').map(item => item.sourceOrigin).filter((value): value is string => !!value))
+    return computeResourceStats({ tabs, liveIds, downloadingOrigins, lastActiveAt: lastActiveAtRef.current })
+  }, [tabs, downloads])
+
+  const resourcePanel = (
+    <div className="resource-panel" role="status">
+      <Typography.Text type="secondary" className="resource-panel__title">资源面板</Typography.Text>
+      <ul>
+        <li><span>总标签页</span><b>{resourceStats.totalTabs}</b></li>
+        <li><span>活跃 WebView</span><b>{resourceStats.liveTabs}</b></li>
+        <li><span>已休眠</span><b>{resourceStats.suspendedTabs}</b></li>
+        <li><span>固定</span><b>{resourceStats.pinnedTabs}</b></li>
+        <li><span>播放音频</span><b>{resourceStats.audibleTabs}</b></li>
+        <li><span>下载中</span><b>{resourceStats.downloadingTabs}</b></li>
+        <li><span>最久未活跃</span><b>{resourceStats.idleMinutes} 分钟</b></li>
+      </ul>
+      <Typography.Paragraph type="secondary" className="resource-panel__hint">
+        LRU 阈值 {advancedSettings.maxLiveWebviews} 个 WebView；空闲 {advancedSettings.idleSuspendMinutes} 分钟自动休眠。
+      </Typography.Paragraph>
+    </div>
   )
 
   async function retryActive() {
@@ -1015,7 +1076,7 @@ export function BrowserPage({ visible = true, onSearchKnowledge }: { visible?: b
             closable: tabs.length > 1 && !tab.pinned,
           }
         })})()} activeKey={activeTabId} onChange={activateTab} addIcon={<Tooltip title="新建标签页 (Ctrl+T)"><PlusOutlined aria-label="新建标签页"/></Tooltip>} onEdit={(target, action) => action === 'add' ? openNewTab() : closeTab(String(target))}/></div>
-    <div className="browser-toolbar"><Space><Button type="text" aria-label="后退" title="后退 (Alt+←)" icon={<ArrowLeftOutlined/>} disabled={!nativeMode || !active.canGoBack} onClick={() => void navigateHistory(active.id,-1)}/><Button type="text" aria-label="前进" title="前进 (Alt+→)" icon={<ArrowRightOutlined/>} disabled={!nativeMode || !active.canGoForward} onClick={() => void navigateHistory(active.id,1)}/><Button type="text" aria-label={active.loading?'停止加载':'重新加载'} title={active.loading?'停止加载 (Esc)':'重新加载 (F5)'} icon={active.loading?<CloseOutlined/>:<ReloadOutlined/>} disabled={!nativeMode} onClick={() => void (active.loading ? stopNativeTab(active.id) : reloadNativeTab(active.id))}/><Button type="text" icon={<BookOutlined/>} onClick={() => void openReader()}>阅读模式</Button></Space><form onSubmit={event => { event.preventDefault(); void navigate(address) }}><AutoComplete value={address} options={addressSuggestions} onChange={setAddress} onSelect={value=>void navigate(value)}><Input ref={addressRef} prefix={<SafetyCertificateOutlined/>} suffix={<button type="button" className={`browser-star${starredDocId ? ' is-active' : ''}`} disabled={!active.url} aria-label={starredDocId ? '取消收藏' : '收藏当前页'} title={starredDocId ? '取消收藏' : '收藏当前页'} onClick={event => { event.preventDefault(); event.stopPropagation(); void toggleStarCurrent() }}><StarOutlined/></button>} onFocus={event=>event.currentTarget.select()} placeholder="搜索或输入网址"/></AutoComplete></form><Tag icon={<SafetyCertificateOutlined/>} color="green">43</Tag><Button type={aiOpen?'primary':'text'} ghost={aiOpen} icon={<RobotOutlined/>} onClick={()=>setAiOpen(value=>!value)}/><Popover trigger="click" placement="bottomRight" content={downloadPanel}><Badge size="small" count={downloads.filter(item=>item.status==='downloading').length}><Button type="text" aria-label="下载" icon={<DownloadOutlined/>}/></Badge></Popover><Dropdown menu={{items:browserMenu}} trigger={['click']}><Button type="text" aria-label="浏览器菜单" icon={<MoreOutlined/>}/></Dropdown></div>
+    <div className="browser-toolbar"><Space><Button type="text" aria-label="后退" title="后退 (Alt+←)" icon={<ArrowLeftOutlined/>} disabled={!nativeMode || !active.canGoBack} onClick={() => void navigateHistory(active.id,-1)}/><Button type="text" aria-label="前进" title="前进 (Alt+→)" icon={<ArrowRightOutlined/>} disabled={!nativeMode || !active.canGoForward} onClick={() => void navigateHistory(active.id,1)}/><Button type="text" aria-label={active.loading?'停止加载':'重新加载'} title={active.loading?'停止加载 (Esc)':'重新加载 (F5)'} icon={active.loading?<CloseOutlined/>:<ReloadOutlined/>} disabled={!nativeMode} onClick={() => void (active.loading ? stopNativeTab(active.id) : reloadNativeTab(active.id))}/><Button type="text" icon={<BookOutlined/>} onClick={() => void openReader()}>阅读模式</Button></Space><form onSubmit={event => { event.preventDefault(); void navigate(address) }}><AutoComplete value={address} options={addressSuggestions} onChange={setAddress} onSelect={value=>void navigate(value)}><Input ref={addressRef} prefix={<SafetyCertificateOutlined/>} suffix={<button type="button" className={`browser-star${starredDocId ? ' is-active' : ''}`} disabled={!active.url} aria-label={starredDocId ? '取消收藏' : '收藏当前页'} title={starredDocId ? '取消收藏' : '收藏当前页'} onClick={event => { event.preventDefault(); event.stopPropagation(); void toggleStarCurrent() }}><StarOutlined/></button>} onFocus={event=>event.currentTarget.select()} placeholder="搜索或输入网址"/></AutoComplete></form><Tag icon={<SafetyCertificateOutlined/>} color="green">43</Tag><Button type={aiOpen?'primary':'text'} ghost={aiOpen} icon={<RobotOutlined/>} onClick={()=>setAiOpen(value=>!value)}/><Popover trigger="click" placement="bottomRight" content={downloadPanel}><Badge size="small" count={downloads.filter(item=>item.status==='downloading').length}><Button type="text" aria-label="下载" icon={<DownloadOutlined/>}/></Badge></Popover><Popover trigger="click" placement="bottomRight" content={resourcePanel}><Button type="text" aria-label="资源面板" icon={<ThunderboltOutlined/>} title={`${resourceStats.liveTabs} 个 WebView / ${resourceStats.totalTabs} 标签`}/></Popover><Dropdown menu={{items:browserMenu}} trigger={['click']}><Button type="text" aria-label="浏览器菜单" icon={<MoreOutlined/>}/></Dropdown></div>
     {findOpen&&<div className="browser-find"><Input autoFocus allowClear prefix={<SearchOutlined/>} value={findQuery} status={findStatus==='missing'?'error':undefined} placeholder="在页面中查找" onChange={event=>{setFindQuery(event.target.value);setFindStatus('idle')}} onPressEnter={event=>void runFind(event.shiftKey)}/><Typography.Text type={findStatus==='missing'?'danger':'secondary'}>{findStatus==='missing'?'未找到':findStatus==='found'?'已定位':''}</Typography.Text><Button type="text" aria-label="上一个匹配项" icon={<ArrowUpOutlined/>} onClick={()=>void runFind(true)}/><Button type="text" aria-label="下一个匹配项" icon={<ArrowDownOutlined/>} onClick={()=>void runFind(false)}/><Button type="text" aria-label="关闭查找" icon={<CloseOutlined/>} onClick={closeFind}/></div>}
     <PermissionPromptBar prompt={permissionPrompt} />
     <RecoveryPanel
