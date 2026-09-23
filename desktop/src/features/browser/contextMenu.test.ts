@@ -31,13 +31,22 @@ describe('buildContextMenu', () => {
     expect(forward.enabled).toBe(false)
   })
 
-  it('selection region uses copy + search + ask-ai; ask-ai disabled when capability is off', () => {
+  it('selection region uses copy + search + add-to-notes + ask-ai; ask-ai disabled when capability is off', () => {
     const { sections } = buildContextMenu({ ...baseRequest, kind: 'selection', selectionText: 'hello world' }, caps)
     const items = sections.flatMap(s => s.items)
-    expect(items.map(i => i.action)).toEqual(['copy', 'search-selection', 'ask-ai'])
+    expect(items.map(i => i.action)).toEqual(['copy', 'search-selection', 'add-to-notes', 'ask-ai'])
     const ai = items.find(i => i.action === 'ask-ai')!
     expect(ai.enabled).toBe(false)
     expect(ai.disabledReason).toBeTruthy()
+    const add = items.find(i => i.action === 'add-to-notes')!
+    expect(add.enabled).toBe(true)
+  })
+
+  it('selection region disables add-to-notes when nothing is selected', () => {
+    const { sections } = buildContextMenu({ ...baseRequest, kind: 'selection', selectionText: '' }, caps)
+    const items = sections.flatMap(s => s.items)
+    const add = items.find(i => i.action === 'add-to-notes')!
+    expect(add.enabled).toBe(false)
   })
 
   it('link region disables open actions for javascript: and file: links', () => {

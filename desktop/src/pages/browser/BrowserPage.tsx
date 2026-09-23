@@ -40,6 +40,8 @@ import { BookmarkSearchPalette } from '../../features/bookmarks/BookmarkSearchPa
 import { useBookmarks } from '../../features/bookmarks/useBookmarks'
 import { BulkSummaryPalette } from '../../features/ai/BulkSummaryPalette'
 import type { BulkProgressEntry } from '../../features/ai/bulkSummary'
+import { NotesPanel } from '../../features/notes/NotesPanel'
+import { addNote as appendNoteEntry, readNotes as loadStoredNotes, type NoteEntry } from '../../features/notes/notes'
 import { isPrivateTab, makePrivateTab, stripPrivateTabs, resetPrivateSessionPermissions } from '../../features/browser/privateTabs'
 import { readSitePermissions, writeSitePermissions } from '../../features/browser/sitePermissions'
 import { forceAllDenyFor } from '../../features/browser/usePermissionPrompt'
@@ -152,6 +154,8 @@ export function BrowserPage({ visible = true, onSearchKnowledge }: { visible?: b
   const [bulkSummaryOpen, setBulkSummaryOpen] = useState(false)
   const [bulkSummaryBusy, setBulkSummaryBusy] = useState(false)
   const [bulkSummaryProgress, setBulkSummaryProgress] = useState<BulkProgressEntry[]>([])
+  const [notes, setNotes] = useState<NoteEntry[]>(() => loadStoredNotes())
+  const [notesOpen, setNotesOpen] = useState(false)
   const [findQuery, setFindQuery] = useState('')
   const [findStatus, setFindStatus] = useState<'idle' | 'found' | 'missing'>('idle')
   const [zoomLevels, setZoomLevels] = useState<Record<string, number>>({})
@@ -508,6 +512,9 @@ export function BrowserPage({ visible = true, onSearchKnowledge }: { visible?: b
         case 'openBulkSummary':
           setBulkSummaryOpen(true)
           return
+        case 'toggleNotesPanel':
+          setNotesOpen(value => !value)
+          return
         case 'print':
           if (hasNativeTab(activeTabIdRef.current)) void printNativeTab(activeTabIdRef.current)
           return
@@ -814,7 +821,20 @@ export function BrowserPage({ visible = true, onSearchKnowledge }: { visible?: b
     })
   }
 
-  async function handleContextAction(action: ContextMenuAction, request: { linkUrl: string | null; imageUrl: string | null; selectionText: string }) {
+  function handleContextAction(action: ContextMenuAction, request: { linkUrl: string | null; imageUrl: string | null; selectionText: string }) {
+  if (action === 'add-to-notes' as never) {
+    const text = request.selectionText?.trim()
+    if (!text) { messageApi.info('请先选中文本'); return }
+    const entry: Omit<NoteEntry, 'id' | 'createdAt'> = {
+      url: active.url ?? '',
+      title: active.title ?? active.url ?? '未命名页面',
+      text,
+      comment: '',
+    }
+    setNotes(current => appendNoteEntry(current, entry))
+    messageApi.success('已加入笔记', 2)
+    return
+  }
     switch (action) {
       case 'back': void navigateHistory(active.id, -1); return
       case 'forward': void navigateHistory(active.id, 1); return

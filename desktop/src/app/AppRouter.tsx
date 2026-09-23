@@ -1,5 +1,5 @@
 import { lazy, Suspense, useState } from 'react'
-import { Spin } from 'antd'
+import { Spin } from '../components/ui'
 import { AppLayout } from '../layouts/AppLayout'
 import type { View } from '../types'
 

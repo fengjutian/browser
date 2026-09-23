@@ -40,4 +40,8 @@ describe('interpretShortcut', () => {
   it('opens the bulk summary palette on Ctrl+Shift+S', () => {
     expect(interpretShortcut({ ctrlKey: true, metaKey: false, shiftKey: true, altKey: false, key: 'S' })).toBe('openBulkSummary')
   })
+
+  it('toggles the notes panel on Ctrl+Shift+N', () => {
+    expect(interpretShortcut({ ctrlKey: true, metaKey: false, shiftKey: true, altKey: false, key: 'N' })).toBe('toggleNotesPanel')
+  })
 })

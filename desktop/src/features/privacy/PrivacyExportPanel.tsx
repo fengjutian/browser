@@ -1,6 +1,6 @@
 import { useState } from 'react'
-import { Alert, Typography, Upload, message } from 'antd'
-import { Button, Input, Modal, Space } from '../../components/ui'
+import { Typography, Upload, message } from 'antd'
+import { Alert, Button, Input, Modal, Space } from '../../components/ui'
 import { DownloadOutlined, LockOutlined, UploadOutlined } from '@ant-design/icons'
 import { addBrowserHistory, listBrowserHistory } from '../../api'
 import { listBookmarks } from '../../services/bookmarks'
