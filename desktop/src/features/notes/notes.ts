@@ -72,6 +72,7 @@ export function groupNotesByUrl(notes: NoteEntry[]): Array<{ url: string; title:
     if (existing) existing.notes.push(note)
     else groups.set(note.url, { url: note.url, title: note.title, notes: [note] })
   }
+  for (const group of groups.values()) group.notes.sort((a, b) => b.createdAt - a.createdAt)
   return Array.from(groups.values()).sort((a, b) => {
     const aMax = Math.max(...a.notes.map(n => n.createdAt))
     const bMax = Math.max(...b.notes.map(n => n.createdAt))

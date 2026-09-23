@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
-import { List, Typography } from 'antd'
-import { Alert, Button, Input, Modal, Progress, Segmented, Space, Tag } from '../../components/ui'
+import { Typography } from 'antd'
+import { Alert, Button, Input, List, Modal, Progress, Segmented, Space, Tag } from '../../components/ui'
 import type { BulkProgressEntry } from './bulkSummary'
 import { summaryKindLabelSafe } from './bulkSummary'
 import type { SummaryKind } from './summarize'

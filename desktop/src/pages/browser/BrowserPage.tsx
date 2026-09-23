@@ -823,7 +823,7 @@ export function BrowserPage({ visible = true, onSearchKnowledge }: { visible?: b
     })
   }
 
-  function handleContextAction(action: ContextMenuAction, request: { linkUrl: string | null; imageUrl: string | null; selectionText: string }) {
+  async function handleContextAction(action: ContextMenuAction, request: { linkUrl: string | null; imageUrl: string | null; selectionText: string }) {
   if (action === 'add-to-notes') {
     const text = request.selectionText?.trim()
     if (!text) { messageApi.info('请先选中文本'); return }

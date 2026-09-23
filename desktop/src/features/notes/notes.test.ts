@@ -29,10 +29,12 @@ describe('listNotes', () => {
   })
 
   it('drops entries with missing fields and sorts newest first', () => {
-    const raw = JSON.stringify([
+    const mixed = [
       note({ id: 'a', createdAt: 1 }),
-      note({ id: 'b', createdAt: 5, url: undefined as unknown as string }),
-    ])
+      note({ id: 'b', createdAt: 5 }),
+    ]
+    mixed[1] = { ...mixed[1], createdAt: 'not-a-number' as unknown as number }
+    const raw = JSON.stringify(mixed)
     const out = listNotes(raw)
     expect(out.length).toBe(1)
     expect(out[0].id).toBe('a')
