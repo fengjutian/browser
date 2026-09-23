@@ -54,6 +54,8 @@ function scoreText(text: string, query: string): { score: number; spans: Array<[
       ti += 1
     }
   }
+  // eslint-disable-next-line no-console
+  console.log('DEBUG scoreText', { text, query, qi, lowerQueryLen: lowerQuery.length, ti, lowerTextLen: lowerText.length, score, spanCount: spans.length })
   if (qi < lowerQuery.length) return null
   score -= Math.min(text.length, 200) / 4
   return { score, spans }
