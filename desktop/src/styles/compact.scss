@@ -1016,6 +1016,40 @@ body[data-theme='dark'] {
   .ui-select { border-color: transparent !important; background: transparent !important; box-shadow: none !important; }
 }
 
+// Give the local-search controls enough room to read as separate filters.
+.search-filters {
+  display: flex;
+  width: 100%;
+  margin: 14px 0 6px;
+  gap: 12px !important;
+  align-items: center !important;
+
+  > .ui-space__item {
+    flex: none;
+  }
+
+  .ui-segmented button {
+    min-width: 72px;
+    padding-inline: 14px;
+    white-space: nowrap;
+  }
+
+  .ui-select {
+    min-width: 190px;
+  }
+
+  .ui-statistic {
+    display: flex;
+    align-items: baseline;
+    gap: 6px;
+    padding-inline: 6px;
+    white-space: nowrap;
+  }
+
+  .ui-statistic__title { margin: 0; }
+  .ui-statistic__value { font-size: 14px; }
+}
+
 .new-tab .quick-sites { width: min(800px, 92%) !important; margin-top: 14px !important; }
 
 body[data-theme='dark'] {

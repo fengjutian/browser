@@ -13,11 +13,9 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@ant-design/icons": "^6.1.0",
     "@base-ui/react": "^1.8.0",
     "@mozilla/readability": "^0.6.0",
     "@tauri-apps/api": "^2.11.1",
-    "antd": "^6.3.0",
     "lucide-react": "^1.47.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",

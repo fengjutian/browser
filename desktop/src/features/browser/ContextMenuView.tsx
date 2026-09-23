@@ -23,7 +23,7 @@ const MENU_MAX_HEIGHT = 320
 
 /**
  * Subscribes to `browser://context-menu` events emitted by the init script
- * injected into every child WebView, then renders an antd Menu anchored at
+ * injected into every child WebView, then renders a local menu anchored at
  * the cursor. Coordinates from the WebView are viewport-relative; we offset
  * them by the surface rect so the menu floats over the right pixel of the
  * main window even when the WebView is offset.

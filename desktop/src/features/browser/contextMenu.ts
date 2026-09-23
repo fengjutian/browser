@@ -2,7 +2,7 @@
  * Pure builders for the browser's right-click context menu. Each region
  * (page / selection / link / image / input) returns its own item list with
  * `enabled` flags reflecting URL safety and capability checks. The
- * component layer just maps these into antd `MenuProps.items` so that the
+ * component layer maps these into the local menu adapter so that the
  * state machine stays testable without rendering React.
  */
 import type { ContextMenuRequest } from '../../services/nativeBrowser'
