@@ -449,6 +449,14 @@ fn external_url(input: &str) -> Result<url::Url, String> {
     }
 }
 
+fn validate_browser_label(label: &str) -> Result<(), String> {
+    let suffix = label.strip_prefix("browser-").ok_or_else(|| "invalid browser webview label".to_string())?;
+    if suffix.is_empty() || label.len() > 96 || !suffix.chars().all(|ch| ch.is_ascii_alphanumeric() || ch == '-') {
+        return Err("invalid browser webview label".into());
+    }
+    Ok(())
+}
+
 #[tauri::command]
 async fn browser_create(
     app: tauri::AppHandle,
@@ -457,6 +465,7 @@ async fn browser_create(
     bounds: BrowserBounds,
     permissions: Option<Vec<SitePermissionRule>>,
 ) -> Result<(), String> {
+    validate_browser_label(&label)?;
     if app.get_webview(&label).is_some() {
         return Ok(());
     }
@@ -533,6 +542,7 @@ async fn browser_navigate(
     label: String,
     url: String,
 ) -> Result<String, String> {
+    validate_browser_label(&label)?;
     let url = external_url(&url)?;
     app.get_webview(&label)
         .ok_or_else(|| "browser tab webview not found".to_string())?
@@ -547,6 +557,7 @@ async fn browser_navigate(
 
 #[tauri::command]
 async fn browser_reload(app: tauri::AppHandle, label: String) -> Result<(), String> {
+    validate_browser_label(&label)?;
     app.get_webview(&label)
         .ok_or_else(|| "browser tab webview not found".to_string())?
         .reload()
@@ -555,6 +566,7 @@ async fn browser_reload(app: tauri::AppHandle, label: String) -> Result<(), Stri
 
 #[tauri::command]
 async fn browser_stop(app: tauri::AppHandle, label: String) -> Result<(), String> {
+    validate_browser_label(&label)?;
     app.get_webview(&label)
         .ok_or_else(|| "browser tab webview not found".to_string())?
         .eval("window.stop()")
@@ -568,6 +580,7 @@ async fn browser_find(
     query: String,
     backwards: bool,
 ) -> Result<bool, String> {
+    validate_browser_label(&label)?;
     let webview = app
         .get_webview(&label)
         .ok_or_else(|| "browser tab webview not found".to_string())?;
@@ -587,6 +600,7 @@ async fn browser_find(
 
 #[tauri::command]
 async fn browser_zoom(app: tauri::AppHandle, label: String, scale: f64) -> Result<(), String> {
+    validate_browser_label(&label)?;
     if !(0.5..=3.0).contains(&scale) {
         return Err("zoom scale must be between 0.5 and 3.0".into());
     }
@@ -598,6 +612,7 @@ async fn browser_zoom(app: tauri::AppHandle, label: String, scale: f64) -> Resul
 
 #[tauri::command]
 async fn browser_print(app: tauri::AppHandle, label: String) -> Result<(), String> {
+    validate_browser_label(&label)?;
     app.get_webview(&label)
         .ok_or_else(|| "browser tab webview not found".to_string())?
         .eval("window.print()")
@@ -606,6 +621,7 @@ async fn browser_print(app: tauri::AppHandle, label: String) -> Result<(), Strin
 
 #[tauri::command]
 async fn browser_history(app: tauri::AppHandle, label: String, delta: i32) -> Result<(), String> {
+    validate_browser_label(&label)?;
     if !(-1..=1).contains(&delta) || delta == 0 {
         return Err("history delta must be -1 or 1".into());
     }
@@ -648,6 +664,7 @@ async fn eval_json<T: DeserializeOwned + Send + 'static>(
 
 #[tauri::command]
 async fn browser_state(app: tauri::AppHandle, label: String) -> Result<BrowserState, String> {
+    validate_browser_label(&label)?;
     let webview = app
         .get_webview(&label)
         .ok_or_else(|| "browser tab webview not found".to_string())?;
@@ -667,6 +684,7 @@ async fn browser_state(app: tauri::AppHandle, label: String) -> Result<BrowserSt
 
 #[tauri::command]
 fn browser_restore_scroll(app: tauri::AppHandle, label: String, x: f64, y: f64) -> Result<(), String> {
+    validate_browser_label(&label)?;
     if !x.is_finite() || !y.is_finite() {
         return Err("invalid scroll position".into());
     }
@@ -678,6 +696,7 @@ fn browser_restore_scroll(app: tauri::AppHandle, label: String, x: f64, y: f64) 
 
 #[tauri::command]
 async fn browser_snapshot(app: tauri::AppHandle, label: String) -> Result<PageSnapshot, String> {
+    validate_browser_label(&label)?;
     let webview = app
         .get_webview(&label)
         .ok_or_else(|| "browser tab webview not found".to_string())?;

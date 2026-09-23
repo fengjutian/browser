@@ -4,7 +4,7 @@ import { ArrowDownOutlined, ArrowLeftOutlined, ArrowRightOutlined, ArrowUpOutlin
 import { Sparkles as RobotOutlined } from 'lucide-react'
 import type { BrowserTab, BrowserTabError } from '../../types'
 import { findDocumentByUrl, getBrowserShortcutsEnabled, getDocument, getSession, saveDocument, setSession, toggleStarred } from '../../api'
-import { captureNativePage, closeNativeTab, ensureNativeTab, findInNativeTab, hasNativeTab, hideNativeTab, navigateHistory, onNativeNewTab, openNativeTab, printNativeTab, readNativeState, reloadNativeTab, resizeNativeTab, showNativeTab, stopNativeTab, zoomNativeTab } from '../../services/nativeBrowser'
+import { captureNativePage, closeNativeTab, ensureNativeTab, findInNativeTab, hasNativeTab, hideNativeTab, isNativeBrowserAvailable, navigateHistory, onNativeNewTab, openNativeTab, printNativeTab, readNativeState, reloadNativeTab, resizeNativeTab, showNativeTab, stopNativeTab, zoomNativeTab } from '../../services/nativeBrowser'
 import { extractArticle } from '../../features/reader/extractArticle'
 import type { ReaderArticle } from '../../features/reader/types'
 import { classifySaveError } from '../../features/documents/saveClassifier'
@@ -489,6 +489,13 @@ export function BrowserPage({ visible = true, onSearchKnowledge }: { visible?: b
     if (!resolved) return
     const url = trackingCleanerEnabled ? cleanTrackingParameters(resolved) : resolved
     const tabId = active.id
+    if (!isNativeBrowserAvailable()) {
+      window.open(url, '_blank', 'noopener,noreferrer')
+      setTabs(current => current.map(tab => tab.id === tabId ? { ...newTab(tab.id), active: true } : tab))
+      setAddress('')
+      messageApi.info('网页预览模式下已使用系统浏览器打开')
+      return
+    }
     // Private tabs always deny sensitive permissions for the target origin.
     // The script-level guard enforces this at runtime; pre-denying here
     // ensures the JS prompt is skipped too.
@@ -784,6 +791,11 @@ export function BrowserPage({ visible = true, onSearchKnowledge }: { visible?: b
   }
 
   function openNewTab(url?: string, options: { private?: boolean } = {}) {
+    if (url && !isNativeBrowserAvailable()) {
+      window.open(url, '_blank', 'noopener,noreferrer')
+      messageApi.info('网页预览模式下已使用系统浏览器打开')
+      return
+    }
     const tab = options.private ? makePrivateTab() : newTab()
     const currentId = activeTabIdRef.current
     if (currentId) void hideNativeTab(currentId)

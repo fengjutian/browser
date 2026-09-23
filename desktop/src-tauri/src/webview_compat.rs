@@ -46,6 +46,13 @@ fn is_dangerous_custom_scheme(scheme: &str) -> bool {
     )
 }
 
+fn is_allowed_custom_scheme(scheme: &str) -> bool {
+    matches!(
+        scheme.to_ascii_lowercase().as_str(),
+        "mailto" | "tel" | "sms" | "vscode" | "slack" | "zoommtg"
+    )
+}
+
 #[tauri::command]
 pub fn shell_open(_app: AppHandle, url: String) -> Result<(), String> {
     let parsed = url::Url::parse(&url).map_err(|error| format!("invalid url: {error}"))?;
@@ -55,10 +62,13 @@ pub fn shell_open(_app: AppHandle, url: String) -> Result<(), String> {
     if is_dangerous_custom_scheme(parsed.scheme()) {
         return Err(format!("refusing to open dangerous scheme: {}", parsed.scheme()));
     }
+    if !is_allowed_custom_scheme(parsed.scheme()) {
+        return Err(format!("custom scheme is not allowlisted: {}", parsed.scheme()));
+    }
     #[cfg(target_os = "windows")]
     {
-        std::process::Command::new("cmd")
-            .args(["/C", "start", "", parsed.as_str()])
+        std::process::Command::new("rundll32.exe")
+            .args(["url.dll,FileProtocolHandler", parsed.as_str()])
             .spawn()
             .map_err(|error| format!("failed to launch shell: {error}"))?;
         return Ok(());
@@ -169,5 +179,13 @@ mod tests {
         assert!(!is_dangerous_custom_scheme("slack"));
         assert!(!is_dangerous_custom_scheme("zoommtg"));
         assert!(!is_dangerous_custom_scheme("mailto"));
+    }
+
+    #[test]
+    fn custom_scheme_allowlist_is_explicit() {
+        assert!(is_allowed_custom_scheme("mailto"));
+        assert!(is_allowed_custom_scheme("vscode"));
+        assert!(!is_allowed_custom_scheme("unknown-app"));
+        assert!(!is_allowed_custom_scheme("http"));
     }
 }

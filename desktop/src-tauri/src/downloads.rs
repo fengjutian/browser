@@ -386,8 +386,8 @@ pub fn download_show_in_folder(app: tauri::AppHandle, id: String) -> Result<(), 
 fn open_path_with_system(path: &Path) -> Result<(), String> {
     #[cfg(target_os = "windows")]
     {
-        std::process::Command::new("cmd")
-            .args(["/C", "start", "", &path.display().to_string()])
+        std::process::Command::new("explorer.exe")
+            .arg(path)
             .spawn()
             .map_err(|error| format!("failed to launch shell: {error}"))?;
         return Ok(());

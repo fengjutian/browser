@@ -40,6 +40,7 @@ export interface NativeDownloadUpdate {
 export const EVENT_PAYLOAD_VERSION = 2
 const labels = new Map<string, string>()
 const isTauri = () => '__TAURI_INTERNALS__' in window
+export const isNativeBrowserAvailable = (): boolean => isTauri()
 const labelFor = (tabId: string) => `browser-${tabId.replace(/[^a-zA-Z0-9-]/g, '-')}`
 
 export async function openNativeTab(tabId: string, url: string, bounds: BrowserBounds): Promise<boolean> {
