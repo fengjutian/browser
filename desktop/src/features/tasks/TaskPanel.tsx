@@ -1,5 +1,5 @@
-import { Typography, message } from 'antd'
-import { Button, Empty, Space, Table, Tag, Tooltip } from '../../components/ui'
+import { message } from 'antd'
+import { Button, Empty, Space, Table, Tag, Tooltip, Typography } from '../../components/ui'
 import { ReloadOutlined, SyncOutlined } from '@ant-design/icons'
 import { useEffect, useState } from 'react'
 import type { Task } from '../../types'

@@ -1,5 +1,5 @@
-import { Typography, message } from 'antd'
-import { Button, Card, Dropdown, Input, Popover, Space, Tag, Tooltip } from '../../components/ui'
+import { message } from 'antd'
+import { Button, Card, Dropdown, Input, Popover, Space, Tag, Tooltip, Typography } from '../../components/ui'
 import { ClockCircleOutlined, FileTextOutlined, FolderAddOutlined, InboxOutlined, MoreOutlined, StarFilled, StarOutlined } from '@ant-design/icons'
 import { useEffect, useState } from 'react'
 import type { Document } from '../../types'

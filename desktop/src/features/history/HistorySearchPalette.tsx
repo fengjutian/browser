@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import { Typography } from 'antd'
-import { Button, Input, List, Modal, Popconfirm, type InputRef } from '../../components/ui'
+import { Button, Input, List, Modal, Popconfirm, Typography, type InputRef } from '../../components/ui'
 import { DeleteOutlined, GlobalOutlined } from '@ant-design/icons'
 import type { HistoryEntry } from './dedupeHistory'
 import { searchHistory, type HistorySearchResult } from './historySearchIndex'
