@@ -22,13 +22,13 @@ const PROVIDER_OPTIONS: { label: string; value: AIProviderType }[] = [
   { label: 'MiniMax', value: 'minimax' },
 ]
 
-const PROVIDER_PRESETS: Record<AIProviderType, { baseUrl: string; defaultModel: string; placeholderModel: string }> = {
-  'openai-compatible': { baseUrl: 'https://api.example.com/v1', defaultModel: 'gpt-4o-mini', placeholderModel: 'gpt-4o-mini' },
-  ollama: { baseUrl: 'http://localhost:11434', defaultModel: 'llama3.1', placeholderModel: 'llama3.1' },
-  deepseek: { baseUrl: 'https://api.deepseek.com/v1', defaultModel: 'deepseek-chat', placeholderModel: 'deepseek-chat' },
-  qwen: { baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1', defaultModel: 'qwen-plus', placeholderModel: 'qwen-plus' },
-  kimi: { baseUrl: 'https://api.moonshot.cn/v1', defaultModel: 'moonshot-v1-8k', placeholderModel: 'moonshot-v1-8k' },
-  minimax: { baseUrl: 'https://api.minimax.chat/v1', defaultModel: 'MiniMax-Text-01', placeholderModel: 'MiniMax-Text-01' },
+const PROVIDER_PRESETS: Record<AIProviderType, { baseUrl: string; defaultModel: string; placeholderModel: string; embeddingModel?: string; embeddingPlaceholder: string }> = {
+  'openai-compatible': { baseUrl: 'https://api.openai.com/v1', defaultModel: 'gpt-4o-mini', placeholderModel: 'gpt-4o-mini', embeddingModel: 'text-embedding-3-small', embeddingPlaceholder: 'text-embedding-3-small' },
+  ollama: { baseUrl: 'http://localhost:11434', defaultModel: 'llama3.1', placeholderModel: 'llama3.1', embeddingModel: 'nomic-embed-text', embeddingPlaceholder: 'nomic-embed-text' },
+  deepseek: { baseUrl: 'https://api.deepseek.com', defaultModel: 'deepseek-flash', placeholderModel: 'deepseek-flash', embeddingPlaceholder: '该 Provider 暂无通用 Embedding 默认值' },
+  qwen: { baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1', defaultModel: 'qwen-plus', placeholderModel: 'qwen-plus', embeddingModel: 'text-embedding-v3', embeddingPlaceholder: 'text-embedding-v3' },
+  kimi: { baseUrl: 'https://api.moonshot.cn/v1', defaultModel: 'moonshot-v1-8k', placeholderModel: 'moonshot-v1-8k', embeddingPlaceholder: '该 Provider 暂无通用 Embedding 默认值' },
+  minimax: { baseUrl: 'https://api.minimax.chat/v1', defaultModel: 'MiniMax-Text-01', placeholderModel: 'MiniMax-Text-01', embeddingModel: 'embo-01', embeddingPlaceholder: 'embo-01' },
 }
 
 const PROVIDER_TAG_COLOR: Record<AIProviderType, string> = {
@@ -178,8 +178,20 @@ function AIProviderSettings() {
     form.setFieldsValue({
       baseUrl: current.baseUrl?.trim() ? current.baseUrl : preset.baseUrl,
       model: current.model?.trim() ? current.model : preset.defaultModel,
+      embeddingModel: preset.embeddingModel,
     })
   }, [activeType, editingId, form])
+
+  function handleProviderTypeChange(type: AIProviderType) {
+    const preset = PROVIDER_PRESETS[type]
+    form.setFieldsValue({
+      type,
+      baseUrl: preset.baseUrl,
+      model: preset.defaultModel,
+      embeddingModel: preset.embeddingModel,
+    })
+    form.validateFields(['baseUrl', 'model']).catch(() => undefined)
+  }
 
   async function handleEdit(provider: AIProvider) {
     form.setFieldsValue({
@@ -249,10 +261,10 @@ function AIProviderSettings() {
   return <>{contextHolder}<Card title="AI Provider" className="settings-card"><Typography.Paragraph type="secondary">连接兼容 Provider，用于摘要、翻译和知识问答。普通配置写入本地 SQLite，API Key 通过操作系统密钥环保存；前端不会回显 Key 明文。</Typography.Paragraph>
     <Form form={form} layout="vertical" initialValues={{type:'openai-compatible',timeoutSeconds:60}} onFinish={handleSubmit}>
       <Space wrap>
-        <Form.Item name="type" label="Provider 类型" rules={[{required:true}]}><Select options={PROVIDER_OPTIONS} style={{minWidth:220}}/></Form.Item>
+        <Form.Item name="type" label="Provider 类型" rules={[{required:true}]}><Select options={PROVIDER_OPTIONS} style={{minWidth:220}} onChange={handleProviderTypeChange}/></Form.Item>
         <Form.Item name="baseUrl" label="Base URL" rules={[{required:true,message:'请输入 Base URL'},{type:'url',message:'需为有效 http(s) URL'}]}><Input placeholder="https://api.example.com/v1" style={{minWidth:280}}/></Form.Item>
         <Form.Item name="model" label="模型" rules={[{required:true,message:'请输入模型名称'}]}><Input placeholder={activeType ? PROVIDER_PRESETS[activeType].placeholderModel : 'gpt-4o-mini'} style={{minWidth:200}}/></Form.Item>
-        <Form.Item name="embeddingModel" label="Embedding 模型（可选）"><Input placeholder="text-embedding-3-small" style={{minWidth:220}}/></Form.Item>
+        <Form.Item name="embeddingModel" label="Embedding 模型（可选）"><Input placeholder={activeType ? PROVIDER_PRESETS[activeType].embeddingPlaceholder : 'text-embedding-3-small'} style={{minWidth:220}}/></Form.Item>
         <Form.Item name="timeoutSeconds" label="超时（秒）" rules={[{type:'number',min:1,max:600,message:'范围 1-600'}]}><InputNumber min={1} max={600} style={{width:120}}/></Form.Item>
         <Form.Item name="apiKey" label={activeType === 'ollama' ? 'API Key（可选）' : 'API Key'} tooltip="已保存的 Key 不会回显，留空表示不清除"><Input.Password prefix={<KeyOutlined/>} placeholder={activeType === 'ollama' ? '本地服务通常不需要' : 'sk-...'} style={{minWidth:260}} autoComplete="off"/></Form.Item>
       </Space>

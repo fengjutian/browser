@@ -1036,8 +1036,13 @@ body[data-theme='dark'] {
     flex: 1;
     height: auto;
     min-height: 0;
-    grid-template-columns: minmax(0, 1fr) 260px;
+    grid-template-columns: minmax(0, 1fr);
     gap: 12px;
+  }
+
+  .assistant-provider-alert {
+    flex: none;
+    margin: -6px 0 14px;
   }
 
   .assistant-grid > .ant-card {
@@ -1054,9 +1059,22 @@ body[data-theme='dark'] {
     &::-webkit-scrollbar { display: none; }
   }
 
-  .assistant-chat > .ant-card-body { overflow: hidden; }
-  .assistant-conversation { min-height: 0; overflow: auto; scrollbar-width: none; }
+  .assistant-chat { display: flex; flex-direction: column; }
+  .assistant-chat > .ant-card-head { flex: none; }
+  .assistant-chat > .ant-card-body {
+    flex: 1;
+    height: auto;
+    overflow: hidden;
+    padding-bottom: 16px;
+  }
+  .assistant-conversation { flex: 1; min-height: 0; overflow: auto; scrollbar-width: none; }
   .assistant-conversation::-webkit-scrollbar { display: none; }
+  .assistant-composer {
+    flex: none;
+    padding-top: 12px;
+    background: var(--ant-color-bg-container, #fff);
+  }
+  .assistant-composer .ant-input-affix-wrapper { min-height: 48px; }
 }
 
 // Native rail buttons avoid the centering offsets of collapsed component menus.

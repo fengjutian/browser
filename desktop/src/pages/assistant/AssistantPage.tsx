@@ -1,4 +1,4 @@
-import { Alert, Avatar, Button, Card, Empty, Input, List, Space, Spin, Tag, Typography, message } from 'antd'
+import { Alert, Avatar, Button, Card, Drawer, Empty, Input, List, Space, Spin, Tag, Typography, message } from 'antd'
 import { ArrowRightOutlined, FileTextOutlined, RobotOutlined, SettingOutlined, UserOutlined } from '@ant-design/icons'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { PageHeader } from '../../shared/components/PageHeader'
@@ -38,6 +38,7 @@ export function AssistantPage({ onNavigate }: { onNavigate?: (view: View) => voi
   const [turns, setTurns] = useState<Turn[]>([])
   const [busy, setBusy] = useState(false)
   const [selectedDoc, setSelectedDoc] = useState<Document | null>(null)
+  const [sourcesOpen, setSourcesOpen] = useState(false)
   const listRef = useRef<HTMLDivElement | null>(null)
 
   useEffect(() => {
@@ -156,6 +157,16 @@ export function AssistantPage({ onNavigate }: { onNavigate?: (view: View) => voi
           title="向整个知识库提问"
           description={`当前基于 ${documents.length} 篇真实保存来源${noProvider ? ' · 未配置 AI Provider' : ''}。`}
         />
+        {noProvider && (
+          <Alert
+            className="assistant-provider-alert"
+            type="warning"
+            showIcon
+            message="尚未配置 AI Provider"
+            description="请在“设置 → AI Provider”中添加 OpenAI 兼容或 Ollama 服务。"
+            action={onNavigate ? <Button size="small" type="primary" icon={<SettingOutlined />} onClick={goToProviderSettings}>去设置</Button> : undefined}
+          />
+        )}
         <div className="assistant-grid">
           <Card
             className="assistant-chat"
@@ -168,9 +179,12 @@ export function AssistantPage({ onNavigate }: { onNavigate?: (view: View) => voi
               ) : '对话'
             }
             extra={
-              turns.length > 0 ? (
-                <Button size="small" type="link" onClick={clearConversation}>清空</Button>
-              ) : undefined
+              <Space>
+                <Button size="small" icon={<FileTextOutlined />} onClick={() => setSourcesOpen(true)}>
+                  引用来源 {sourceItems.length}
+                </Button>
+                {turns.length > 0 && <Button size="small" type="link" onClick={clearConversation}>清空</Button>}
+              </Space>
             }
           >
             {turns.length === 0 && noDocuments && (
@@ -185,22 +199,6 @@ export function AssistantPage({ onNavigate }: { onNavigate?: (view: View) => voi
                 <span className="assistant-avatar"><RobotOutlined /></span>
                 <Typography.Title level={2}>你想了解什么？</Typography.Title>
                 <Typography.Paragraph>比较观点、发现联系，或把真实浏览资料整理成研究简报。</Typography.Paragraph>
-                {noProvider && (
-                  <Alert
-                    type="warning"
-                    showIcon
-                    style={{ marginBottom: 12, textAlign: 'left' }}
-                    message="尚未配置 AI Provider"
-                    description="提问功能需要在「设置 → AI Provider」中添加 OpenAI 兼容或 Ollama 服务。"
-                    action={
-                      onNavigate ? (
-                        <Button size="small" type="primary" icon={<SettingOutlined />} onClick={goToProviderSettings}>
-                          去设置
-                        </Button>
-                      ) : undefined
-                    }
-                  />
-                )}
                 <Space direction="vertical">
                   {SUGGESTED_PROMPTS.map(text => (
                     <Button key={text} onClick={() => applySuggestion(text)} disabled={noProvider}>{text}</Button>
@@ -262,29 +260,26 @@ export function AssistantPage({ onNavigate }: { onNavigate?: (view: View) => voi
                 />
               </div>
             )}
-            <Input
-              size="large"
-              disabled={noDocuments || busy}
-              value={question}
-              onChange={event => setQuestion(event.target.value)}
-              onPressEnter={() => void ask()}
-              placeholder={placeholder}
-              suffix={
-                <Button
-                  type="primary"
-                  shape="circle"
-                  icon={<ArrowRightOutlined />}
-                  disabled={!canAsk}
-                  loading={busy}
-                  onClick={() => void ask()}
-                />
-              }
-            />
+            <div className="assistant-composer">
+              <Input
+                size="large"
+                disabled={noDocuments || busy}
+                value={question}
+                onChange={event => setQuestion(event.target.value)}
+                onPressEnter={() => void ask()}
+                placeholder={placeholder}
+                suffix={<Button type="primary" shape="circle" icon={<ArrowRightOutlined />} disabled={!canAsk} loading={busy} onClick={() => void ask()} />}
+              />
+            </div>
           </Card>
-          <Card
-            title="引用来源"
-            extra={<Typography.Text type="secondary">{sourceItems.length} 条</Typography.Text>}
-          >
+        </div>
+        <Drawer
+          title={`引用来源（${sourceItems.length}）`}
+          placement="right"
+          width={420}
+          open={sourcesOpen}
+          onClose={() => setSourcesOpen(false)}
+        >
             <List
               dataSource={sourceItems}
               locale={{ emptyText: <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无来源" /> }}
@@ -302,8 +297,7 @@ export function AssistantPage({ onNavigate }: { onNavigate?: (view: View) => voi
                 </List.Item>
               )}
             />
-          </Card>
-        </div>
+        </Drawer>
         <DocumentDetailDrawer
           document={selectedDoc}
           onClose={() => setSelectedDoc(null)}
