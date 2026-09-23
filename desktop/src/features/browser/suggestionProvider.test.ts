@@ -90,6 +90,18 @@ describe('buildSuggestions', () => {
     })
     expect(items[0].title.length).toBeLessThanOrEqual(120)
   })
+
+  it('does not crash when persisted runtime data contains non-string values', () => {
+    const items = buildSuggestions({
+      query: { value: 'rust' } as unknown as string,
+      openTabs: [{ url: 42 as unknown as string, title: null as unknown as string }],
+      history: [],
+      bookmarks: [],
+      searchTemplate: template,
+      now: NOW,
+    })
+    expect(items.at(-1)?.url).toBe('https://duckduckgo.com/?q=rust')
+  })
 })
 
 describe('trimSuggestions', () => {

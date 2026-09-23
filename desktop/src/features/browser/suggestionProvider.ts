@@ -42,6 +42,7 @@ const TITLE_MAX = 120
 function asText(value: unknown): string {
   if (typeof value === 'string') return value
   if (value == null) return ''
+  if (typeof value === 'object' && 'value' in value && typeof value.value === 'string') return value.value
   return String(value)
 }
 
