@@ -227,11 +227,11 @@ export function BrowserPage({ visible = true, onSearchKnowledge }: { visible?: b
   }, [])
 
   useEffect(() => {
-    let unlisten = () => undefined
+    let unlisten: () => void = () => undefined
     void onNativeAdBlockUpdate(update => {
       const tabId = update.tabLabel.replace(/^browser-/, '')
       setBlockedAdsByTab(current => ({ ...current, [tabId]: update.blockedCount }))
-    }).then(dispose => { unlisten = dispose })
+    }).then(dispose => { unlisten = () => { dispose() } })
     return () => unlisten()
   }, [])
 
