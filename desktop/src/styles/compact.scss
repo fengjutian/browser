@@ -23,8 +23,8 @@
     padding: 12px 14px;
   }
 
-  .ant-statistic-title { margin-bottom: 2px; }
-  .ant-statistic-content { font-size: 24px; }
+  .ant-statistic-title, .ui-statistic__title { margin-bottom: 2px; }
+  .ant-statistic-content, .ui-statistic__value { font-size: 24px; }
 }
 
 .settings-card {
@@ -44,7 +44,7 @@
 .search-results {
   margin-top: 12px;
 
-  .ant-list-item {
+  .ant-list-item, .ui-list-item {
     margin-bottom: 6px;
     padding: 10px 12px;
   }
@@ -234,9 +234,9 @@
   border-radius: 10px;
   background: rgba(255, 255, 255, .55);
 
-  .ant-list-item { padding-block: 11px; }
-  .ant-list-item-meta-title { margin-bottom: 3px !important; }
-  .ant-list-item-meta-description { display: flex; align-items: center; gap: 14px; min-width: 0; }
+  .ant-list-item, .ui-list-item { padding-block: 11px; }
+  .ant-list-item-meta-title, .ui-list-meta__title { margin-bottom: 3px !important; }
+  .ant-list-item-meta-description, .ui-list-meta__description { display: flex; align-items: center; gap: 14px; min-width: 0; }
 }
 
 .privacy-history-url {
@@ -323,7 +323,8 @@ body[data-theme='github'] {
   .quick-site,
   .document-card,
   .settings-card,
-  .search-results .ant-list-item {
+  .search-results .ant-list-item,
+  .search-results .ui-list-item {
     border-color: #d0d7de;
     border-radius: 6px;
     background: #fff;
@@ -370,7 +371,8 @@ body[data-theme='dark'] {
 
     &__name { color: #cbd5ce; }
   }
-  .search-results .ant-list-item { background: #181f1b; }
+  .search-results .ant-list-item,
+  .search-results .ui-list-item { background: #181f1b; }
   .document-cover { background: linear-gradient(145deg, #25372c, #1b2821); }
   .ai-preview { background: #1d2b23; }
 }
@@ -491,7 +493,7 @@ select {
 }
 
 .library-stats {
-  .ant-statistic-content {
+  .ant-statistic-content, .ui-statistic__value {
     display: flex;
     align-items: center;
     gap: 12px;
@@ -539,8 +541,8 @@ select {
 
 .library-history,
 .library-downloads {
-  .ant-list-item-meta { align-items: center; }
-  .ant-list-item-meta-avatar { margin-inline-end: 12px; }
+  .ant-list-item-meta, .ui-list-meta { align-items: center; }
+  .ant-list-item-meta-avatar, .ui-list-meta__avatar { margin-inline-end: 12px; }
 }
 
 .library-tabs {
@@ -576,7 +578,7 @@ select {
 
 .site-permissions {
   .ant-alert { margin-bottom: 4px; }
-  .ant-list-item-meta-description { margin-top: 10px; }
+  .ant-list-item-meta-description, .ui-list-meta__description { margin-top: 10px; }
 }
 
 .site-permission-toggle {
@@ -624,9 +626,9 @@ select {
     padding: 2px 4px 8px;
   }
 
-  .ant-list-item { padding-inline: 4px; }
-  .ant-list-item-meta-avatar { margin-inline-end: 10px; color: #748078; }
-  .ant-list-item-meta-title { max-width: 270px; margin-bottom: 0 !important; }
+  .ant-list-item, .ui-list-item { padding-inline: 4px; }
+  .ant-list-item-meta-avatar, .ui-list-meta__avatar { margin-inline-end: 10px; color: #748078; }
+  .ant-list-item-meta-title, .ui-list-meta__title { max-width: 270px; margin-bottom: 0 !important; }
   .is-success { color: #347851; }
   .is-error { color: #b53a36; }
 }
@@ -780,8 +782,8 @@ body[data-theme='github'] { --accent:#0969da; --accent-soft:#ddf4ff; --accent-bo
     background: var(--accent-soft);
   }
 
-  .ant-statistic-title { margin-bottom: 7px; font-size: 13px; }
-  .ant-statistic-content { gap: 10px; font-size: 24px; }
+  .ant-statistic-title, .ui-statistic__title { margin-bottom: 7px; font-size: 13px; }
+  .ant-statistic-content, .ui-statistic__value { gap: 10px; font-size: 24px; }
 }
 
 .library-stat-icon,

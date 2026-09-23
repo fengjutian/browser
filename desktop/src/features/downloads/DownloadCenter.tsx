@@ -91,7 +91,7 @@ export function DownloadCenter({ center, limit = 200 }: DownloadCenterProps) {
     return <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="还没有下载记录" />
   }
 
-  const columns: ColumnsType<DownloadRecord> = [
+  const columns = [
     {
       title: '文件',
       dataIndex: 'fileName',
@@ -265,7 +265,7 @@ export function DownloadCenter({ center, limit = 200 }: DownloadCenterProps) {
         </Space>
       ),
     },
-  ]
+  ] as ColumnsType<DownloadRecord>
 
   return (
     <Table<DownloadRecord>

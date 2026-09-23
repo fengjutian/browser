@@ -211,8 +211,6 @@ export function AssistantPage({ onNavigate }: { onNavigate?: (view: View) => voi
               <div className="assistant-conversation" ref={listRef}>
                 <List
                   dataSource={turns}
-                  rowKey={turn => turn.id}
-                  split={false}
                   renderItem={turn => {
                     if (turn.role === 'user') {
                       return (
