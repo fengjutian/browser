@@ -1,5 +1,5 @@
-import { Empty, List, Segmented, Select, Statistic, Typography } from 'antd'
-import { Input, Space, Tag } from '../../components/ui'
+import { Empty, List, Statistic, Typography } from 'antd'
+import { Input, Segmented, Select, Space, Tag } from '../../components/ui'
 import { FileSearchOutlined, RightOutlined, SearchOutlined } from '@ant-design/icons'
 import { Fragment, useEffect, useMemo, useState } from 'react'
 import { PageHeader } from '../../shared/components/PageHeader'
@@ -75,14 +75,13 @@ export function SearchPage({ initialQuery = '' }: { initialQuery?: string }) {
 
   return <section className="page"><PageHeader eyebrow="LOCAL SEARCH" title="找回你读过的内容" description="搜索保存在本地 SQLite 中的真实网页内容。"/><Input size="large" prefix={<SearchOutlined/>} value={query} onChange={event => setQuery(event.target.value)} placeholder="搜索标题、正文或标签" suffix={`${filtered.length} 条结果${durationMs !== null ? ` · ${durationMs}ms` : ''}`}/>
     <Space wrap className="search-filters">
-      <Select<string[], { label: string; value: string }>
+      <Select<string[]>
         mode="multiple"
-        allowClear
-        placeholder="按标签筛选"
-        style={{minWidth:200}}
+        options={allTags.map(tag => ({label: tag, value: tag})) as any}
+        style={{minWidth:160}}
+        placeholder="按标签过滤"
         value={tagFilter}
         onChange={setTagFilter}
-        options={allTags.map(tag => ({label:tag,value:tag}))}
       />
       <Segmented value={starredOnly ? 'starred' : 'all'} onChange={value => setStarredOnly(value === 'starred')} options={[{label:'全部',value:'all'},{label:'仅收藏',value:'starred'}]}/>
       <Segmented value={includeArchived ? 'all' : 'active'} onChange={value => setIncludeArchived(value === 'all')} options={[{label:'未归档',value:'active'},{label:'含归档',value:'all'}]}/>

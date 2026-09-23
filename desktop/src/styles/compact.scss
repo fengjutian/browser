@@ -631,7 +631,8 @@ select {
   .is-error { color: #b53a36; }
 }
 
-.browser-toolbar form > .ant-select { width: 100%; }
+.browser-toolbar form > .ant-select,
+.browser-toolbar form > .ui-autocomplete { width: 100%; }
 
 // The omnibox should read as browser chrome, not as a narrow page form.
 .browser-toolbar > form {
@@ -1007,8 +1008,10 @@ body[data-theme='dark'] {
   color: #667169;
   font-size: 12px;
 
-  .ant-select { width: 100%; }
-  .ant-select-selector { border-color: transparent !important; background: transparent !important; box-shadow: none !important; }
+  .ant-select,
+  .ui-select { width: 100%; }
+  .ant-select-selector,
+  .ui-select { border-color: transparent !important; background: transparent !important; box-shadow: none !important; }
 }
 
 .new-tab .quick-actions { width: min(720px, 86%) !important; margin-top: 16px !important; }

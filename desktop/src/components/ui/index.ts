@@ -11,4 +11,7 @@ export { Dropdown, type DropdownProps, type MenuItem, type MenuProps } from './D
 export { Modal, type ModalProps } from './Modal'
 export { Drawer, type DrawerProps } from './Drawer'
 export { Popconfirm, type PopconfirmProps } from './Popconfirm'
+export { Select, type SelectOption, type SelectProps } from './Select'
+export { Segmented, type SegmentedOption, type SegmentedProps } from './Segmented'
+export { AutoComplete, type AutoCompleteOption, type AutoCompleteProps } from './AutoComplete'
 export { UI_MODAL_OVERLAY_EVENT } from './overlayLifecycle'

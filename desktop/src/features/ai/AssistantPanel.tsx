@@ -1,5 +1,5 @@
-import { Alert, Empty, Segmented, Select, Spin, Typography, message } from 'antd'
-import { Button, Card, Input, Space, Tag } from '../../components/ui'
+import { Alert, Empty, Spin, Typography, message } from 'antd'
+import { Button, Card, Input, Segmented, Select, Space, Tag } from '../../components/ui'
 import { ArrowRightOutlined, BookOutlined, CloseOutlined, CopyOutlined, GlobalOutlined, RobotOutlined, SaveOutlined, ThunderboltOutlined, TranslationOutlined } from '@ant-design/icons'
 import { useEffect, useMemo, useState } from 'react'
 import { aiChat, findDocumentByUrl, getSession, listAIProviders, setSession, updateDocument } from '../../api'
@@ -145,9 +145,9 @@ export function AssistantPanel({ close, saveToLibrary, currentUrl, currentTabId,
   return <>{contextHolder}<aside className="ai-panel">
     <div className="panel-title"><Space><span className="ai-mark"><RobotOutlined/></span><b>AI Assistant</b></Space><Button type="text" icon={<CloseOutlined/>} onClick={close}/></div>
     <Segmented block value={mode} onChange={value => setMode(value as PanelMode)} options={[
-      {label:'摘要',value:'summarize',icon:<BookOutlined/>},
-      {label:'提问',value:'ask',icon:<RobotOutlined/>},
-      {label:'翻译',value:'translate',icon:<TranslationOutlined/>},
+      {label:'摘要',value:'summarize' as PanelMode,icon:<BookOutlined/>},
+      {label:'提问',value:'ask' as PanelMode,icon:<RobotOutlined/>},
+      {label:'翻译',value:'translate' as PanelMode,icon:<TranslationOutlined/>},
     ]}/>
     <Space wrap className="ai-panel__provider">
       <Tag icon={<RobotOutlined/>} color={currentProvider ? 'green' : 'default'}>

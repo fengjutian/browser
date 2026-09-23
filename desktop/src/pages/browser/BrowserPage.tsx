@@ -1,6 +1,6 @@
 import { MouseEvent, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
-import { AutoComplete, Badge, Segmented, Select, Typography, message } from 'antd'
-import { Button, Card, Dropdown, Input, Modal, Popover, Space, Tabs, Tag, Tooltip, UI_MODAL_OVERLAY_EVENT, type InputRef, type MenuProps } from '../../components/ui'
+import { Badge, Typography, message } from 'antd'
+import { AutoComplete, Button, Card, Dropdown, Input, Modal, Popover, Segmented, Select, Space, Tabs, Tag, Tooltip, UI_MODAL_OVERLAY_EVENT, type InputRef, type MenuProps } from '../../components/ui'
 import { ArrowDownOutlined, ArrowLeftOutlined, ArrowRightOutlined, ArrowUpOutlined, AudioMutedOutlined, BookOutlined, CheckCircleOutlined, CloseCircleOutlined, CloseOutlined, CopyOutlined, DownloadOutlined, FullscreenOutlined, GlobalOutlined, LoadingOutlined, MoreOutlined, PlusOutlined, PrinterOutlined, ReloadOutlined, SafetyCertificateOutlined, SaveOutlined, SearchOutlined, SoundOutlined, StarFilled, StarOutlined, ThunderboltOutlined, TranslationOutlined, WarningOutlined } from '@ant-design/icons'
 import { Sparkles as RobotOutlined } from 'lucide-react'
 import type { BrowserTab, BrowserTabError } from '../../types'
@@ -662,7 +662,7 @@ export function BrowserPage({ visible = true, onSearchKnowledge }: { visible?: b
     const next = await toggleWindowFullscreen()
     setIsWindowFullscreen(next)
   }
-  const browserMenu: MenuProps['items'] = [
+  const browserMenu: MenuProps['items'] = ([
     { key: 'find', label: '在页面中查找', extra: 'Ctrl+F', onClick: () => setFindOpen(true) },
     { key: 'tab-search', label: '搜索标签页', extra: 'Ctrl+K', onClick: () => setTabSearchOpen(true) },
     { key: 'history-search', label: '浏览历史记录', extra: 'Ctrl+H', onClick: () => setHistorySearchOpen(true) },
@@ -676,7 +676,7 @@ export function BrowserPage({ visible = true, onSearchKnowledge }: { visible?: b
     { type: 'divider' },
     { key: 'zoom', label: <Space><Button size="small" onClick={event => { event.stopPropagation(); changeZoom(active.id, -0.1) }}>−</Button><span className="browser-zoom-value">{Math.round((zoomLevels[active.id] ?? 1) * 100)}%</span><Button size="small" onClick={event => { event.stopPropagation(); changeZoom(active.id, 0.1) }}>+</Button></Space> },
     { key: 'zoom-reset', label: '重置缩放', extra: 'Ctrl+0', onClick: () => setZoom(active.id, 1) },
-  ]
+  ]) as MenuProps['items']
 
   const bookmarkBarPanel = (
     <div className="bookmark-bar-panel" role="menu">
