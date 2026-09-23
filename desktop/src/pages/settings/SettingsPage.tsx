@@ -16,6 +16,18 @@ import { isAdBlockerEnabled, setAdBlockerEnabled } from '../../features/plugins/
 import { setNativeAdBlocking } from '../../services/nativeBrowser'
 import { PrivacyExportPanel } from '../../features/privacy/PrivacyExportPanel'
 import { getBrowserCapabilities, type BrowserCapabilities } from '../../services/browserCapabilities'
+import {
+  bindingToDisplay,
+  clearShortcutOverride,
+  isOverridden,
+  readShortcutOverrides,
+  resetAllShortcutOverrides,
+  SHORTCUT_DEFINITIONS,
+  SHORTCUT_OVERRIDES_EVENT,
+  writeShortcutOverrides,
+  type ShortcutAction,
+  type ShortcutOverrides,
+} from '../../features/browser/shortcuts'
 
 const PROVIDER_OPTIONS: { label: string; value: AIProviderType }[] = [
   { label: 'OpenAI 兼容（API Key）', value: 'openai-compatible' },
@@ -88,6 +100,8 @@ function BrowserSettings() {
   const [messageApi, contextHolder] = message.useMessage()
   const [config, setConfig] = useState(() => readSearchEngineConfig())
   const [customTemplate, setCustomTemplate] = useState('')
+  const [overrides, setOverrides] = useState<ShortcutOverrides>(() => readShortcutOverrides())
+  const [recording, setRecording] = useState<ShortcutAction | null>(null)
   const presets = SEARCH_ENGINE_PRESETS
 
   useEffect(() => {
@@ -98,6 +112,47 @@ function BrowserSettings() {
     window.addEventListener(SHORTCUTS_EVENT, onChange)
     return () => window.removeEventListener(SHORTCUTS_EVENT, onChange)
   }, [])
+
+  useEffect(() => {
+    function onOverrides(event: Event) {
+      const detail = (event as CustomEvent<ShortcutOverrides>).detail
+      setOverrides(detail ?? readShortcutOverrides())
+    }
+    window.addEventListener(SHORTCUT_OVERRIDES_EVENT, onOverrides)
+    return () => window.removeEventListener(SHORTCUT_OVERRIDES_EVENT, onOverrides)
+  }, [])
+
+  function recordBinding(action: ShortcutAction, event: React.KeyboardEvent<HTMLLIElement>) {
+    event.preventDefault()
+    event.stopPropagation()
+    if (event.key === 'Escape' && !event.ctrlKey && !event.shiftKey && !event.altKey) {
+      setRecording(null)
+      return
+    }
+    if (['Control', 'Shift', 'Alt', 'Meta'].includes(event.key)) return
+    const next: ShortcutOverrides = {
+      ...readShortcutOverrides(),
+      [action]: {
+        key: event.key,
+        ctrl: event.ctrlKey || event.metaKey,
+        shift: event.shiftKey,
+        alt: event.altKey,
+      },
+    }
+    writeShortcutOverrides(next)
+    setOverrides(next)
+    setRecording(null)
+  }
+
+  function resetOne(action: ShortcutAction) {
+    clearShortcutOverride(action)
+    setOverrides(readShortcutOverrides())
+  }
+
+  function resetAll() {
+    resetAllShortcutOverrides()
+    setOverrides({})
+  }
 
   function toggle(next: boolean) {
     setEnabled(next)
@@ -135,6 +190,28 @@ function BrowserSettings() {
       <Switch checked={enabled} onChange={toggle} />
       <Typography.Text>{enabled ? '已启用' : '已禁用'}</Typography.Text>
     </Space>
+    <div className="shortcut-editor">
+      <div className="shortcut-editor__header">
+        <Typography.Paragraph type="secondary">点击「修改」后按下任意组合键即可绑定；Esc 暂停即取消录制。Ctrl 与 ⌘ 视为同一个主按钮。</Typography.Paragraph>
+        <Button size="small" disabled={Object.keys(overrides).length === 0} onClick={resetAll}>重置全部</Button>
+      </div>
+      <ul className="shortcut-editor__list">
+        {SHORTCUT_DEFINITIONS.map(def => {
+          const binding = overrides[def.action] ?? def.default
+          const recordingThis = recording === def.action
+          const customised = isOverridden(def.action, overrides)
+          return <li key={def.action} className={`shortcut-editor__row${recordingThis ? ' is-recording' : ''}${customised ? ' is-overridden' : ''}`} tabIndex={recordingThis ? 0 : -1} onKeyDown={recordingThis ? event => recordBinding(def.action, event) : undefined}>
+            <span className="shortcut-editor__label">{def.label}</span>
+            <span className="shortcut-editor__hint">{def.hint}</span>
+            <Tag className="shortcut-editor__binding">{recordingThis ? '按下新组合键…' : bindingToDisplay(binding)}{!customised && def.extras?.length ? <Typography.Text type="secondary" style={{ marginLeft: 6 }}>/ {def.extras.map(bindingToDisplay).join(' / ')}</Typography.Text> : null}{customised && !recordingThis ? <Tag color="orange" style={{ marginLeft: 6 }}>已自定义</Tag> : null}</Tag>
+            <Space size={4}>
+              <Button size="small" onClick={() => setRecording(recordingThis ? null : def.action)}>{recordingThis ? '取消' : '修改'}</Button>
+              <Button size="small" disabled={!customised} onClick={() => resetOne(def.action)}>还原</Button>
+            </Space>
+          </li>
+        })}
+      </ul>
+    </div>
     <Typography.Title level={5} style={{ marginTop: 24 }}>默认搜索引擎</Typography.Title>
     <Typography.Paragraph type="secondary">地址栏中非 URL 输入会展开为搜索引擎查询；模板必须包含 <code>{'{query}'}</code> 占位符。</Typography.Paragraph>
     <Segmented

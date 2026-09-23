@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Menu, type MenuProps } from 'antd'
+import { Menu, type MenuComponentProps } from '../../components/ui'
 import { onNativeContextMenu, type ContextMenuRequest } from '../../services/nativeBrowser'
 import { buildContextMenu, type ContextMenuAction, type ContextMenuCapabilities } from './contextMenu'
 
@@ -87,8 +87,8 @@ export function ContextMenu({ surfaceRef, capabilities, onAction, onDismiss }: C
 
   if (!state || !built) return null
 
-  const items: MenuProps['items'] = built.sections.flatMap((section, sectionIndex) => {
-    const flat: NonNullable<MenuProps['items']> = section.items.map((item, itemIndex) => ({
+  const items: MenuComponentProps['items'] = built.sections.flatMap((section, sectionIndex) => {
+    const flat: NonNullable<MenuComponentProps['items']> = section.items.map((item, itemIndex) => ({
       key: `${item.action}-${sectionIndex}-${itemIndex}`,
       label: (
         <span style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}>
@@ -105,7 +105,7 @@ export function ContextMenu({ surfaceRef, capabilities, onAction, onDismiss }: C
       },
     }))
     // Insert a divider between sections (not before the first section).
-    if (sectionIndex > 0) flat.unshift({ type: 'divider', key: `div-${sectionIndex}` } as NonNullable<MenuProps['items']>[number])
+    if (sectionIndex > 0) flat.unshift({ type: 'divider', key: `div-${sectionIndex}` } as NonNullable<MenuComponentProps['items']>[number])
     return flat
   })
 

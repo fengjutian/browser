@@ -1,6 +1,6 @@
 import { MouseEvent, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
-import { Badge, message } from 'antd'
-import { AutoComplete, Button, Card, Dropdown, Input, Modal, Popover, Segmented, Select, Space, Tabs, Tag, Tooltip, Typography, UI_MODAL_OVERLAY_EVENT, type InputRef, type MenuProps } from '../../components/ui'
+import { message } from 'antd'
+import { AutoComplete, Badge, Button, Card, Dropdown, Input, Modal, Popover, Segmented, Select, Space, Tabs, Tag, Tooltip, Typography, UI_MODAL_OVERLAY_EVENT, type InputRef, type MenuProps } from '../../components/ui'
 import { ArrowDownOutlined, ArrowLeftOutlined, ArrowRightOutlined, ArrowUpOutlined, AudioMutedOutlined, BookOutlined, CheckCircleOutlined, CloseCircleOutlined, CloseOutlined, CopyOutlined, DownloadOutlined, FullscreenOutlined, GlobalOutlined, LoadingOutlined, MoreOutlined, PlusOutlined, PrinterOutlined, ReloadOutlined, SafetyCertificateOutlined, SaveOutlined, SearchOutlined, SoundOutlined, StarFilled, StarOutlined, ThunderboltOutlined, TranslationOutlined, WarningOutlined } from '@ant-design/icons'
 import { Sparkles as RobotOutlined } from 'lucide-react'
 import type { BrowserTab, BrowserTabError } from '../../types'
@@ -15,7 +15,9 @@ import { reorderTabs } from '../../features/browser/reorderTabs'
 import { groupTabsByOrigin, idsToCloseForSameDomain } from '../../features/browser/tabGrouping'
 import { planLruSweep, type DownloadActivity } from '../../features/browser/lruPolicy'
 import { computeResourceStats } from '../../features/browser/resourceStats'
-import { interpretShortcut } from '../../features/browser/shortcuts'
+import { useProcessMemory } from '../../features/browser/useProcessMemory'
+import { formatBytes as formatProcessBytes } from '../../services/processMemory'
+import { interpretShortcut, readShortcutOverrides } from '../../features/browser/shortcuts'
 import { popClosedTab, recordClosedTab, type ClosedTab } from '../../features/browser/closedTabs'
 import { AssistantPanel } from '../../features/ai/AssistantPanel'
 import { classifyNavigationInput, renderSearchTemplate, resolveNavigationInput } from '../../features/browser/navigation'
@@ -452,7 +454,7 @@ export function BrowserPage({ visible = true, onSearchKnowledge }: { visible?: b
     const onKeyDown = (event: KeyboardEvent) => {
       if (!visibleRef.current) return
       if (!shortcutsEnabledRef.current) return
-      const action = interpretShortcut(event)
+      const action = interpretShortcut(event, readShortcutOverrides())
       if (!action) return
       event.preventDefault()
       switch (action) {
@@ -718,6 +720,9 @@ export function BrowserPage({ visible = true, onSearchKnowledge }: { visible?: b
     return computeResourceStats({ tabs, liveIds, downloadingOrigins, lastActiveAt: lastActiveAtRef.current })
   }, [tabs, downloads])
 
+  const processMemory = useProcessMemory({ enabled: nativeMode })
+  const memory = processMemory.snapshot
+
   const resourcePanel = (
     <div className="resource-panel" role="status">
       <Typography.Text type="secondary" className="resource-panel__title">资源面板</Typography.Text>
@@ -730,8 +735,23 @@ export function BrowserPage({ visible = true, onSearchKnowledge }: { visible?: b
         <li><span>下载中</span><b>{resourceStats.downloadingTabs}</b></li>
         <li><span>最久未活跃</span><b>{resourceStats.idleMinutes} 分钟</b></li>
       </ul>
+      <Typography.Text type="secondary" className="resource-panel__title resource-panel__title--sub">进程内存</Typography.Text>
+      <ul className="resource-panel__memory">
+        <li><span>工作集</span><b>{formatProcessBytes(memory?.workingSetBytes)}</b></li>
+        <li><span>提交大小</span><b>{formatProcessBytes(memory?.commitBytes)}</b></li>
+        <li><span>峰值</span><b>{formatProcessBytes(memory?.peakWorkingSetBytes)}</b></li>
+        <li>
+          <span>缺页中断</span>
+          <b>{memory?.pageFaultCount == null ? '—' : memory.pageFaultCount.toLocaleString('zh-CN')}</b>
+        </li>
+      </ul>
+      {processMemory.unsupported && (
+        <Typography.Paragraph type="secondary" className="resource-panel__hint">
+          当前平台未提供进程内存查询
+        </Typography.Paragraph>
+      )}
       <Typography.Paragraph type="secondary" className="resource-panel__hint">
-        LRU 阈值 {advancedSettings.maxLiveWebviews} 个 WebView；空闲 {advancedSettings.idleSuspendMinutes} 分钟自动休眠。
+        LRU 阈值 {advancedSettings.maxLiveWebviews} 个 WebView；空闲 {advancedSettings.idleSuspendMinutes} 分钟自动休眠；进程内存每 5 秒刷新。
       </Typography.Paragraph>
     </div>
   )

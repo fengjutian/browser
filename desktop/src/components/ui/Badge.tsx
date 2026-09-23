@@ -1,0 +1,2 @@
+import type { ReactNode } from 'react'
+export function Badge({ count, dot, color, size = 'default', children }: { count?: ReactNode; dot?: boolean; color?: string; size?: 'small' | 'default'; children?: ReactNode }) { const visible = dot || (typeof count === 'number' ? count > 0 : count != null); return <span className="ui-badge">{children}{visible && <sup className={`ui-badge__count ui-badge__count--${size}${dot ? ' is-dot' : ''}`} style={{ background: color }}>{dot ? null : count}</sup>}</span> }

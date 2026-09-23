@@ -7,6 +7,7 @@ pub mod session_lock;
 pub mod webview_compat;
 pub mod certificate_guard;
 pub mod bookmarks;
+pub mod process_memory;
 
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
@@ -1124,6 +1125,7 @@ pub fn run() {
             bookmarks::bookmark_remove,
             bookmarks::bookmark_update,
             bookmarks::bookmark_move,
+            process_memory::browser_process_memory,
             webview_compat::shell_open,
             webview_compat::toggle_fullscreen,
             webview_compat::pick_files

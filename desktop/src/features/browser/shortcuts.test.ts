@@ -1,47 +1,144 @@
-import { describe, expect, it } from 'vitest'
-import { interpretShortcut } from './shortcuts'
+import { describe, expect, it, beforeEach } from 'vitest'
+import {
+  bindingToDisplay,
+  clearShortcutOverride,
+  defaultBinding,
+  interpretShortcut,
+  isOverridden,
+  matchBinding,
+  readShortcutOverrides,
+  resetAllShortcutOverrides,
+  SHORTCUT_DEFINITIONS,
+  writeShortcutOverrides,
+  type ShortcutBinding,
+} from './shortcuts'
+
+const evt = (key: string, partial: Partial<{ ctrl: boolean; shift: boolean; alt: boolean }> = {}): { ctrlKey: boolean; metaKey: boolean; shiftKey: boolean; altKey: boolean; key: string } => ({
+  ctrlKey: partial.ctrl ?? false,
+  metaKey: false,
+  shiftKey: partial.shift ?? false,
+  altKey: partial.alt ?? false,
+  key,
+})
 
 describe('interpretShortcut', () => {
-  it('focuses the address bar on Ctrl+L', () => {
-    expect(interpretShortcut({ ctrlKey: true, metaKey: false, shiftKey: false, altKey: false, key: 'l' })).toBe('focusAddress')
+  it('matches default Ctrl+L to focusAddress', () => {
+    expect(interpretShortcut(evt('l', { ctrl: true }))).toBe('focusAddress')
   })
 
-  it('supports find, print, and zoom shortcuts', () => {
-    const event = { ctrlKey: true, metaKey: false, shiftKey: false, altKey: false }
-    expect(interpretShortcut({ ...event, key: 'f' })).toBe('find')
-    expect(interpretShortcut({ ...event, key: 'p' })).toBe('print')
-    expect(interpretShortcut({ ...event, key: '+' })).toBe('zoomIn')
-    expect(interpretShortcut({ ...event, key: '-' })).toBe('zoomOut')
-    expect(interpretShortcut({ ...event, key: '0' })).toBe('zoomReset')
+  it('matches Ctrl+F / Ctrl+P / Ctrl+0 / Ctrl+-', () => {
+    expect(interpretShortcut(evt('f', { ctrl: true }))).toBe('find')
+    expect(interpretShortcut(evt('p', { ctrl: true }))).toBe('print')
+    expect(interpretShortcut(evt('+', { ctrl: true }))).toBe('zoomIn')
+    expect(interpretShortcut(evt('-', { ctrl: true }))).toBe('zoomOut')
+    expect(interpretShortcut(evt('0', { ctrl: true }))).toBe('zoomReset')
   })
 
-  it('reopens the last closed tab on Ctrl+Shift+T', () => {
-    expect(interpretShortcut({ ctrlKey: true, metaKey: false, shiftKey: true, altKey: false, key: 'T' })).toBe('reopenClosedTab')
+  it('distinguishes Ctrl+T from Ctrl+Shift+T', () => {
+    expect(interpretShortcut(evt('t', { ctrl: true }))).toBe('newTab')
+    expect(interpretShortcut(evt('T', { ctrl: true, shift: true }))).toBe('reopenClosedTab')
   })
 
-  it('opens a new tab on plain Ctrl+T (without shift)', () => {
-    expect(interpretShortcut({ ctrlKey: true, metaKey: false, shiftKey: false, altKey: false, key: 't' })).toBe('newTab')
+  it('matches the search palette cluster', () => {
+    expect(interpretShortcut(evt('k', { ctrl: true }))).toBe('openTabSearch')
+    expect(interpretShortcut(evt('A', { ctrl: true, shift: true }))).toBe('openTabSearch')
+    expect(interpretShortcut(evt('h', { ctrl: true }))).toBe('openHistorySearch')
+    expect(interpretShortcut(evt('O', { ctrl: true, shift: true }))).toBe('openBookmarks')
+    expect(interpretShortcut(evt('d', { ctrl: true }))).toBe('addBookmark')
+    expect(interpretShortcut(evt('S', { ctrl: true, shift: true }))).toBe('openBulkSummary')
+    expect(interpretShortcut(evt('N', { ctrl: true, shift: true }))).toBe('toggleNotesPanel')
   })
 
-  it('opens the tab search palette on Ctrl+K and Ctrl+Shift+A', () => {
-    expect(interpretShortcut({ ctrlKey: true, metaKey: false, shiftKey: false, altKey: false, key: 'k' })).toBe('openTabSearch')
-    expect(interpretShortcut({ ctrlKey: true, metaKey: false, shiftKey: true, altKey: false, key: 'A' })).toBe('openTabSearch')
+  it('matches Alt+Arrow navigation', () => {
+    expect(interpretShortcut(evt('ArrowLeft', { alt: true }))).toBe('back')
+    expect(interpretShortcut(evt('ArrowRight', { alt: true }))).toBe('forward')
   })
 
-  it('opens the history search palette on Ctrl+H', () => {
-    expect(interpretShortcut({ ctrlKey: true, metaKey: false, shiftKey: false, altKey: false, key: 'h' })).toBe('openHistorySearch')
+  it('falls through when no pattern matches', () => {
+    expect(interpretShortcut(evt('x', { ctrl: true }))).toBeNull()
+    expect(interpretShortcut(evt('z'))).toBeNull()
   })
 
-  it('opens the bookmark palette on Ctrl+Shift+O and bookmarks the active tab on Ctrl+D', () => {
-    expect(interpretShortcut({ ctrlKey: true, metaKey: false, shiftKey: true, altKey: false, key: 'O' })).toBe('openBookmarks')
-    expect(interpretShortcut({ ctrlKey: true, metaKey: false, shiftKey: false, altKey: false, key: 'd' })).toBe('addBookmark')
+  it('lets overrides win over the default table', () => {
+    const overrides = { addBookmark: { key: 'b', ctrl: true, shift: false, alt: false } as ShortcutBinding }
+    expect(interpretShortcut(evt('b', { ctrl: true }), overrides)).toBe('addBookmark')
+    // Default Ctrl+D no longer matches once addBookmark is overridden
+    expect(interpretShortcut(evt('d', { ctrl: true }), overrides)).toBeNull()
+  })
+})
+
+describe('matchBinding', () => {
+  it('treats ctrl and meta as the same primary modifier', () => {
+    const event = { ctrlKey: false, metaKey: true, shiftKey: false, altKey: false, key: 'l' }
+    expect(matchBinding(event, { key: 'l', ctrl: true, shift: false, alt: false })).toBe(true)
   })
 
-  it('opens the bulk summary palette on Ctrl+Shift+S', () => {
-    expect(interpretShortcut({ ctrlKey: true, metaKey: false, shiftKey: true, altKey: false, key: 'S' })).toBe('openBulkSummary')
+  it('requires exact modifier state', () => {
+    const binding: ShortcutBinding = { key: 'k', ctrl: true, shift: false, alt: false }
+    expect(matchBinding(evt('k', { ctrl: true }), binding)).toBe(true)
+    expect(matchBinding(evt('k', { ctrl: false }), binding)).toBe(false)
+    expect(matchBinding(evt('K', { ctrl: true, shift: true }), binding)).toBe(false)
+  })
+})
+
+describe('bindingToDisplay', () => {
+  it('uses friendly glyphs for arrow keys', () => {
+    expect(bindingToDisplay({ key: 'ArrowLeft', ctrl: false, shift: false, alt: true })).toBe('Alt + ←')
   })
 
-  it('toggles the notes panel on Ctrl+Shift+N', () => {
-    expect(interpretShortcut({ ctrlKey: true, metaKey: false, shiftKey: true, altKey: false, key: 'N' })).toBe('toggleNotesPanel')
+  it('uppercases single-character keys', () => {
+    expect(bindingToDisplay({ key: 'd', ctrl: true, shift: false, alt: false })).toBe('Ctrl + D')
+  })
+
+  it('renders Escape as Esc', () => {
+    expect(bindingToDisplay({ key: 'Escape', ctrl: false, shift: false, alt: false })).toBe('Esc')
+  })
+})
+
+describe('overrides persistence', () => {
+  beforeEach(() => {
+    resetAllShortcutOverrides()
+  })
+
+  it('returns an empty map when nothing has been saved', () => {
+    expect(readShortcutOverrides()).toEqual({})
+  })
+
+  it('round-trips writes through localStorage', () => {
+    writeShortcutOverrides({ addBookmark: { key: 'b', ctrl: true, shift: false, alt: false } })
+    expect(isOverridden('addBookmark', readShortcutOverrides())).toBe(true)
+    expect(readShortcutOverrides().addBookmark?.key).toBe('b')
+  })
+
+  it('drops corrupt entries without throwing', () => {
+    localStorage.setItem('arcadia-shortcut-overrides', 'not json {')
+    expect(readShortcutOverrides()).toEqual({})
+  })
+
+  it('clearShortcutOverride removes a single entry', () => {
+    writeShortcutOverrides({ addBookmark: { key: 'b', ctrl: true, shift: false, alt: false } })
+    clearShortcutOverride('addBookmark')
+    expect(isOverridden('addBookmark', readShortcutOverrides())).toBe(false)
+  })
+
+  it('resetAllShortcutOverrides wipes everything', () => {
+    writeShortcutOverrides({ addBookmark: { key: 'b', ctrl: true, shift: false, alt: false } })
+    resetAllShortcutOverrides()
+    expect(readShortcutOverrides()).toEqual({})
+  })
+})
+
+describe('SHORTCUT_DEFINITIONS', () => {
+  it('every action has a default and a label', () => {
+    for (const def of SHORTCUT_DEFINITIONS) {
+      expect(def.label.length).toBeGreaterThan(0)
+      expect(def.default.key.length).toBeGreaterThan(0)
+    }
+  })
+
+  it('defaultBinding returns a clone', () => {
+    const a = defaultBinding('focusAddress')
+    a.key = 'mutated'
+    expect(defaultBinding('focusAddress').key).toBe('l')
   })
 })

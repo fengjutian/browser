@@ -87,10 +87,11 @@ function FormItem({ name, label, tooltip, rules = [], children, className = '' }
   useSyncExternalStore(form?._subscribe ?? (() => () => undefined), form?._snapshot ?? (() => 0))
   useEffect(() => name && form ? form._register(name, rules) : undefined, [form, name, rules])
   const child = children ? Children.only(children) : null
-  const control = name && form && isValidElement(child) ? cloneElement(child, {
+  const childProps = (isValidElement(child) ? child.props : {}) as { onChange?: (...args: any[]) => void }
+  const control = name && form && isValidElement(child) ? cloneElement(child as any, {
     value: form.getFieldValue(name),
     onChange: (input: any, ...rest: any[]) => {
-      child.props.onChange?.(input, ...rest)
+      childProps.onChange?.(input, ...rest)
       form.setFieldValue(name, input?.target ? input.target.value : input)
     },
   }) : child
