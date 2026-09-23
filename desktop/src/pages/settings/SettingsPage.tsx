@@ -281,40 +281,128 @@ const PERMISSION_LABELS: Record<SitePermissionKind, string> = {
   clipboard: '读取剪贴板',
 }
 
-function SitePermissionSettings() {
+function PrivacySettings() {
   const [messageApi, contextHolder] = message.useMessage()
-  const [rules, setRules] = useState<SitePermissionRule[]>(readSitePermissions)
-  const [site, setSite] = useState('')
+  const [historyScope, setHistoryScope] = useState<'hour' | 'day' | 'week' | 'all'>('day')
+  const [cleanupOnExit, setCleanupOnExit] = useState<boolean>(() => readCleanupOnExitPreference())
 
-  function persist(next: SitePermissionRule[]) {
-    setRules(next)
-    writeSitePermissions(next)
+  function clearHistory(scope: 'hour' | 'day' | 'week' | 'all') {
+    const all = readHistoryEntries()
+    if (scope === 'all') {
+      writeHistoryEntries([])
+      messageApi.success(`已清理全部 ${all.length} 条浏览记录`)
+      return
+    }
+    const cutoff = cutoffForScope(scope)
+    const next = all.filter(item => item.visitedAt < cutoff)
+    writeHistoryEntries(next)
+    messageApi.success(`已清理 ${all.length - next.length} 条浏览记录`)
   }
 
-  function addSite() {
-    const origin = normalizeOrigin(site)
-    if (!origin) { messageApi.error('请输入有效的网站域名'); return }
-    if (rules.some(rule => rule.origin === origin)) { messageApi.info('该站点已存在'); return }
-    persist([...rules, { origin, camera: 'ask', microphone: 'ask', location: 'ask', notifications: 'ask', clipboard: 'ask' }])
-    setSite('')
+  function clearDownloads() {
+    try {
+      localStorage.removeItem('browser.downloads.v1')
+    } catch { /* ignore */ }
+    messageApi.success('已清空下载记录（磁盘文件未删除）')
   }
 
-  function toggle(origin: string, kind: SitePermissionKind, value: 'allow' | 'deny' | 'ask') {
-    persist(rules.map(rule => rule.origin === origin ? { ...rule, [kind]: value } : rule))
+  function clearClosedTabs() {
+    try {
+      localStorage.removeItem('browser.closed')
+    } catch { /* ignore */ }
+    messageApi.success('已清空最近关闭列表')
   }
 
-  return <>{contextHolder}<Card title="站点权限" className="settings-card site-permissions">
-    <Alert type="warning" showIcon message="敏感权限默认询问" description="每次允许都会弹出提示；选择「始终允许」才会持久化为 allow。权限修改对新打开的标签生效。" />
-    <Space.Compact block style={{margin:'18px 0'}}><Input value={site} onChange={event=>setSite(event.target.value)} onPressEnter={addSite} placeholder="example.com 或 https://example.com"/><Button type="primary" onClick={addSite}>添加站点</Button></Space.Compact>
-    {rules.length===0?<Typography.Text type="secondary">尚未配置任何站点。</Typography.Text>:<List dataSource={rules} renderItem={rule=><List.Item actions={[<Button danger type="link" onClick={()=>persist(rules.filter(item=>item.origin!==rule.origin))}>移除</Button>]}><List.Item.Meta title={rule.origin} description={<Space wrap>{(Object.keys(PERMISSION_LABELS) as SitePermissionKind[]).map(kind=><span className="site-permission-toggle" key={kind}><Segmented<'allow' | 'deny' | 'ask'> size="small" value={rule[kind]} onChange={value=>toggle(rule.origin,kind,value as 'allow' | 'deny' | 'ask')} options={[{label:'允许',value:'allow'},{label:'询问',value:'ask'},{label:'拒绝',value:'deny'}]} /><span>{PERMISSION_LABELS[kind]}</span></span>)}</Space>}/></List.Item>}/>}
+  function clearAllPermissions() {
+    try {
+      localStorage.removeItem('browser.sitePermissions.v2')
+    } catch { /* ignore */ }
+    messageApi.success('已重置所有站点权限规则')
+  }
+
+  function toggleCleanupOnExit(next: boolean) {
+    setCleanupOnExit(next)
+    writeCleanupOnExitPreference(next)
+    messageApi.success(next ? '退出时将自动清理浏览痕迹' : '已关闭退出清理')
+  }
+
+  return <>{contextHolder}<Card title="隐私与站点数据" className="settings-card">
+    <Alert type="info" showIcon message="私密标签已就绪" description="通过工具栏「⋯ → 新建私密窗口」打开；私密窗口不会写入历史、关闭列表或下载数据库。" />
+    <Typography.Title level={5} style={{ marginTop: 24 }}>浏览历史</Typography.Title>
+    <Typography.Paragraph type="secondary">按时间范围清理浏览历史（只删数据，不会删除已保存到知识库的文档）。</Typography.Paragraph>
+    <Space wrap>
+      <Button onClick={() => clearHistory('hour')}>最近 1 小时</Button>
+      <Button onClick={() => clearHistory('day')}>最近 24 小时</Button>
+      <Button onClick={() => clearHistory('week')}>最近 7 天</Button>
+      <Button danger onClick={() => { localStorage.removeItem('browser.history'); messageApi.success('已清空全部历史') }}>清空全部</Button>
+    </Space>
+    <Typography.Title level={5} style={{ marginTop: 24 }}>其他清理</Typography.Title>
+    <Space wrap>
+      <Button onClick={clearClosedTabs}>清空最近关闭</Button>
+      <Button onClick={clearDownloads}>清空下载记录</Button>
+      <Button onClick={clearAllPermissions}>重置所有站点权限</Button>
+    </Space>
+    <Typography.Title level={5} style={{ marginTop: 24 }}>退出时</Typography.Title>
+    <Space>
+      <Switch checked={cleanupOnExit} onChange={toggleCleanupOnExit} />
+      <Typography.Text>退出时清空浏览历史 / 最近关闭 / 下载记录（保留私密窗口未关闭时已持久化的内容）</Typography.Text>
+    </Space>
   </Card></>
+}
+
+const CLEANUP_ON_EXIT_KEY = 'browser.cleanupOnExit.v1'
+
+function readCleanupOnExitPreference(): boolean {
+  try {
+    return localStorage.getItem(CLEANUP_ON_EXIT_KEY) === 'true'
+  } catch {
+    return false
+  }
+}
+
+function writeCleanupOnExitPreference(value: boolean): void {
+  try {
+    localStorage.setItem(CLEANUP_ON_EXIT_KEY, value ? 'true' : 'false')
+  } catch { /* ignore */ }
+}
+
+function readHistoryEntries(): { url: string; title: string; visitedAt: number }[] {
+  try {
+    const raw = localStorage.getItem('browser.history')
+    if (!raw) return []
+    const value = JSON.parse(raw)
+    if (!Array.isArray(value)) return []
+    return value
+      .filter((entry: unknown) => !!entry && typeof entry === 'object')
+      .map((entry: any) => ({
+        url: typeof entry.url === 'string' ? entry.url : '',
+        title: typeof entry.title === 'string' ? entry.title : '',
+        visitedAt: typeof entry.visitedAt === 'number' ? entry.visitedAt : 0,
+      }))
+      .filter((entry: { url: string }) => entry.url.length > 0)
+  } catch {
+    return []
+  }
+}
+
+function writeHistoryEntries(entries: { url: string; title: string; visitedAt: number }[]): void {
+  try {
+    localStorage.setItem('browser.history', JSON.stringify(entries))
+  } catch { /* ignore */ }
+}
+
+function cutoffForScope(scope: 'hour' | 'day' | 'week'): number {
+  const now = Date.now()
+  if (scope === 'hour') return now - 60 * 60 * 1000
+  if (scope === 'day') return now - 24 * 60 * 60 * 1000
+  return now - 7 * 24 * 60 * 60 * 1000
 }
 
 export function SettingsPage() {
   const items = ['通用','浏览器','隐私','AI Provider','知识库','插件','高级'].map((label, index) => ({
     key: label,
     label,
-    children: index === 0 ? <GeneralSettings/> : index === 1 ? <BrowserSettings/> : index === 2 ? <SitePermissionSettings/> : index === 3 ? <AIProviderSettings/> : index === 4 ? <KnowledgeBaseSettings/> : <Card><Typography.Title level={4}>{label}</Typography.Title><Typography.Paragraph type="secondary">该设置模块将在对应开发阶段开放。</Typography.Paragraph></Card>,
+    children: index === 0 ? <GeneralSettings/> : index === 1 ? <BrowserSettings/> : index === 2 ? <PrivacySettings/> : index === 3 ? <AIProviderSettings/> : index === 4 ? <KnowledgeBaseSettings/> : <Card><Typography.Title level={4}>{label}</Typography.Title><Typography.Paragraph type="secondary">该设置模块将在对应开发阶段开放。</Typography.Paragraph></Card>,
   }))
   return <section className="page"><PageHeader eyebrow="PREFERENCES" title="设置" description="调整浏览器、隐私、AI Provider 与知识库工作流。"/><Tabs tabPosition="left" items={items} defaultActiveKey="通用"/></section>
 }

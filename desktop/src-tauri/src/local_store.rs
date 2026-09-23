@@ -117,6 +117,15 @@ const MIGRATIONS: &[(i64, &str)] = &[
         CREATE INDEX idx_downloads_status_updated ON downloads(status, updated_at DESC);
         CREATE INDEX idx_downloads_private ON downloads(private);",
     ),
+    (
+        9,
+        "CREATE TABLE session_locks (
+            id INTEGER PRIMARY KEY CHECK (id = 1),
+            started_at INTEGER NOT NULL,
+            updated_at INTEGER NOT NULL,
+            clean_exit_at INTEGER
+        );",
+    ),
 ];
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

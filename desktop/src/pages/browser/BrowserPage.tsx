@@ -24,6 +24,9 @@ import type { ContextMenuAction } from '../../features/browser/contextMenu'
 import { startDownload } from '../../services/downloads'
 import { usePermissionPrompt } from '../../features/browser/usePermissionPrompt'
 import { PermissionPromptBar } from '../../features/browser/PermissionPromptBar'
+import { isPrivateTab, makePrivateTab, stripPrivateTabs, resetPrivateSessionPermissions } from '../../features/browser/privateTabs'
+import { forceAllDenyFor } from '../../features/browser/usePermissionPrompt'
+import { LockOutlined } from '@ant-design/icons'
 import { buildSuggestions, trimSuggestions, type SuggestionItem } from '../../features/browser/suggestionProvider'
 import { readSearchEngineConfig, resolveActiveSearchTemplate } from '../../features/browser/searchEngine'
 import { evaluateUrlSafety, highestLevel, type SafetyIssue, type SafetyLevel } from '../../features/browser/urlSafety'
@@ -218,7 +221,7 @@ export function BrowserPage({ visible = true }: { visible?: boolean }) {
     return () => { cancelled = true }
   }, [])
 
-  const sessionJson = useDebouncedValue(JSON.stringify({ tabs, activeTabId }), SESSION_DEBOUNCE_MS)
+  const sessionJson = useDebouncedValue(JSON.stringify({ tabs: stripPrivateTabs(tabs), activeTabId }), SESSION_DEBOUNCE_MS)
   useEffect(() => {
     if (!hydrated) return
     void setSession(SESSION_KEY, sessionJson)
@@ -238,9 +241,10 @@ export function BrowserPage({ visible = true }: { visible?: boolean }) {
 
   useEffect(() => {
     if (!hydrated || !active.url || active.url === lastHistoryUrl.current) return
+    if (isPrivateTab(active)) return
     lastHistoryUrl.current = active.url
     setHistory(current => dedupeHistory(current, { url: active.url, title: active.title, visitedAt: Date.now() }))
-  }, [active.url, active.title, hydrated])
+  }, [active.url, active.title, active.private, hydrated])
 
   useEffect(() => { activeTabIdRef.current = activeTabId }, [activeTabId])
   useEffect(() => { tabsRef.current = tabs }, [tabs])
@@ -398,6 +402,15 @@ export function BrowserPage({ visible = true }: { visible?: boolean }) {
     const url = resolveNavigationInput(input, { searchTemplate })
     if (!url) return
     const tabId = active.id
+    // Private tabs always deny sensitive permissions for the target origin.
+    // The script-level guard enforces this at runtime; pre-denying here
+    // ensures the JS prompt is skipped too.
+    if (active.private) {
+      try {
+        const origin = new URL(url).origin
+        if (origin && origin !== 'null') forceAllDenyFor(origin)
+      } catch { /* ignore non-http inputs */ }
+    }
     setReaderArticle(null)
     setTabs(current => current.map(tab => tab.id === tabId ? { ...tab, url, title: input.trim(), loading: true, error: undefined } : tab))
     await new Promise(resolve => requestAnimationFrame(resolve))
@@ -481,6 +494,8 @@ export function BrowserPage({ visible = true }: { visible?: boolean }) {
   const browserMenu: MenuProps['items'] = [
     { key: 'find', label: '在页面中查找', extra: 'Ctrl+F', onClick: () => setFindOpen(true) },
     { key: 'print', label: '打印', icon: <PrinterOutlined/>, extra: 'Ctrl+P', disabled: !nativeMode, onClick: () => void printNativeTab(active.id) },
+    { type: 'divider' },
+    { key: 'new-private', label: '新建私密窗口', icon: <LockOutlined/>, extra: 'Shift+Ctrl+N', onClick: () => openNewTab(undefined, { private: true }) },
     { type: 'divider' },
     { key: 'zoom', label: <Space><Button size="small" onClick={event => { event.stopPropagation(); changeZoom(active.id, -0.1) }}>−</Button><span className="browser-zoom-value">{Math.round((zoomLevels[active.id] ?? 1) * 100)}%</span><Button size="small" onClick={event => { event.stopPropagation(); changeZoom(active.id, 0.1) }}>+</Button></Space> },
     { key: 'zoom-reset', label: '重置缩放', extra: 'Ctrl+0', onClick: () => setZoom(active.id, 1) },
@@ -569,8 +584,8 @@ export function BrowserPage({ visible = true }: { visible?: boolean }) {
     }
   }
 
-  function openNewTab(url?: string) {
-    const tab = newTab()
+  function openNewTab(url?: string, options: { private?: boolean } = {}) {
+    const tab = options.private ? makePrivateTab() : newTab()
     const currentId = activeTabIdRef.current
     if (currentId) void hideNativeTab(currentId)
     if (url) { tab.url = url; tab.title = '正在加载…'; tab.loading = true }
@@ -648,7 +663,7 @@ export function BrowserPage({ visible = true }: { visible?: boolean }) {
   }
 
   function tabMenu(tab: BrowserTab, index: number): MenuProps['items'] {
-    return [
+    const items: NonNullable<MenuProps['items']> = [
       { key: 'reload', label: '重新加载', disabled: !hasNativeTab(tab.id), onClick: () => void reloadNativeTab(tab.id) },
       { key: 'duplicate', label: '复制标签页', disabled: !tab.url, onClick: () => duplicateTab(tab) },
       { key: 'pin', label: tab.pinned ? '取消固定' : '固定标签页', onClick: () => togglePinned(tab.id) },
@@ -657,6 +672,11 @@ export function BrowserPage({ visible = true }: { visible?: boolean }) {
       { key: 'close-others', label: '关闭其他标签页', disabled: tabs.length < 2, onClick: () => closeTabs(tabs.filter(item => item.id !== tab.id && !item.pinned).map(item => item.id)) },
       { key: 'close-right', label: '关闭右侧标签页', disabled: index === tabs.length - 1, onClick: () => closeTabs(tabs.slice(index + 1).filter(item => !item.pinned).map(item => item.id)) },
     ]
+    if (tab.private) {
+      items.splice(3, 0, { type: 'divider', key: 'private-divider' })
+      items.splice(4, 0, { key: 'private-info', label: '私密窗口：不会写入历史与会话', disabled: true })
+    }
+    return items
   }
 
   function onTabDragStart(index: number) {
@@ -691,12 +711,24 @@ export function BrowserPage({ visible = true }: { visible?: boolean }) {
     void closeNativeTab(id)
     lastActiveAtRef.current.delete(id)
     const closing = tabs.find(tab => tab.id === id)
-    if (closing && closing.url) {
+    const wasPrivate = isPrivateTab(closing)
+    if (closing && closing.url && !wasPrivate) {
       const entry: ClosedTab = { id: closing.id, url: closing.url, title: closing.title, favicon: closing.favicon, closedAt: Date.now() }
       setClosedTabs(current => recordClosedTab(current, entry))
     }
     const closedIndex = tabs.findIndex(tab => tab.id === id)
     const remaining = tabs.filter(tab => tab.id !== id)
+    // Last private tab closed → wipe its accumulated permission rules so the
+    // session leaves no trace.
+    if (wasPrivate) {
+      const stillPrivate = remaining.filter(tab => isPrivateTab(tab))
+      if (stillPrivate.length === 0 && closing?.url) {
+        try {
+          const origin = new URL(closing.url).origin
+          resetPrivateSessionPermissions([origin])
+        } catch { /* ignore malformed urls */ }
+      }
+    }
     if (!remaining.length) {
       const replacement = newTab()
       setTabs([replacement])
@@ -811,7 +843,7 @@ export function BrowserPage({ visible = true }: { visible?: boolean }) {
           return {
             key: tab.id,
             label: <Dropdown menu={{ items: tabMenu(tab, index) }} trigger={['contextMenu']}>
-              <Tooltip title={tab.url || '新标签页'} mouseEnterDelay={0.6}>
+              <Tooltip title={tab.url || (tab.private ? '新私密窗口' : '新标签页')} mouseEnterDelay={0.6}>
               <span
                 draggable
                 onAuxClick={event => { if (event.button === 1 && !tab.pinned) closeTab(tab.id) }}
@@ -819,11 +851,11 @@ export function BrowserPage({ visible = true }: { visible?: boolean }) {
                 onDragOver={onTabDragOver(index)}
                 onDrop={onTabDrop(index)}
                 onDragEnd={onTabDragEnd}
-                className={`browser-tab-title${isDragging ? ' is-dragging' : ''}${isDropTarget ? ' is-drop-target' : ''}`}
-              >{tab.loading ? <LoadingOutlined spin/> : tab.favicon ? <img src={tab.favicon} alt=""/> : <GlobalOutlined/>}<span>{tab.title}</span></span>
+                className={`browser-tab-title${isDragging ? ' is-dragging' : ''}${isDropTarget ? ' is-drop-target' : ''}${tab.private ? ' browser-tab-title--private' : ''}`}
+              >{tab.loading ? <LoadingOutlined spin/> : tab.private ? <LockOutlined /> : tab.favicon ? <img src={tab.favicon} alt=""/> : <GlobalOutlined/>}<span>{tab.title}</span></span>
               </Tooltip>
             </Dropdown>,
-            className: `${tab.pinned ? 'browser-tab--pinned ' : ''}${tab.suspended ? 'browser-tab--suspended' : ''}`.trim() || undefined,
+            className: `${tab.pinned ? 'browser-tab--pinned ' : ''}${tab.suspended ? 'browser-tab--suspended' : ''}${tab.private ? ' browser-tab--private' : ''}`.trim() || undefined,
             closable: tabs.length > 1 && !tab.pinned,
           }
         })} activeKey={activeTabId} onChange={activateTab} addIcon={<Tooltip title="新建标签页 (Ctrl+T)"><PlusOutlined aria-label="新建标签页"/></Tooltip>} onEdit={(target, action) => action === 'add' ? openNewTab() : closeTab(String(target))}/></div>
