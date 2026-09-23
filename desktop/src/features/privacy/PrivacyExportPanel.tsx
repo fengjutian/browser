@@ -1,5 +1,6 @@
 import { useState } from 'react'
-import { Alert, Button, Input, Modal, Space, Typography, Upload, message } from 'antd'
+import { Alert, Modal, Typography, Upload, message } from 'antd'
+import { Button, Input, Space } from '../../components/ui'
 import { DownloadOutlined, LockOutlined, UploadOutlined } from '@ant-design/icons'
 import { addBrowserHistory, listBrowserHistory } from '../../api'
 import { listBookmarks } from '../../services/bookmarks'
@@ -119,13 +120,18 @@ export function PrivacyExportPanel() {
     }
     // Site permissions — only persist if the export included the block so
     // the user's existing rules stay untouched on a partial restore.
-    if (sections.sitePermissions) {
+    if (sections.sitePermissions?.length) {
       const { writeSitePermissions } = await import('../../features/browser/sitePermissions')
-      const rules: Array<{ origin: string; kind: string; decision: 'allow' | 'deny' | 'ask'; updatedAt: number }> = []
-      for (const [origin, decision] of Object.entries(sections.sitePermissions)) {
-        rules.push({ origin, kind: 'media', decision, updatedAt: Date.now() })
+      // Merge: existing rules take precedence (the user may have updated
+      // them locally since the export was made).
+      const existing = readSitePermissions()
+      const incoming = sections.sitePermissions
+      const incomingByOrigin = new Map(incoming.map(r => [r.origin, r]))
+      const merged = existing.map(rule => incomingByOrigin.get(rule.origin) ? { ...rule, ...incomingByOrigin.get(rule.origin) } : rule)
+      for (const rule of incoming) {
+        if (!existing.some(e => e.origin === rule.origin)) merged.push(rule as Parameters<typeof writeSitePermissions>[0][number])
       }
-      writeSitePermissions(rules as Parameters<typeof writeSitePermissions>[0])
+      writeSitePermissions(merged)
     }
     // Bump the history / bookmark counts so the UI refreshes.
     window.dispatchEvent(new CustomEvent('arcadia-history-change'))

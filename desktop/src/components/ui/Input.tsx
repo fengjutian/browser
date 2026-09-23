@@ -61,10 +61,10 @@ export interface TextAreaProps extends TextareaHTMLAttributes<HTMLTextAreaElemen
   autoSize?: boolean | { minRows?: number; maxRows?: number }
 }
 
-function TextArea({ autoSize, className = '', rows, ...props }: TextAreaProps) {
+function TextArea({ autoSize, className = '', rows, style, ...props }: TextAreaProps) {
   const minRows = typeof autoSize === 'object' ? autoSize.minRows : rows
   const maxRows = typeof autoSize === 'object' ? autoSize.maxRows : undefined
-  return <textarea className={`ui-textarea ant-input ${className}`.trim()} rows={minRows} style={{ ...props.style, maxHeight: maxRows ? `${maxRows * 1.5}em` : undefined }} {...props}/>
+  return <textarea className={`ui-textarea ant-input ${className}`.trim()} rows={minRows} style={{ ...style, maxHeight: maxRows ? `${maxRows * 1.5}em` : undefined }} {...props}/>
 }
 
 export const Input = Object.assign(BaseInput, { Password, TextArea })

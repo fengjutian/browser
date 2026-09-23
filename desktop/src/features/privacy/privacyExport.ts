@@ -33,7 +33,15 @@ export interface PrivacyExportSections {
   bookmarks: Array<{ id: string; url: string; title: string; favicon?: string | null; folder?: string | null; note?: string | null }>
   downloads: Array<{ id: string; url: string; fileName: string; status: string; dangerType?: string; startedAt: string }>
   searchEngine?: { presetId: string; customTemplate?: string }
-  sitePermissions?: Record<string, 'allow' | 'deny' | 'ask'>
+  /** Each entry is one origin with allow/deny/ask per permission kind. */
+  sitePermissions?: Array<{
+    origin: string
+    camera?: 'allow' | 'deny' | 'ask'
+    microphone?: 'allow' | 'deny' | 'ask'
+    location?: 'allow' | 'deny' | 'ask'
+    notifications?: 'allow' | 'deny' | 'ask'
+    clipboard?: 'allow' | 'deny' | 'ask'
+  }>
 }
 
 export interface PrivacyExportEnvelope {

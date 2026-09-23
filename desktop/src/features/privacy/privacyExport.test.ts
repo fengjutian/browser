@@ -18,7 +18,7 @@ const SAMPLE: PrivacyExportSections = {
   bookmarks: [{ id: 'bm-1', url: 'https://docs.example.com', title: 'Docs' }],
   downloads: [{ id: 'dl-1', url: 'https://example.com/file.zip', fileName: 'file.zip', status: 'completed', startedAt: '2024-01-01T00:00:00Z' }],
   searchEngine: { presetId: 'duckduckgo' },
-  sitePermissions: { 'https://a.com': 'deny' },
+  sitePermissions: [{ origin: 'https://a.com', camera: 'deny' }],
 }
 
 beforeAll(() => {
