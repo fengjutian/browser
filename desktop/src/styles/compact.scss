@@ -1025,6 +1025,69 @@ body[data-theme='dark'] {
   .new-tab-search { background: #18211c; box-shadow: none; }
   .new-tab-search__hint,
   .search-engine-picker { color: #9aa69e; }
+
+  // Browser tab strip: invert tab strip, active tab, hover, and group/muted/crash
+  // accents so dark theme reads as the same surface hierarchy, not washed-out
+  // light tiles pasted onto a dark window.
+  .browser-tabs {
+    background: #1a221e !important;
+    border-bottom-color: #2a352f !important;
+  }
+  .browser-tabs .ant-tabs-tab {
+    color: #b9c4bd;
+    &:not(.ant-tabs-tab-active):hover { background: rgba(255, 255, 255, .06) !important; }
+    &.ant-tabs-tab-active {
+      border-color: #2a352f !important;
+      background: #111714 !important;
+      color: #f0f4f1;
+    }
+    &.browser-tab--crashed {
+      .browser-tab-title,
+      .browser-tab-title > .browser-tab-crash { color: #ff6b6b; }
+    }
+    &.browser-tab--muted .browser-tab-title > .browser-tab-audio { color: #6f7a73; }
+  }
+
+  // Browser toolbar / bookmark bar buttons rest on a dark page background; make
+  // the "active" state legible without relying on antd default light tokens.
+  .browser-toolbar .ant-btn.is-active,
+  .browser-bookmark-bar .ant-btn.is-active {
+    background: rgba(101, 167, 125, .18);
+    color: #8fd1a8;
+  }
+
+  // Quick-actions cards on the new-tab page: lighten the icon badge so it
+  // doesn't disappear against the dark accent-soft tile.
+  .quick-actions > .ant-card { border-color: rgba(101, 167, 125, .25); }
+  .quick-actions .ant-card-body > .anticon,
+  .quick-actions .ant-card-body > svg { color: #8fd1a8; background: rgba(101, 167, 125, .14); }
+
+  // Notes sidebar (batch 17) and bookmark popover need dark-friendly surfaces.
+  .notes-panel,
+  .bookmark-bar-panel,
+  .tab-search-palette,
+  .history-palette,
+  .bulk-summary-palette {
+    background: #18211d;
+    border-color: #2a352f;
+    color: #d8e0db;
+  }
+  .notes-panel input,
+  .notes-panel textarea,
+  .bookmark-bar-panel input,
+  .tab-search-palette input,
+  .history-palette input,
+  .bulk-summary-palette input {
+    background: #111714;
+    border-color: #2a352f;
+    color: #e5ebe7;
+  }
+
+  // Permission / certificate bars that ship with the chrome use antd Alert; the
+  // dark algorithm already restyles them, but the custom error/ok borders
+  // were tuned for light and look pale on dark.
+  .certificate-error-bar.ant-alert-error { border-color: #5a2b2a; }
+  .permission-prompt-bar.ant-alert-warning { border-color: #5a4721; }
 }
 
 // The assistant is an application workspace, not a scrolling document.

@@ -1,5 +1,5 @@
 import { Check, Copy } from 'lucide-react'
-import { useState, type CSSProperties, type HTMLAttributes, type ReactNode } from 'react'
+import { useState, type CSSProperties, type ElementType, type HTMLAttributes, type ReactNode } from 'react'
 
 type TextType = 'secondary' | 'success' | 'warning' | 'danger'
 interface CommonProps extends HTMLAttributes<HTMLElement> {
@@ -12,7 +12,7 @@ interface CommonProps extends HTMLAttributes<HTMLElement> {
 }
 
 function classes(base: string, props: CommonProps): string {
-  return `${base}${props.type ? ` ${base}--${props.type}` : ''}${props.strong ? ` ${base}--strong` : ''}${props.code ? ` ${base}--code` : ''} ${props.className ?? ''}`.trim()
+  return `ant-typography ${base}${props.type ? ` ${base}--${props.type}` : ''}${props.strong ? ` ${base}--strong` : ''}${props.code ? ` ${base}--code` : ''} ${props.className ?? ''}`.trim()
 }
 
 function ellipsisStyle(ellipsis: CommonProps['ellipsis']): CSSProperties | undefined {
@@ -37,7 +37,7 @@ function Paragraph({ type, strong, code, ellipsis, children, className, style, .
 
 interface TitleProps extends CommonProps { level?: 1 | 2 | 3 | 4 | 5 }
 function Title({ level = 1, type, strong, code, ellipsis, children, className, style, ...props }: TitleProps) {
-  const Tag = `h${level}` as keyof JSX.IntrinsicElements
+  const Tag: ElementType = `h${level}`
   return <Tag {...props} className={classes(`ui-typography-title ui-typography-title--${level}`, { type, strong, code, className })} style={{ ...ellipsisStyle(ellipsis), ...style }}>{children}</Tag>
 }
 
