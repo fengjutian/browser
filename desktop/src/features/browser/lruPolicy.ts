@@ -46,7 +46,11 @@ export interface LruCandidateInputs {
   protectedId: string
   /** Target live webview count. */
   maxLive: number
-  /** Optional idle threshold: tabs activated within this window are kept alive. */
+  /**
+   * Tabs whose last-active timestamp is more recent than this many ms are kept
+   * alive even if they would otherwise be a candidate. Defaults to 5 minutes so
+   * the planner is safe to call without explicit configuration.
+   */
   idleThresholdMs?: number
   /** Reference timestamp for idle math (test seam). */
   now?: number
@@ -67,7 +71,7 @@ export interface LruPlan {
  */
 export function planLruSweep(inputs: LruCandidateInputs): LruPlan {
   const { tabs, lastActiveAt, protectedId, maxLive, activeDownloads } = inputs
-  const idleThresholdMs = inputs.idleThresholdMs ?? Number.POSITIVE_INFINITY
+  const idleThresholdMs = inputs.idleThresholdMs ?? 5 * 60_000
   const now = inputs.now ?? Date.now()
   if (inputs.liveIds.size <= maxLive) return { toClose: [], kept: [] }
 
@@ -76,12 +80,12 @@ export function planLruSweep(inputs: LruCandidateInputs): LruPlan {
     .filter(tab => tab.id !== protectedId)
     .sort((a, b) => (lastActiveAt.get(a.id) ?? 0) - (lastActiveAt.get(b.id) ?? 0))
 
-  const surplus = inputs.liveIds.size - maxLive
   const toClose: string[] = []
   const kept: string[] = []
 
   for (const tab of candidates) {
-    if (toClose.length >= surplus) break
+    // Stop once the live count would drop to (or below) the cap.
+    if (inputs.liveIds.size - toClose.length <= maxLive) break
     if (shouldKeepTabLive(tab, activeDownloads, now, idleThresholdMs)) {
       kept.push(tab.id)
       continue

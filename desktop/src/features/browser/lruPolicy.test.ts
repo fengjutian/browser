@@ -79,11 +79,12 @@ describe('planLruSweep', () => {
 
   it('respects the protectedId even when it is the oldest', () => {
     const plan = planLruSweep({
-      tabs, liveIds, lastActiveAt, activeDownloads, protectedId: 'recent',
-      maxLive: 2, now: NOW,
+      tabs, liveIds, lastActiveAt, activeDownloads: [], protectedId: 'stale',
+      maxLive: 2, idleThresholdMs: 0, now: NOW,
     })
-    expect(plan.toClose).not.toContain('recent')
+    expect(plan.toClose).not.toContain('stale')
     expect(plan.toClose.length).toBe(2)
+    expect(plan.toClose).toEqual(expect.arrayContaining(['down', 'recent']))
   })
 
   it('honours idleThresholdMs by keeping recently used tabs', () => {
