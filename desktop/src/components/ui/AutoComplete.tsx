@@ -47,10 +47,10 @@ export function AutoComplete({ value = '', options = [], onChange, onSelect, chi
       onFocus: (event: any) => { window.clearTimeout(closeTimer.current); child.props.onFocus?.(event); setOpen(options.length > 0) },
       onBlur: (event: any) => { child.props.onBlur?.(event); closeTimer.current = window.setTimeout(() => setOpen(false), 120) },
       onKeyDown,
-      role: 'combobox',
+      role: 'combobox' as any,
       'aria-expanded': open,
       'aria-autocomplete': 'list',
-    })}
+    } as any)}
     {open && options.length > 0 && <div className="ui-autocomplete__popup" role="listbox">
       {options.map((option, index) => <button key={`${option.value}-${index}`} type="button" role="option" aria-selected={index === activeIndex} className={index === activeIndex ? 'is-active' : ''} onMouseDown={event => event.preventDefault()} onClick={() => choose(option)}>{option.label ?? option.value}</button>)}
     </div>}

@@ -145,9 +145,9 @@ export function AssistantPanel({ close, saveToLibrary, currentUrl, currentTabId,
   return <>{contextHolder}<aside className="ai-panel">
     <div className="panel-title"><Space><span className="ai-mark"><RobotOutlined/></span><b>AI Assistant</b></Space><Button type="text" icon={<CloseOutlined/>} onClick={close}/></div>
     <Segmented block value={mode} onChange={value => setMode(value as PanelMode)} options={[
-      {label:'摘要',value:'summarize' as PanelMode,icon:<BookOutlined/>},
-      {label:'提问',value:'ask' as PanelMode,icon:<RobotOutlined/>},
-      {label:'翻译',value:'translate' as PanelMode,icon:<TranslationOutlined/>},
+      {label:'摘要',value:'summarize' as PanelMode},
+      {label:'提问',value:'ask' as PanelMode},
+      {label:'翻译',value:'translate' as PanelMode},
     ]}/>
     <Space wrap className="ai-panel__provider">
       <Tag icon={<RobotOutlined/>} color={currentProvider ? 'green' : 'default'}>
