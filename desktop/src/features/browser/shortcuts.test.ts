@@ -31,4 +31,9 @@ describe('interpretShortcut', () => {
   it('opens the history search palette on Ctrl+H', () => {
     expect(interpretShortcut({ ctrlKey: true, metaKey: false, shiftKey: false, altKey: false, key: 'h' })).toBe('openHistorySearch')
   })
+
+  it('opens the bookmark palette on Ctrl+Shift+O and bookmarks the active tab on Ctrl+D', () => {
+    expect(interpretShortcut({ ctrlKey: true, metaKey: false, shiftKey: true, altKey: false, key: 'O' })).toBe('openBookmarks')
+    expect(interpretShortcut({ ctrlKey: true, metaKey: false, shiftKey: false, altKey: false, key: 'd' })).toBe('addBookmark')
+  })
 })

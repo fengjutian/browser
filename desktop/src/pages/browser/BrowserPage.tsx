@@ -35,6 +35,8 @@ import { CertificateErrorBar } from '../../features/browser/CertificateErrorBar'
 import { useCertificatePrompt } from '../../features/browser/useCertificatePrompt'
 import { TabSearchPalette } from '../../features/browser/TabSearchPalette'
 import { HistorySearchPalette } from '../../features/history/HistorySearchPalette'
+import { BookmarkSearchPalette } from '../../features/bookmarks/BookmarkSearchPalette'
+import { useBookmarks } from '../../features/bookmarks/useBookmarks'
 import { isPrivateTab, makePrivateTab, stripPrivateTabs, resetPrivateSessionPermissions } from '../../features/browser/privateTabs'
 import { readSitePermissions, writeSitePermissions } from '../../features/browser/sitePermissions'
 import { forceAllDenyFor } from '../../features/browser/usePermissionPrompt'
@@ -142,6 +144,7 @@ export function BrowserPage({ visible = true, onSearchKnowledge }: { visible?: b
   const [pendingShellOpen, setPendingShellOpen] = useState<string | null>(null)
   const [tabSearchOpen, setTabSearchOpen] = useState(false)
   const [historySearchOpen, setHistorySearchOpen] = useState(false)
+  const [bookmarkPaletteOpen, setBookmarkPaletteOpen] = useState(false)
   const [findQuery, setFindQuery] = useState('')
   const [findStatus, setFindStatus] = useState<'idle' | 'found' | 'missing'>('idle')
   const [zoomLevels, setZoomLevels] = useState<Record<string, number>>({})
@@ -153,6 +156,7 @@ export function BrowserPage({ visible = true, onSearchKnowledge }: { visible?: b
   })
   const permissionPrompt = usePermissionPrompt()
   const certificatePrompt = useCertificatePrompt()
+  const bookmarkActions = useBookmarks()
   const [readerArticle, setReaderArticle] = useState<ReaderArticle | null>(null)
   const [hydrated, setHydrated] = useState(false)
   const [history, setHistory] = useState<HistoryEntry[]>([])
@@ -452,6 +456,12 @@ export function BrowserPage({ visible = true, onSearchKnowledge }: { visible?: b
           return
         case 'openHistorySearch':
           setHistorySearchOpen(true)
+          return
+        case 'openBookmarks':
+          setBookmarkPaletteOpen(true)
+          return
+        case 'addBookmark':
+          void addCurrentAsBookmark()
           return
         case 'print':
           if (hasNativeTab(activeTabIdRef.current)) void printNativeTab(activeTabIdRef.current)

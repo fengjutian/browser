@@ -6,6 +6,7 @@ pub mod providers;
 pub mod session_lock;
 pub mod webview_compat;
 pub mod certificate_guard;
+pub mod bookmarks;
 
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
@@ -1053,6 +1054,12 @@ pub fn run() {
             session_lock::browser_session_status,
             session_lock::browser_session_drop,
             certificate_guard::browser_certificate_respond,
+            bookmarks::bookmark_list,
+            bookmarks::bookmark_add,
+            bookmarks::bookmark_get,
+            bookmarks::bookmark_remove,
+            bookmarks::bookmark_update,
+            bookmarks::bookmark_move,
             webview_compat::shell_open,
             webview_compat::toggle_fullscreen,
             webview_compat::pick_files
