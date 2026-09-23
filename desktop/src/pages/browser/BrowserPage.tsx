@@ -41,7 +41,7 @@ import { useBookmarks } from '../../features/bookmarks/useBookmarks'
 import { BulkSummaryPalette } from '../../features/ai/BulkSummaryPalette'
 import type { BulkProgressEntry } from '../../features/ai/bulkSummary'
 import { NotesPanel } from '../../features/notes/NotesPanel'
-import { addNote as appendNoteEntry, readNotes as loadStoredNotes, type NoteEntry } from '../../features/notes/notes'
+import { addNote as appendNoteEntry, readNotes as loadStoredNotes, removeNote as dropNoteEntry, updateNote as patchNoteEntry, writeNotes as persistNotes, type NoteEntry } from '../../features/notes/notes'
 import { isPrivateTab, makePrivateTab, stripPrivateTabs, resetPrivateSessionPermissions } from '../../features/browser/privateTabs'
 import { readSitePermissions, writeSitePermissions } from '../../features/browser/sitePermissions'
 import { forceAllDenyFor } from '../../features/browser/usePermissionPrompt'
@@ -368,6 +368,7 @@ export function BrowserPage({ visible = true, onSearchKnowledge }: { visible?: b
 
   useEffect(() => { activeTabIdRef.current = activeTabId }, [activeTabId])
   useEffect(() => { tabsRef.current = tabs }, [tabs])
+  useEffect(() => { persistNotes(notes) }, [notes])
   useEffect(() => { closedTabsRef.current = closedTabs }, [closedTabs])
   useEffect(() => { downloadsRef.current = downloads }, [downloads])
   useEffect(() => { historyRef.current = history }, [history])
@@ -676,6 +677,7 @@ export function BrowserPage({ visible = true, onSearchKnowledge }: { visible?: b
     { key: 'bookmark-add', label: '收藏当前页', extra: 'Ctrl+D', onClick: () => void addCurrentAsBookmark() },
     { key: 'bookmarks', label: '打开收藏夹', extra: 'Ctrl+Shift+O', onClick: () => setBookmarkPaletteOpen(true) },
     { key: 'bulk-summary', label: '多链接 AI 摘要', extra: 'Ctrl+Shift+S', onClick: () => setBulkSummaryOpen(true) },
+    { key: 'toggle-notes', label: '网页笔记面板', extra: 'Ctrl+Shift+N', onClick: () => setNotesOpen(value => !value) },
     { key: 'print', label: '打印', icon: <PrinterOutlined/>, extra: 'Ctrl+P', disabled: !nativeMode, onClick: () => void printNativeTab(active.id) },
     { type: 'divider' },
     { key: 'new-private', label: '新建私密窗口', icon: <LockOutlined/>, extra: 'Shift+Ctrl+N', onClick: () => openNewTab(undefined, { private: true }) },
@@ -822,7 +824,7 @@ export function BrowserPage({ visible = true, onSearchKnowledge }: { visible?: b
   }
 
   function handleContextAction(action: ContextMenuAction, request: { linkUrl: string | null; imageUrl: string | null; selectionText: string }) {
-  if (action === 'add-to-notes' as never) {
+  if (action === 'add-to-notes') {
     const text = request.selectionText?.trim()
     if (!text) { messageApi.info('请先选中文本'); return }
     const entry: Omit<NoteEntry, 'id' | 'createdAt'> = {
@@ -832,6 +834,7 @@ export function BrowserPage({ visible = true, onSearchKnowledge }: { visible?: b
       comment: '',
     }
     setNotes(current => appendNoteEntry(current, entry))
+    setNotesOpen(true)
     messageApi.success('已加入笔记', 2)
     return
   }
@@ -1322,6 +1325,13 @@ export function BrowserPage({ visible = true, onSearchKnowledge }: { visible?: b
           setBulkSummaryBusy(false)
         }
       }}
+    />
+    <NotesPanel
+      open={notesOpen}
+      notes={notes}
+      onToggle={() => setNotesOpen(value => !value)}
+      onRemove={id => setNotes(current => dropNoteEntry(current, id))}
+      onUpdate={(id, patch) => setNotes(current => patchNoteEntry(current, id, patch))}
     />
     {certificatePrompt.prompt && <CertificateErrorBar payload={certificatePrompt.prompt} onRespond={allow => void certificatePrompt.respond(allow)} />}
     <RecoveryPanel

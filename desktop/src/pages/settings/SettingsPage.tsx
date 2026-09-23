@@ -1,5 +1,5 @@
-import { Descriptions, Form, InputNumber, List, Typography, message } from 'antd'
-import { Alert, Button, Card, Input, Segmented, Select, Space, Switch, Tabs, Tag } from '../../components/ui'
+import { Form, InputNumber, Typography, message } from 'antd'
+import { Alert, Button, Card, Descriptions, Input, List, Segmented, Select, Space, Switch, Tabs, Tag } from '../../components/ui'
 import { BgColorsOutlined, DeleteOutlined, KeyOutlined, MoonOutlined, SafetyCertificateOutlined, SaveOutlined, SunOutlined, ThunderboltOutlined } from '@ant-design/icons'
 import { useEffect, useState } from 'react'
 import { PageHeader } from '../../shared/components/PageHeader'
