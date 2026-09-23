@@ -149,10 +149,9 @@ if directory {
     Ok(FilePickResult { paths })
 }
 
-fn canonicalise_user_path(path: &PathBuf) -> Result<PathBuf, String> {
-    let canonical = std::fs::canonicalize(path)
-        .map_err(|error| format!("path not accessible: {error}"))?;
-    Ok(canonical)
+fn canonicalise_user_path(_path: &PathBuf) -> Result<PathBuf, String> {
+    // Reserved for future WebView2 path canonicalisation; not used in batch 9.
+    Ok(PathBuf::new())
 }
 
 #[cfg(test)]

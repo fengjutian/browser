@@ -1,6 +1,6 @@
 import { MouseEvent, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
-import { AutoComplete, Badge, Button, Card, Dropdown, Input, Popover, Segmented, Space, Tabs, Tag, Tooltip, Typography, message, type InputRef, type MenuProps } from 'antd'
-import { ArrowDownOutlined, ArrowLeftOutlined, ArrowRightOutlined, ArrowUpOutlined, BookOutlined, CheckCircleOutlined, CloseCircleOutlined, CloseOutlined, CopyOutlined, DownloadOutlined, GlobalOutlined, LoadingOutlined, MoreOutlined, PlusOutlined, PrinterOutlined, ReloadOutlined, SafetyCertificateOutlined, SaveOutlined, SearchOutlined, StarOutlined, ThunderboltOutlined, TranslationOutlined } from '@ant-design/icons'
+import { AutoComplete, Badge, Button, Card, Dropdown, Input, Popover, Segmented, Select, Space, Tabs, Tag, Tooltip, Typography, message, type InputRef, type MenuProps } from 'antd'
+import { ArrowDownOutlined, ArrowLeftOutlined, ArrowRightOutlined, ArrowUpOutlined, BookOutlined, CheckCircleOutlined, CloseCircleOutlined, CloseOutlined, CopyOutlined, DatabaseOutlined, DownloadOutlined, FullscreenOutlined, GlobalOutlined, LoadingOutlined, MoreOutlined, PlusOutlined, PrinterOutlined, ReloadOutlined, SafetyCertificateOutlined, SaveOutlined, SearchOutlined, StarOutlined, ThunderboltOutlined, TranslationOutlined } from '@ant-design/icons'
 import { Sparkles as RobotOutlined } from 'lucide-react'
 import type { BrowserTab, BrowserTabError } from '../../types'
 import { findDocumentByUrl, getBrowserShortcutsEnabled, getDocument, getSession, saveDocument, setSession, toggleStarred } from '../../api'
@@ -30,8 +30,10 @@ import { LockOutlined } from '@ant-design/icons'
 import { readLatestSnapshot, restoreFromSnapshot, writeSnapshot, type SessionSnapshot } from '../../features/browser/sessionStore'
 import { RecoveryPanel, type RecoveryChoice } from '../../features/browser/RecoveryPanel'
 import { dropSessionLock, getSessionLockState, type SessionLockState } from '../../services/session'
+import { toggleFullscreen as toggleWindowFullscreen } from '../../services/webviewCompat'
 import { buildSuggestions, trimSuggestions, type SuggestionItem } from '../../features/browser/suggestionProvider'
-import { readSearchEngineConfig, resolveActiveSearchTemplate } from '../../features/browser/searchEngine'
+import { readSearchEngineConfig, resolveActiveSearchTemplate, SEARCH_ENGINE_PRESETS } from '../../features/browser/searchEngine'
+import { classifyNavigationInput, resolveNavigationInput as resolveInput, renderSearchTemplate } from '../../features/browser/navigation'
 import { evaluateUrlSafety, highestLevel, type SafetyIssue, type SafetyLevel } from '../../features/browser/urlSafety'
 
 const SESSION_KEY = 'browser.tabs'
@@ -128,7 +130,7 @@ function renderSuggestion(item: SuggestionItem) {
   )
 }
 
-export function BrowserPage({ visible = true }: { visible?: boolean }) {
+export function BrowserPage({ visible = true, onSearchKnowledge }: { visible?: boolean; onSearchKnowledge?: (query: string) => void }) {
   const [tabs, setTabs] = useState<BrowserTab[]>([newTab('new')])
   const [activeTabId, setActiveTabId] = useState('new')
   const [address, setAddress] = useState('')
@@ -539,11 +541,17 @@ export function BrowserPage({ visible = true }: { visible?: boolean }) {
     setFindStatus('idle')
   }
 
+  const [isWindowFullscreen, setIsWindowFullscreen] = useState(false)
+  async function handleToggleFullscreen() {
+    const next = await toggleWindowFullscreen()
+    setIsWindowFullscreen(next)
+  }
   const browserMenu: MenuProps['items'] = [
     { key: 'find', label: '在页面中查找', extra: 'Ctrl+F', onClick: () => setFindOpen(true) },
     { key: 'print', label: '打印', icon: <PrinterOutlined/>, extra: 'Ctrl+P', disabled: !nativeMode, onClick: () => void printNativeTab(active.id) },
     { type: 'divider' },
     { key: 'new-private', label: '新建私密窗口', icon: <LockOutlined/>, extra: 'Shift+Ctrl+N', onClick: () => openNewTab(undefined, { private: true }) },
+    { key: 'fullscreen', label: isWindowFullscreen ? '退出全屏' : '进入全屏', icon: <FullscreenOutlined/>, extra: 'F11', onClick: () => void handleToggleFullscreen() },
     { type: 'divider' },
     { key: 'zoom', label: <Space><Button size="small" onClick={event => { event.stopPropagation(); changeZoom(active.id, -0.1) }}>−</Button><span className="browser-zoom-value">{Math.round((zoomLevels[active.id] ?? 1) * 100)}%</span><Button size="small" onClick={event => { event.stopPropagation(); changeZoom(active.id, 0.1) }}>+</Button></Space> },
     { key: 'zoom-reset', label: '重置缩放', extra: 'Ctrl+0', onClick: () => setZoom(active.id, 1) },
@@ -977,7 +985,7 @@ export function BrowserPage({ visible = true }: { visible?: boolean }) {
             ? <div className="web-surface__loading"><LoadingOutlined spin/></div>
             : active.url
               ? <BrowserErrorView tab={{...active, error:{kind:'web-mode-required',message:'当前网页需要在 Tauri 桌面应用中打开。'}}} onRetry={retryActive} onNewTab={openNewTab} onCopy={copyUrl}/>
-              : <NewTab address={address} setAddress={setAddress} navigate={navigate}/>}</div>{aiOpen&&<AssistantPanel close={()=>setAiOpen(false)} saveToLibrary={save} currentUrl={active.url} currentTabId={active.id} readerArticle={readerArticle}/>}</div>
+              : <NewTab address={address} setAddress={setAddress} navigate={navigate} openNewTab={openNewTab} onSearchKnowledge={onSearchKnowledge}/>}</div>{aiOpen&&<AssistantPanel close={()=>setAiOpen(false)} saveToLibrary={save} currentUrl={active.url} currentTabId={active.id} readerArticle={readerArticle}/>}</div>
     <ContextMenu
       surfaceRef={surfaceRef}
       capabilities={{
@@ -991,7 +999,32 @@ export function BrowserPage({ visible = true }: { visible?: boolean }) {
   </div>
 }
 
-function NewTab({address,setAddress,navigate}:{address:string;setAddress:(value:string)=>void;navigate:(input:string)=>Promise<void>}) { return <div className="new-tab"><span className="new-tab__icon"><ThunderboltOutlined/></span><Typography.Title>今天想探索什么？</Typography.Title><Typography.Paragraph>深入阅读，保存重要内容，随时向你的知识库提问。</Typography.Paragraph><form onSubmit={event=>{event.preventDefault();void navigate(address)}}><Input size="large" prefix={<SearchOutlined/>} value={address} onChange={event=>setAddress(event.target.value)} placeholder="搜索网页或输入 URL"/></form><div className="quick-actions"><Card><BookOutlined/><b>Reader Mode</b><small>更专注地阅读</small></Card><Card><RobotOutlined/><b>AI 摘要</b><small>快速理解页面</small></Card><Card><SaveOutlined/><b>知识库</b><small>沉淀重要内容</small></Card></div><div className="quick-sites"><div className="quick-sites__label">常用网站</div><div className="quick-sites__grid">{QUICK_SITES.map(site => <button key={site.url} type="button" className="quick-site" title={site.name} aria-label={`打开 ${site.name}`} onClick={(event:MouseEvent<HTMLButtonElement>)=>{event.currentTarget.blur();void navigate(site.url)}}><span className="quick-site__mark" style={{background:site.color}}>{site.initial}</span><span className="quick-site__name">{site.name}</span></button>)}</div></div></div> }
+type SearchMode = 'single' | 'multiple' | 'knowledge'
+
+function NewTab({address,setAddress,navigate,openNewTab,onSearchKnowledge}:{address:string;setAddress:(value:string)=>void;navigate:(input:string)=>Promise<void>;openNewTab:(url?:string)=>void;onSearchKnowledge?: (query:string)=>void}) {
+  const configuredEngine = readSearchEngineConfig().presetId
+  const initialEngine = SEARCH_ENGINE_PRESETS.some(engine => engine.id === configuredEngine) ? configuredEngine : 'google'
+  const [mode, setMode] = useState<SearchMode>('single')
+  const [engine, setEngine] = useState(initialEngine)
+  const [engines, setEngines] = useState<string[]>(['google', 'bing'])
+  const presets = SEARCH_ENGINE_PRESETS.map(item => ({ label: item.label, value: item.id }))
+  const placeholder = mode === 'knowledge' ? '搜索本地知识库' : '搜索网页或输入 URL'
+
+  function templateFor(id:string) { return SEARCH_ENGINE_PRESETS.find(item => item.id === id)?.template ?? SEARCH_ENGINE_PRESETS[0].template }
+  function submit() {
+    const query = address.trim()
+    if (!query) return
+    if (mode === 'knowledge') { onSearchKnowledge?.(query); return }
+    if (mode === 'single') { void navigate(resolveInput(query, { searchTemplate: templateFor(engine) }) ?? query); return }
+    if (classifyNavigationInput(query) !== 'search') { void navigate(query); return }
+    const selected = engines.length ? engines : ['google']
+    const urls = selected.map(id => renderSearchTemplate(templateFor(id), query))
+    void navigate(urls[0])
+    urls.slice(1).forEach(url => openNewTab(url))
+  }
+
+  return <div className="new-tab"><div className="new-tab__hero"><span className="new-tab__icon"><ThunderboltOutlined/></span><Typography.Title>今天想探索什么？</Typography.Title><Typography.Paragraph>在网页与个人知识之间，选择最合适的探索方式。</Typography.Paragraph></div><div className="new-tab-search"><Segmented<SearchMode> block value={mode} onChange={setMode} options={[{label:<span><GlobalOutlined/> 单引擎</span>,value:'single'},{label:<span><SearchOutlined/> 多引擎</span>,value:'multiple'},{label:<span><DatabaseOutlined/> 本地知识库</span>,value:'knowledge'}]}/><form onSubmit={event=>{event.preventDefault();submit()}}><Input size="large" autoFocus prefix={<SearchOutlined/>} value={address} onChange={event=>setAddress(event.target.value)} placeholder={placeholder} suffix={<Button type="primary" htmlType="submit">{mode === 'knowledge' ? '查询' : '搜索'}</Button>}/></form>{mode === 'single' && <div className="search-engine-picker"><span>搜索引擎</span><Select value={engine} onChange={setEngine} options={presets}/></div>}{mode === 'multiple' && <div className="search-engine-picker search-engine-picker--multiple"><span>同时打开</span><Select mode="multiple" maxTagCount="responsive" value={engines} onChange={setEngines} options={presets} placeholder="至少选择一个搜索引擎"/></div>}{mode === 'knowledge' && <div className="new-tab-search__hint">仅查询保存在本机的网页、笔记和标签，不会发送到外部搜索引擎。</div>}</div><div className="quick-actions"><Card><BookOutlined/><b>Reader Mode</b><small>更专注地阅读</small></Card><Card><RobotOutlined/><b>AI 摘要</b><small>快速理解页面</small></Card><Card><SaveOutlined/><b>知识库</b><small>沉淀重要内容</small></Card></div><div className="quick-sites"><div className="quick-sites__label">常用网站</div><div className="quick-sites__grid">{QUICK_SITES.map(site => <button key={site.url} type="button" className="quick-site" title={site.name} aria-label={`打开 ${site.name}`} onClick={(event:MouseEvent<HTMLButtonElement>)=>{event.currentTarget.blur();void navigate(site.url)}}><span className="quick-site__mark" style={{background:site.color}}>{site.initial}</span><span className="quick-site__name">{site.name}</span></button>)}</div></div></div>
+}
 
 function BrowserErrorView({tab, onRetry, onNewTab, onCopy}:{tab:BrowserTab;onRetry:()=>void;onNewTab:()=>void;onCopy:()=>void}) {
   const error = tab.error

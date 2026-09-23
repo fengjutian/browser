@@ -448,6 +448,19 @@ select {
 
 .browser-toolbar form > .ant-select { width: 100%; }
 
+// The omnibox should read as browser chrome, not as a narrow page form.
+.browser-toolbar > form {
+  width: auto;
+  max-width: none;
+  margin: 0 12px;
+}
+
+.browser-toolbar > form .ant-input-affix-wrapper {
+  height: 38px;
+  border-radius: 11px;
+  background: rgba(255, 255, 255, .86);
+}
+
 // Cohesive application shell and content rhythm.
 body[data-theme='green'] { --accent:#347851; --accent-soft:#e2eee6; --accent-border:#c9ddcf; --page:#f5f7f4; }
 body[data-theme='beige'] { --accent:#8a6846; --accent-soft:#eee2d1; --accent-border:#ddcbb4; --page:#f7f2e9; }
@@ -745,6 +758,83 @@ body[data-theme='dark'] {
 
 .quick-actions b { font-size: 14px; line-height: 20px; }
 .quick-actions small { font-size: 12px; line-height: 18px; }
+
+// New-tab search workspace. Keeping all search choices inside one card makes
+// the page hierarchy independent from the browser's omnibox above it.
+.new-tab {
+  justify-content: flex-start;
+  padding: clamp(34px, 7vh, 68px) 24px 28px;
+  overflow: auto;
+}
+
+.new-tab__hero {
+  text-align: center;
+
+  .new-tab__icon { margin: 0 auto; }
+  h1.ant-typography { margin: 12px 0 3px; font-size: clamp(28px, 2.25vw, 38px); }
+  p.ant-typography { margin-bottom: 18px; color: #657269; }
+}
+
+.new-tab-search {
+  width: min(720px, 86%);
+  padding: 10px;
+  border: 1px solid color-mix(in srgb, var(--accent-border) 85%, transparent);
+  border-radius: 18px;
+  background: color-mix(in srgb, #fff 91%, var(--accent-soft));
+  box-shadow: 0 14px 38px rgba(40, 58, 47, .08);
+
+  > .ant-segmented {
+    width: 100%;
+    margin-bottom: 10px;
+    padding: 4px;
+    border-radius: 12px;
+    background: var(--accent-soft);
+  }
+
+  .ant-segmented-item-label > span { display: inline-flex; align-items: center; gap: 6px; }
+
+  form { width: 100%; }
+
+  form .ant-input-affix-wrapper {
+    min-height: 52px;
+    padding: 5px 6px 5px 15px;
+    border-color: var(--accent-border);
+    border-radius: 13px;
+    box-shadow: none;
+  }
+
+  form .ant-input-suffix .ant-btn {
+    height: 40px;
+    padding-inline: 21px;
+    border-radius: 9px;
+  }
+
+  &__hint { padding: 10px 5px 1px; color: #758078; font-size: 12px; }
+}
+
+.search-engine-picker {
+  display: grid;
+  grid-template-columns: 72px minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  padding: 9px 5px 0;
+  color: #667169;
+  font-size: 12px;
+
+  .ant-select { width: 100%; }
+  .ant-select-selector { border-color: transparent !important; background: transparent !important; box-shadow: none !important; }
+}
+
+.new-tab .quick-actions { width: min(720px, 86%) !important; margin-top: 16px !important; }
+.new-tab .quick-sites { width: min(800px, 92%) !important; margin-top: 20px !important; }
+
+body[data-theme='dark'] {
+  .browser-toolbar > form .ant-input-affix-wrapper { background: #202823; }
+  .new-tab__hero p.ant-typography { color: #9aa69e; }
+  .new-tab-search { background: #18211c; box-shadow: none; }
+  .new-tab-search__hint,
+  .search-engine-picker { color: #9aa69e; }
+}
 
 // The assistant is an application workspace, not a scrolling document.
 .assistant-page {

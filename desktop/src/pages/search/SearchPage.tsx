@@ -9,8 +9,8 @@ import { useDebouncedValue } from '../../shared/hooks/useDebouncedValue'
 
 type SortKey = 'recent' | 'oldest' | 'starred'
 
-export function SearchPage() {
-  const [query, setQuery] = useState('')
+export function SearchPage({ initialQuery = '' }: { initialQuery?: string }) {
+  const [query, setQuery] = useState(initialQuery)
   const debouncedQuery = useDebouncedValue(query, 250)
   const [documents, setDocuments] = useState<Document[]>([])
   const [selected, setSelected] = useState<Document | null>(null)
@@ -21,6 +21,8 @@ export function SearchPage() {
   const [includeArchived, setIncludeArchived] = useState(false)
   const [sort, setSort] = useState<SortKey>('recent')
   const [durationMs, setDurationMs] = useState<number | null>(null)
+
+  useEffect(() => { setQuery(initialQuery) }, [initialQuery])
 
   useEffect(() => {
     let current = true
