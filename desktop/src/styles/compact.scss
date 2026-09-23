@@ -202,7 +202,7 @@
 }
 
 .theme-settings .ant-segmented {
-  max-width: 640px;
+  max-width: 760px;
 }
 
 body[data-theme='green'] {
@@ -237,6 +237,65 @@ body[data-theme='light'] {
   .user-card { border-top-color: #dde2df; }
   .browser-tabs { background: #e9ecea; }
   .new-tab { background: radial-gradient(circle at 50% 30%, #edf1ee, #fafbfa 44%); }
+}
+
+body[data-theme='github'] {
+  background: #f6f8fa;
+  color: #1f2328;
+
+  .app-content { background: #f6f8fa; }
+  .app-sider.ant-layout-sider {
+    color: #1f2328;
+    border-right: 1px solid #d0d7de;
+  }
+  .brand__mark { color: #0969da; background: #ddf4ff; }
+  .privacy-status {
+    border-color: #d0d7de;
+    border-radius: 6px;
+    background: #fff;
+
+    .ant-typography { color: #57606a; }
+  }
+  .user-card { border-top-color: #d0d7de; }
+  .user-card small { color: #57606a; }
+  .page-header h1.ant-typography,
+  .document-card h4.ant-typography { font-family: inherit; }
+  .browser-tabs { background: #eaeef2; }
+  .browser-toolbar,
+  .ai-panel { background: #f6f8fa; }
+  .web-surface { background: #fff; }
+  .new-tab { background: #f6f8fa; }
+  .new-tab-search {
+    border-color: #d0d7de;
+    border-radius: 6px;
+    background: #fff;
+    box-shadow: 0 1px 0 rgba(31,35,40,.04);
+  }
+  .new-tab-search > .ant-segmented {
+    border-radius: 6px;
+    background: #eaeef2;
+  }
+  .new-tab-search form .ant-input-affix-wrapper,
+  .new-tab-search form .ant-input-suffix .ant-btn { border-radius: 6px; }
+  .quick-actions > .ant-card,
+  .quick-site,
+  .document-card,
+  .settings-card,
+  .search-results .ant-list-item {
+    border-color: #d0d7de;
+    border-radius: 6px;
+    background: #fff;
+    box-shadow: none;
+  }
+  .quick-site:hover {
+    border-color: #0969da;
+    box-shadow: 0 3px 6px rgba(140,149,159,.15);
+  }
+  .browser-toolbar > form .ant-input-affix-wrapper {
+    border-color: #d0d7de;
+    border-radius: 6px;
+    background: #fff;
+  }
 }
 
 body[data-theme='dark'] {
@@ -466,6 +525,7 @@ body[data-theme='green'] { --accent:#347851; --accent-soft:#e2eee6; --accent-bor
 body[data-theme='beige'] { --accent:#8a6846; --accent-soft:#eee2d1; --accent-border:#ddcbb4; --page:#f7f2e9; }
 body[data-theme='light'] { --accent:#3f6f5a; --accent-soft:#e7ece9; --accent-border:#d1dad5; --page:#f7f8f7; }
 body[data-theme='dark'] { --accent:#65a77d; --accent-soft:#24372c; --accent-border:#375342; --page:#111714; }
+body[data-theme='github'] { --accent:#0969da; --accent-soft:#ddf4ff; --accent-border:#d0d7de; --page:#f6f8fa; }
 
 .page {
   width: 100%;

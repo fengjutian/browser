@@ -63,6 +63,7 @@ function GeneralSettings() {
       { label: <Space><BgColorsOutlined/>米色</Space>, value: 'beige' },
       { label: <Space><SunOutlined/>浅色</Space>, value: 'light' },
       { label: <Space><MoonOutlined/>深色</Space>, value: 'dark' },
+      { label: 'GitHub', value: 'github' },
     ]}/>
   </Card>
 }
