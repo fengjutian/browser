@@ -37,7 +37,7 @@ describe('writeSnapshot + readLatestSnapshot', () => {
   afterEach(() => localStorage.clear())
 
   it('writes to v1 on the first call', () => {
-    writeSnapshot(sample)
+    writeSnapshot(sample, { rotatedAt: 1_000_000 })
     expect(localStorage.getItem(SESSION_KEY_V1)).not.toBeNull()
     expect(localStorage.getItem(SESSION_KEY_V2)).toBeNull()
     const result = readLatestSnapshot()
@@ -46,8 +46,8 @@ describe('writeSnapshot + readLatestSnapshot', () => {
   })
 
   it('rotates after the second write', () => {
-    writeSnapshot(sample)
-    writeSnapshot({ ...sample, savedAt: 2_000_000 })
+    writeSnapshot(sample, { rotatedAt: 1_000_000 })
+    writeSnapshot({ ...sample, savedAt: 2_000_000 }, { rotatedAt: 2_000_000 })
     const v2Raw = localStorage.getItem(SESSION_KEY_V2)
     const v1Raw = localStorage.getItem(SESSION_KEY_V1)
     expect(v2Raw).not.toBeNull()

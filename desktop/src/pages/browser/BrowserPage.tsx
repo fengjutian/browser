@@ -27,6 +27,9 @@ import { PermissionPromptBar } from '../../features/browser/PermissionPromptBar'
 import { isPrivateTab, makePrivateTab, stripPrivateTabs, resetPrivateSessionPermissions } from '../../features/browser/privateTabs'
 import { forceAllDenyFor } from '../../features/browser/usePermissionPrompt'
 import { LockOutlined } from '@ant-design/icons'
+import { readLatestSnapshot, restoreFromSnapshot, writeSnapshot, type SessionSnapshot } from '../../features/browser/sessionStore'
+import { RecoveryPanel, type RecoveryChoice } from '../../features/browser/RecoveryPanel'
+import { dropSessionLock, getSessionLockState, type SessionLockState } from '../../services/session'
 import { buildSuggestions, trimSuggestions, type SuggestionItem } from '../../features/browser/suggestionProvider'
 import { readSearchEngineConfig, resolveActiveSearchTemplate } from '../../features/browser/searchEngine'
 import { evaluateUrlSafety, highestLevel, type SafetyIssue, type SafetyLevel } from '../../features/browser/urlSafety'
@@ -77,6 +80,10 @@ function parsePersistedSession(raw: string | null): PersistedSession | null {
     if (!value.tabs.some(tab => tab.id === value.activeTabId)) return null
     return { tabs: value.tabs as BrowserTab[], activeTabId: value.activeTabId }
   } catch { return null }
+}
+
+function getSessionLegacy(key: string): string | null {
+  try { return localStorage.getItem(key) } catch { return null }
 }
 
 function parseClosedTabs(raw: string | null): ClosedTab[] {
@@ -145,12 +152,19 @@ export function BrowserPage({ visible = true }: { visible?: boolean }) {
   const [draggingIndex, setDraggingIndex] = useState<number | null>(null)
   const [dragOverIndex, setDragOverIndex] = useState<number | null>(null)
   const [messageApi, contextHolder] = message.useMessage()
+  const [lockState, setLockState] = useState<SessionLockState | null>(null)
+  const [recoveredTabs, setRecoveredTabs] = useState<BrowserTab[]>([])
+  const [recoveredActiveId, setRecoveredActiveId] = useState<string>('')
+  const [recoveredScroll, setRecoveredScroll] = useState<Record<string, { x: number; y: number }>>({})
+  const [recoveredZoom, setRecoveredZoom] = useState<Record<string, number>>({})
   const surfaceRef = useRef<HTMLDivElement>(null)
   const addressRef = useRef<InputRef>(null)
   const previousTab = useRef<string | undefined>(undefined)
   const activeTabIdRef = useRef(activeTabId)
   const tabsRef = useRef(tabs)
   const closedTabsRef = useRef(closedTabs)
+  const historyRef = useRef(history)
+  const zoomLevelsRef = useRef(zoomLevels)
   const visibleRef = useRef(visible)
   const lastActiveAtRef = useRef(new Map<string, number>([['new', Date.now()]]))
   const lastHistoryUrl = useRef<string>('')
@@ -179,12 +193,26 @@ export function BrowserPage({ visible = true }: { visible?: boolean }) {
   useEffect(() => {
     let cancelled = false
     void Promise.all([
-      getSession(SESSION_KEY),
       getSession(HISTORY_KEY),
       getSession(CLOSED_KEY),
-    ]).then(([tabsRaw, historyRaw, closedRaw]) => {
+      getSessionLockState(),
+    ]).then(([historyRaw, closedRaw, lockState]) => {
       if (cancelled) return
-      const parsed = parsePersistedSession(tabsRaw)
+      setHistory(parseHistory(historyRaw))
+      setClosedTabs(parseClosedTabs(closedRaw))
+      const crash = lockState?.crashed ?? false
+      const snapshot = readLatestSnapshot()
+      const restored = snapshot ? restoreFromSnapshot(snapshot.snapshot) : null
+      if (crash && restored && restored.tabs.length > 0) {
+        setLockState(lockState)
+        setRecoveredTabs(restored.tabs)
+        setRecoveredActiveId(restored.activeTabId)
+        setRecoveredScroll(restored.scrollPositions)
+        setRecoveredZoom(restored.zoomLevels)
+        setHydrated(true)
+        return
+      }
+      const parsed = parsePersistedSession(getSessionLegacy(SESSION_KEY))
       if (parsed) {
         setTabs(parsed.tabs)
         setActiveTabId(parsed.activeTabId)
@@ -225,6 +253,24 @@ export function BrowserPage({ visible = true }: { visible?: boolean }) {
   useEffect(() => {
     if (!hydrated) return
     void setSession(SESSION_KEY, sessionJson)
+    const snapshot: SessionSnapshot = {
+      schemaVersion: 2,
+      savedAt: Date.now(),
+      windows: [{
+        id: 'main',
+        tabs: stripPrivateTabs(tabs),
+        activeTabId,
+        scrollPositions: Object.fromEntries(
+          tabsRef.current
+            .filter(tab => !tab.private && typeof tab.scrollX === 'number' && typeof tab.scrollY === 'number')
+            .map(tab => [tab.id, { x: tab.scrollX ?? 0, y: tab.scrollY ?? 0 }])
+        ),
+        zoomLevels: zoomLevelsRef.current,
+      }],
+      history: historyRef.current,
+      closedTabs: closedTabsRef.current,
+    }
+    writeSnapshot(snapshot)
   }, [sessionJson, hydrated])
 
   const historyJson = useDebouncedValue(JSON.stringify(history), SESSION_DEBOUNCE_MS)
@@ -249,6 +295,8 @@ export function BrowserPage({ visible = true }: { visible?: boolean }) {
   useEffect(() => { activeTabIdRef.current = activeTabId }, [activeTabId])
   useEffect(() => { tabsRef.current = tabs }, [tabs])
   useEffect(() => { closedTabsRef.current = closedTabs }, [closedTabs])
+  useEffect(() => { historyRef.current = history }, [history])
+  useEffect(() => { zoomLevelsRef.current = zoomLevels }, [zoomLevels])
   useEffect(() => { visibleRef.current = visible }, [visible])
 
   useEffect(() => {
@@ -532,6 +580,49 @@ export function BrowserPage({ visible = true }: { visible?: boolean }) {
     } catch {
       messageApi.error(`复制${label}失败`)
     }
+  }
+
+  async function handleRecovery(choice: RecoveryChoice) {
+    await dropSessionLock()
+    if (choice === 'discard') {
+      setLockState(null)
+      setRecoveredTabs([])
+      return
+    }
+    const next = choice === 'pinned'
+      ? recoveredTabs.filter(tab => tab.pinned)
+      : recoveredTabs
+    if (next.length === 0) {
+      setLockState(null)
+      setRecoveredTabs([])
+      return
+    }
+    setTabs(next)
+    const activeId = next.find(tab => tab.id === recoveredActiveId)?.id
+      ?? next[0]?.id
+      ?? 'new'
+    setActiveTabId(activeId)
+    const active = next.find(tab => tab.id === activeId)
+    setAddress(active?.url ?? '')
+    setZoomLevels(recoveredZoom)
+    if (active?.url) lastHistoryUrl.current = active.url
+    setLockState(null)
+    setRecoveredTabs([])
+    void new Promise(resolve => requestAnimationFrame(resolve)).then(async () => {
+      const nextBounds = bounds()
+      if (!nextBounds) return
+      // Lazy: only mount the active tab WebView; everything else stays
+      // `suspended` until the user clicks them (handled by resumeTab).
+      await Promise.all(next.filter(tab => tab.url && tab.id === activeId).map(async tab => {
+        try {
+          const opened = await ensureNativeTab(tab.id, tab.url, nextBounds)
+          if (!opened) return
+          tabRuntime.enqueueScroll(tab.id, { x: recoveredScroll[tab.id]?.x ?? 0, y: recoveredScroll[tab.id]?.y ?? 0 })
+          if (visibleRef.current) await showNativeTab(tab.id)
+        } catch { /* skip */ }
+      }))
+      await enforceLiveTabLimit(activeId)
+    })
   }
 
   async function handleContextAction(action: ContextMenuAction, request: { linkUrl: string | null; imageUrl: string | null; selectionText: string }) {
@@ -862,6 +953,11 @@ export function BrowserPage({ visible = true }: { visible?: boolean }) {
     <div className="browser-toolbar"><Space><Button type="text" aria-label="后退" title="后退 (Alt+←)" icon={<ArrowLeftOutlined/>} disabled={!nativeMode || !active.canGoBack} onClick={() => void navigateHistory(active.id,-1)}/><Button type="text" aria-label="前进" title="前进 (Alt+→)" icon={<ArrowRightOutlined/>} disabled={!nativeMode || !active.canGoForward} onClick={() => void navigateHistory(active.id,1)}/><Button type="text" aria-label={active.loading?'停止加载':'重新加载'} title={active.loading?'停止加载 (Esc)':'重新加载 (F5)'} icon={active.loading?<CloseOutlined/>:<ReloadOutlined/>} disabled={!nativeMode} onClick={() => void (active.loading ? stopNativeTab(active.id) : reloadNativeTab(active.id))}/><Button type="text" icon={<BookOutlined/>} onClick={() => void openReader()}>阅读模式</Button></Space><form onSubmit={event => { event.preventDefault(); void navigate(address) }}><AutoComplete value={address} options={addressSuggestions} onChange={setAddress} onSelect={value=>void navigate(value)}><Input ref={addressRef} prefix={<SafetyCertificateOutlined/>} suffix={<button type="button" className={`browser-star${starredDocId ? ' is-active' : ''}`} disabled={!active.url} aria-label={starredDocId ? '取消收藏' : '收藏当前页'} title={starredDocId ? '取消收藏' : '收藏当前页'} onClick={event => { event.preventDefault(); event.stopPropagation(); void toggleStarCurrent() }}><StarOutlined/></button>} onFocus={event=>event.currentTarget.select()} placeholder="搜索或输入网址"/></AutoComplete></form><Tag icon={<SafetyCertificateOutlined/>} color="green">43</Tag><Button type={aiOpen?'primary':'text'} ghost={aiOpen} icon={<RobotOutlined/>} onClick={()=>setAiOpen(value=>!value)}/><Popover trigger="click" placement="bottomRight" content={downloadPanel}><Badge size="small" count={downloads.filter(item=>item.status==='downloading').length}><Button type="text" aria-label="下载" icon={<DownloadOutlined/>}/></Badge></Popover><Dropdown menu={{items:browserMenu}} trigger={['click']}><Button type="text" aria-label="浏览器菜单" icon={<MoreOutlined/>}/></Dropdown></div>
     {findOpen&&<div className="browser-find"><Input autoFocus allowClear prefix={<SearchOutlined/>} value={findQuery} status={findStatus==='missing'?'error':undefined} placeholder="在页面中查找" onChange={event=>{setFindQuery(event.target.value);setFindStatus('idle')}} onPressEnter={event=>void runFind(event.shiftKey)}/><Typography.Text type={findStatus==='missing'?'danger':'secondary'}>{findStatus==='missing'?'未找到':findStatus==='found'?'已定位':''}</Typography.Text><Button type="text" aria-label="上一个匹配项" icon={<ArrowUpOutlined/>} onClick={()=>void runFind(true)}/><Button type="text" aria-label="下一个匹配项" icon={<ArrowDownOutlined/>} onClick={()=>void runFind(false)}/><Button type="text" aria-label="关闭查找" icon={<CloseOutlined/>} onClick={closeFind}/></div>}
     <PermissionPromptBar prompt={permissionPrompt} />
+    <RecoveryPanel
+      open={lockState !== null}
+      state={lockState}
+      onChoose={choice => void handleRecovery(choice)}
+    />
     {showSafety && (
       <div className={`browser-safety-warn browser-safety-warn--${safetyLevel}`} role="status">
         <SafetyCertificateOutlined />

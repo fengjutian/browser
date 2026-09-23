@@ -12,7 +12,29 @@ import { isSearchTemplateValid } from '../../features/browser/navigation'
 const PROVIDER_OPTIONS: { label: string; value: AIProviderType }[] = [
   { label: 'OpenAI 兼容（API Key）', value: 'openai-compatible' },
   { label: 'Ollama（本地）', value: 'ollama' },
+  { label: 'DeepSeek', value: 'deepseek' },
+  { label: 'Qwen（通义千问）', value: 'qwen' },
+  { label: 'Kimi（Moonshot）', value: 'kimi' },
+  { label: 'MiniMax', value: 'minimax' },
 ]
+
+const PROVIDER_PRESETS: Record<AIProviderType, { baseUrl: string; defaultModel: string; placeholderModel: string }> = {
+  'openai-compatible': { baseUrl: 'https://api.example.com/v1', defaultModel: 'gpt-4o-mini', placeholderModel: 'gpt-4o-mini' },
+  ollama: { baseUrl: 'http://localhost:11434', defaultModel: 'llama3.1', placeholderModel: 'llama3.1' },
+  deepseek: { baseUrl: 'https://api.deepseek.com/v1', defaultModel: 'deepseek-chat', placeholderModel: 'deepseek-chat' },
+  qwen: { baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1', defaultModel: 'qwen-plus', placeholderModel: 'qwen-plus' },
+  kimi: { baseUrl: 'https://api.moonshot.cn/v1', defaultModel: 'moonshot-v1-8k', placeholderModel: 'moonshot-v1-8k' },
+  minimax: { baseUrl: 'https://api.minimax.chat/v1', defaultModel: 'MiniMax-Text-01', placeholderModel: 'MiniMax-Text-01' },
+}
+
+const PROVIDER_TAG_COLOR: Record<AIProviderType, string> = {
+  'openai-compatible': 'purple',
+  ollama: 'geekblue',
+  deepseek: 'cyan',
+  qwen: 'magenta',
+  kimi: 'volcano',
+  minimax: 'gold',
+}
 
 interface ProviderFormValues {
   id?: string
@@ -133,11 +155,26 @@ function AIProviderSettings() {
   const [providers, setProviders] = useState<AIProvider[]>([])
   const [saving, setSaving] = useState(false)
   const [form] = Form.useForm<ProviderFormValues>()
-  const activeType = Form.useWatch('type', form)
+  const activeType: AIProviderType | undefined = Form.useWatch('type', form)
+  const editingId = Form.useWatch('id', form)
 
   async function refresh() { setProviders(await listAIProviders()) }
 
   useEffect(() => { void refresh() }, [])
+
+  // When the user switches provider type on a *new* (non-editing) form, prefill
+  // the Base URL with the vendor's default endpoint and seed the model field
+  // with the vendor's recommended default. We skip this when editing an existing
+  // provider so we never overwrite saved values.
+  useEffect(() => {
+    if (!activeType || editingId) return
+    const preset = PROVIDER_PRESETS[activeType]
+    const current = form.getFieldsValue(['baseUrl', 'model'])
+    form.setFieldsValue({
+      baseUrl: current.baseUrl?.trim() ? current.baseUrl : preset.baseUrl,
+      model: current.model?.trim() ? current.model : preset.defaultModel,
+    })
+  }, [activeType, editingId, form])
 
   async function handleEdit(provider: AIProvider) {
     form.setFieldsValue({
@@ -209,7 +246,7 @@ function AIProviderSettings() {
       <Space wrap>
         <Form.Item name="type" label="Provider 类型" rules={[{required:true}]}><Select options={PROVIDER_OPTIONS} style={{minWidth:220}}/></Form.Item>
         <Form.Item name="baseUrl" label="Base URL" rules={[{required:true,message:'请输入 Base URL'},{type:'url',message:'需为有效 http(s) URL'}]}><Input placeholder="https://api.example.com/v1" style={{minWidth:280}}/></Form.Item>
-        <Form.Item name="model" label="模型" rules={[{required:true,message:'请输入模型名称'}]}><Input placeholder="gpt-4o-mini" style={{minWidth:200}}/></Form.Item>
+        <Form.Item name="model" label="模型" rules={[{required:true,message:'请输入模型名称'}]}><Input placeholder={activeType ? PROVIDER_PRESETS[activeType].placeholderModel : 'gpt-4o-mini'} style={{minWidth:200}}/></Form.Item>
         <Form.Item name="embeddingModel" label="Embedding 模型（可选）"><Input placeholder="text-embedding-3-small" style={{minWidth:220}}/></Form.Item>
         <Form.Item name="timeoutSeconds" label="超时（秒）" rules={[{type:'number',min:1,max:600,message:'范围 1-600'}]}><InputNumber min={1} max={600} style={{width:120}}/></Form.Item>
         <Form.Item name="apiKey" label={activeType === 'ollama' ? 'API Key（可选）' : 'API Key'} tooltip="已保存的 Key 不会回显，留空表示不清除"><Input.Password prefix={<KeyOutlined/>} placeholder={activeType === 'ollama' ? '本地服务通常不需要' : 'sk-...'} style={{minWidth:260}} autoComplete="off"/></Form.Item>
@@ -223,7 +260,7 @@ function AIProviderSettings() {
     {providers.length === 0
       ? <Typography.Text type="secondary">尚未配置。</Typography.Text>
       : <List size="small" dataSource={providers} renderItem={provider => <List.Item key={provider.id} actions={[<Button size="small" icon={<ThunderboltOutlined/>} onClick={()=>void handleTest(provider)}>测试连接</Button>,<Button size="small" onClick={()=>void handleEdit(provider)}>编辑</Button>,<Button size="small" danger icon={<DeleteOutlined/>} onClick={()=>void handleDelete(provider)}>删除</Button>]}>
-          <List.Item.Meta title={<Space><Tag color={provider.type === 'ollama' ? 'geekblue' : 'purple'}>{provider.type}</Tag><span>{provider.model}</span><Tag>{provider.baseUrl}</Tag>{provider.hasApiKey && <Tag color="green" icon={<KeyOutlined/>}>密钥已配置</Tag>}</Space>} description={`超时 ${provider.timeoutSeconds}s${provider.embeddingModel ? ` · embedding ${provider.embeddingModel}` : ''} · 更新于 ${new Date(provider.updatedAt).toLocaleString()}`}/>
+          <List.Item.Meta title={<Space><Tag color={PROVIDER_TAG_COLOR[provider.type]}>{provider.type}</Tag><span>{provider.model}</span><Tag>{provider.baseUrl}</Tag>{provider.hasApiKey && <Tag color="green" icon={<KeyOutlined/>}>密钥已配置</Tag>}</Space>} description={`超时 ${provider.timeoutSeconds}s${provider.embeddingModel ? ` · embedding ${provider.embeddingModel}` : ''} · 更新于 ${new Date(provider.updatedAt).toLocaleString()}`}/>
         </List.Item>}/>}
     <Alert className="security-alert" icon={<SafetyCertificateOutlined/>} showIcon type="success" message="密钥只保存在本机" description="凭据由操作系统安全存储，不会写入应用日志或数据库。"/>
   </Card></>

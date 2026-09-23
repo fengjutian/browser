@@ -4,7 +4,13 @@ export type BrowserTabError = { kind: 'load-failed' | 'web-mode-required' | 'uns
 export interface Document { id:string; title:string; url:string; source?:string; author?:string; summary?:string; markdown?:string; wordCount:number; status:'PENDING'|'PROCESSING'|'READY'|'FAILED'|'ARCHIVED'; tags:string[]; autoTags?:string[]; createdAt:string; starred:boolean }
 export type TaskStatus = 'PENDING' | 'PROCESSING' | 'COMPLETED' | 'FAILED'
 export interface Task { id:string; kind:string; documentId?:string; payload:string; status:TaskStatus; attempts:number; maxAttempts:number; availableAt:string; startedAt?:string; finishedAt?:string; lastError?:string }
-export type AIProviderType = 'openai-compatible' | 'ollama'
+export type AIProviderType =
+  | 'openai-compatible'
+  | 'ollama'
+  | 'deepseek'
+  | 'qwen'
+  | 'kimi'
+  | 'minimax'
 export interface AIProvider { id:string; type:AIProviderType; baseUrl:string; model:string; embeddingModel?:string; timeoutSeconds:number; hasApiKey:boolean; createdAt:string; updatedAt:string }
 export interface ChatMessage { role: string; content: string }
 export interface ChatRequest { messages: ChatMessage[]; temperature?: number; maxTokens?: number }

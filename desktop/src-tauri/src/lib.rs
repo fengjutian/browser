@@ -3,6 +3,8 @@ pub mod downloads;
 pub mod local_store;
 pub mod plugins;
 pub mod providers;
+pub mod session_lock;
+pub mod webview_compat;
 
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
@@ -832,7 +834,7 @@ async fn ai_chat(
         .and_then(|entry| entry.get_password().ok())
         .filter(|value| !value.is_empty());
     let provider: Box<dyn AiProvider> = match provider_type.as_str() {
-        "openai-compatible" => Box::new(providers::openai::OpenAICompatibleProvider {
+        "openai-compatible" | "deepseek" | "qwen" | "kimi" | "minimax" => Box::new(providers::openai::OpenAICompatibleProvider {
             base_url,
             model,
             api_key: api_key.clone(),
@@ -872,7 +874,7 @@ async fn ai_test_provider(
     let timeout = Duration::from_secs(timeout_seconds.clamp(1, 600) as u64);
     let client = reqwest::Client::builder().timeout(timeout).build().map_err(|error| error.to_string())?;
     let (endpoint, needs_auth) = match provider_type.as_str() {
-        "openai-compatible" => (format!("{}/models", base_url.trim_end_matches('/')), true),
+        "openai-compatible" | "deepseek" | "qwen" | "kimi" | "minimax" => (format!("{}/models", base_url.trim_end_matches('/')), true),
         "ollama" => (format!("{}/api/tags", base_url.trim_end_matches('/')), false),
         other => return Err(format!("unknown provider type: {other}")),
     };
@@ -911,7 +913,7 @@ async fn ai_test_provider(
             .unwrap_or_default(),
         _ => vec![],
     };
-    Ok(ProviderTestResult { ok: true, endpoint, status: Some(status.as_u16()), models, message: format!("连接成功，发现 {} 个模型", match provider_type.as_str() { "openai-compatible" => serde_json::from_str::<serde_json::Value>(&text).ok().and_then(|v| v.get("data").and_then(|d| d.as_array()).map(|a| a.len())).unwrap_or(0), "ollama" => serde_json::from_str::<serde_json::Value>(&text).ok().and_then(|v| v.get("models").and_then(|d| d.as_array()).map(|a| a.len())).unwrap_or(0), _ => 0 }) })
+    Ok(ProviderTestResult { ok: true, endpoint, status: Some(status.as_u16()), models, message: format!("连接成功，发现 {} 个模型", match provider_type.as_str() { "openai-compatible" | "deepseek" | "qwen" | "kimi" | "minimax" => serde_json::from_str::<serde_json::Value>(&text).ok().and_then(|v| v.get("data").and_then(|d| d.as_array()).map(|a| a.len())).unwrap_or(0), "ollama" => serde_json::from_str::<serde_json::Value>(&text).ok().and_then(|v| v.get("models").and_then(|d| d.as_array()).map(|a| a.len())).unwrap_or(0), _ => 0 }) })
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -928,7 +930,27 @@ pub fn run() {
             if let Some(window) = app.get_webview_window("main") {
                 window.set_icon(icon)?;
             }
+            // Write the session lock so the next boot can detect a crash.
+            if let Ok(database) = local_store::connection(app.handle()) {
+                let now = chrono::Utc::now().timestamp();
+                if let Err(error) = session_lock::write_lock(&database, now) {
+                    eprintln!("session_lock: write_lock failed: {error}");
+                }
+            }
             Ok(())
+        })
+        .on_window_event(|window, event| {
+            // Tauri 2 surfaces WindowEvent::CloseRequested for every window;
+            // we treat any of them as a graceful exit and clear the lock.
+            // SIGKILL / power loss will leave the lock row in place.
+            if let tauri::WindowEvent::CloseRequested { .. } = event {
+                if let Ok(database) = local_store::connection(window.app_handle()) {
+                    let now = chrono::Utc::now().timestamp();
+                    if let Err(error) = session_lock::clear_lock(&database, now) {
+                        eprintln!("session_lock: clear_lock failed: {error}");
+                    }
+                }
+            }
         })
         .invoke_handler(tauri::generate_handler![
             validate_navigation,
@@ -990,7 +1012,12 @@ pub fn run() {
             local_store::local_import_backup,
             local_store::local_migration_status,
             browser_permission_request,
-            browser_permission_respond
+            browser_permission_respond,
+            session_lock::browser_session_status,
+            session_lock::browser_session_drop,
+            webview_compat::shell_open,
+            webview_compat::toggle_fullscreen,
+            webview_compat::pick_files
         ])
         .run(tauri::generate_context!())
         .expect("error while running AI Knowledge Browser");
