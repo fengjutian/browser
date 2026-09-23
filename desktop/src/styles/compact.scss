@@ -1174,6 +1174,25 @@ body[data-theme='dark'] {
     &.browser-tab--suspended {
       .browser-tab-title { opacity: .58; }
     }
+
+    &.browser-tab--muted {
+      .browser-tab-title > .browser-tab-audio {
+        color: #9aa39c;
+      }
+    }
+
+    &.browser-tab--crashed {
+      .browser-tab-title {
+        color: #b3261e;
+      }
+      .browser-tab-title > .browser-tab-crash {
+        color: #b3261e;
+      }
+    }
+
+    &.browser-tab--grouped {
+      box-shadow: inset 0 -2px 0 var(--tab-group-color, rgba(167, 223, 189, .85));
+    }
   }
 
   .ant-tabs-tab-btn,

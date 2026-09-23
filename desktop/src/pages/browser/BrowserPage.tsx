@@ -1,6 +1,6 @@
 import { MouseEvent, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import { AutoComplete, Badge, Button, Card, Dropdown, Input, Popover, Segmented, Select, Space, Tabs, Tag, Tooltip, Typography, message, type InputRef, type MenuProps } from 'antd'
-import { ArrowDownOutlined, ArrowLeftOutlined, ArrowRightOutlined, ArrowUpOutlined, BookOutlined, CheckCircleOutlined, CloseCircleOutlined, CloseOutlined, CopyOutlined, DownloadOutlined, FullscreenOutlined, GlobalOutlined, LoadingOutlined, MoreOutlined, PlusOutlined, PrinterOutlined, ReloadOutlined, SafetyCertificateOutlined, SaveOutlined, SearchOutlined, StarOutlined, ThunderboltOutlined, TranslationOutlined } from '@ant-design/icons'
+import { ArrowDownOutlined, ArrowLeftOutlined, ArrowRightOutlined, ArrowUpOutlined, AudioMutedOutlined, BookOutlined, CheckCircleOutlined, CloseCircleOutlined, CloseOutlined, CopyOutlined, DownloadOutlined, FullscreenOutlined, GlobalOutlined, LoadingOutlined, MoreOutlined, PlusOutlined, PrinterOutlined, ReloadOutlined, SafetyCertificateOutlined, SaveOutlined, SearchOutlined, SoundOutlined, StarOutlined, ThunderboltOutlined, TranslationOutlined, WarningOutlined } from '@ant-design/icons'
 import { Sparkles as RobotOutlined } from 'lucide-react'
 import type { BrowserTab, BrowserTabError } from '../../types'
 import { findDocumentByUrl, getBrowserShortcutsEnabled, getDocument, getSession, saveDocument, setSession, toggleStarred } from '../../api'
@@ -11,6 +11,7 @@ import { classifySaveError } from '../../features/documents/saveClassifier'
 import { useDebouncedValue } from '../../shared/hooks/useDebouncedValue'
 import { dedupeHistory, HISTORY_CHANGE_EVENT, parseHistory, type HistoryEntry } from '../../features/history/dedupeHistory'
 import { reorderTabs } from '../../features/browser/reorderTabs'
+import { groupTabsByOrigin, idsToCloseForSameDomain } from '../../features/browser/tabGrouping'
 import { interpretShortcut } from '../../features/browser/shortcuts'
 import { popClosedTab, recordClosedTab, type ClosedTab } from '../../features/browser/closedTabs'
 import { AssistantPanel } from '../../features/ai/AssistantPanel'
@@ -40,6 +41,13 @@ const SESSION_DEBOUNCE_MS = 500
 const HISTORY_KEY = 'browser.history'
 const CLOSED_KEY = 'browser.closed'
 const MAX_LIVE_WEBVIEWS = 8
+const TAB_GROUP_PALETTE = ['#a7dfbd', '#9bc6e8', '#dfc0a7', '#c8a7df', '#dfb5b5', '#bce0c6']
+const tabGroupColor = (id: string | null | undefined): string => {
+  if (!id) return 'transparent'
+  let hash = 0
+  for (let i = 0; i < id.length; i += 1) hash = (hash * 31 + id.charCodeAt(i)) >>> 0
+  return TAB_GROUP_PALETTE[hash % TAB_GROUP_PALETTE.length]
+}
 
 interface QuickSite {
   name: string
@@ -339,7 +347,7 @@ export function BrowserPage({ visible = true, onSearchKnowledge }: { visible?: b
     visible,
     enabled: nativeMode && hasNativeTab(active.id),
     onApply: (patch) => {
-      setTabs(current => current.map(tab => tab.id === active.id ? { ...tab, ...patch } : tab))
+      setTabs(current => current.map(tab => tab.id === active.id ? { ...tab, ...patch, crashed: false } : tab))
       if (typeof patch.url === 'string') setAddress(patch.url)
     },
     onReopen: () => {
@@ -347,8 +355,9 @@ export function BrowserPage({ visible = true, onSearchKnowledge }: { visible?: b
       const nextBounds = bounds()
       if (!tab?.url || !nextBounds) return
       tabRuntime.enqueueScroll(tab.id, { x: tab.scrollX ?? 0, y: tab.scrollY ?? 0 })
+      setTabs(current => current.map(item => item.id === tab.id ? { ...item, crashed: true, loading: true, error: undefined } : item))
       void openNativeTab(tab.id, tab.url, nextBounds).catch(error => {
-        setTabs(current => current.map(item => item.id === tab.id ? { ...item, loading: false, error: classifyNavigationError(error) } : item))
+        setTabs(current => current.map(item => item.id === tab.id ? { ...item, loading: false, crashed: true, error: classifyNavigationError(error) } : item))
       })
     },
   })
@@ -466,7 +475,7 @@ export function BrowserPage({ visible = true, onSearchKnowledge }: { visible?: b
       } catch { /* ignore non-http inputs */ }
     }
     setReaderArticle(null)
-    setTabs(current => current.map(tab => tab.id === tabId ? { ...tab, url, title: input.trim(), loading: true, error: undefined } : tab))
+    setTabs(current => current.map(tab => tab.id === tabId ? { ...tab, url, title: input.trim(), loading: true, error: undefined, crashed: false } : tab))
     await new Promise(resolve => requestAnimationFrame(resolve))
     const nextBounds = bounds()
     if (!nextBounds) return
@@ -572,6 +581,20 @@ export function BrowserPage({ visible = true, onSearchKnowledge }: { visible?: b
     const url = active.url
     if (!url) return
     await navigate(url)
+  }
+
+  async function retryTab(id: string) {
+    const target = tabsRef.current.find(item => item.id === id)
+    if (!target?.url) return
+    setTabs(current => current.map(item => item.id === id ? { ...item, crashed: false, loading: true, error: undefined } : item))
+    const nextBounds = bounds()
+    if (!nextBounds) return
+    try {
+      await openNativeTab(target.id, target.url, nextBounds)
+      await enforceLiveTabLimit(target.id)
+    } catch (error) {
+      setTabs(current => current.map(item => item.id === id ? { ...item, loading: false, error: classifyNavigationError(error) } : item))
+    }
   }
 
   async function copyUrl() {
@@ -742,6 +765,22 @@ export function BrowserPage({ visible = true, onSearchKnowledge }: { visible?: b
     })
   }
 
+  function toggleMuted(id: string) {
+    setTabs(current => current.map(tab => {
+      if (tab.id !== id) return tab
+      const nextMuted = !tab.muted
+      // Marking muted clears any audible hint we previously set on the
+      // client; unmuting just flips the flag back so the speaker reappears.
+      return { ...tab, muted: nextMuted, audible: nextMuted ? false : tab.audible }
+    }))
+  }
+
+  function closeDomain(anchorId: string) {
+    const targets = idsToCloseForSameDomain(tabs, anchorId)
+    if (!targets.length) return
+    closeTabs(targets)
+  }
+
   function closeTabs(ids: string[]) {
     const targets = new Set(ids)
     ids.forEach(id => { void closeNativeTab(id) })
@@ -766,18 +805,27 @@ export function BrowserPage({ visible = true, onSearchKnowledge }: { visible?: b
   }
 
   function tabMenu(tab: BrowserTab, index: number): MenuProps['items'] {
+    const sameDomainCount = idsToCloseForSameDomain(tabs, tab.id).length
     const items: NonNullable<MenuProps['items']> = [
       { key: 'reload', label: '重新加载', disabled: !hasNativeTab(tab.id), onClick: () => void reloadNativeTab(tab.id) },
       { key: 'duplicate', label: '复制标签页', disabled: !tab.url, onClick: () => duplicateTab(tab) },
       { key: 'pin', label: tab.pinned ? '取消固定' : '固定标签页', onClick: () => togglePinned(tab.id) },
+      { key: 'mute', label: tab.muted ? '取消静音此标签页' : '静音此标签页', onClick: () => toggleMuted(tab.id) },
       { type: 'divider' },
-      { key: 'close', label: '关闭标签页', onClick: () => closeTab(tab.id) },
+      { key: 'close', label: '关闭标签页', disabled: tab.pinned, onClick: () => closeTab(tab.id) },
       { key: 'close-others', label: '关闭其他标签页', disabled: tabs.length < 2, onClick: () => closeTabs(tabs.filter(item => item.id !== tab.id && !item.pinned).map(item => item.id)) },
       { key: 'close-right', label: '关闭右侧标签页', disabled: index === tabs.length - 1, onClick: () => closeTabs(tabs.slice(index + 1).filter(item => !item.pinned).map(item => item.id)) },
+      { key: 'close-domain', label: sameDomainCount > 0 ? `关闭同域标签页（${sameDomainCount} 个）` : '关闭同域标签页', disabled: sameDomainCount === 0, onClick: () => closeDomain(tab.id) },
     ]
+    if (tab.crashed) {
+      items.unshift({ key: 'reopen', label: '重新打开崩溃的标签页', onClick: () => void retryTab(tab.id) })
+      items.splice(1, 0, { type: 'divider', key: 'crashed-divider' })
+    }
     if (tab.private) {
-      items.splice(3, 0, { type: 'divider', key: 'private-divider' })
-      items.splice(4, 0, { key: 'private-info', label: '私密窗口：不会写入历史与会话', disabled: true })
+      const insertAt = items.findIndex(item => item && 'key' in item && item.key === 'close-domain')
+      const dividerAt = insertAt > 0 ? insertAt + 1 : items.length
+      items.splice(dividerAt, 0, { type: 'divider', key: 'private-divider' })
+      items.push({ key: 'private-info', label: '私密窗口：不会写入历史与会话', disabled: true })
     }
     return items
   }
@@ -940,9 +988,13 @@ export function BrowserPage({ visible = true, onSearchKnowledge }: { visible?: b
   }
 
   return <div className="browser-page">{contextHolder}
-    <div className="browser-tabs" style={{ '--tab-count': tabs.length } as CSSProperties}><Tabs type="editable-card" items={tabs.map((tab, index) => {
+    <div className="browser-tabs" style={{ '--tab-count': tabs.length } as CSSProperties}><Tabs type="editable-card" items={(() => {
+          const groupDecisions = groupTabsByOrigin(tabs)
+          return tabs.map((tab, index) => {
           const isDragging = draggingIndex === index
           const isDropTarget = dragOverIndex === index && draggingIndex !== null && draggingIndex !== index
+          const group = groupDecisions[index]
+          const groupColor = tabGroupColor(group.groupId)
           return {
             key: tab.id,
             label: <Dropdown menu={{ items: tabMenu(tab, index) }} trigger={['contextMenu']}>
@@ -955,13 +1007,14 @@ export function BrowserPage({ visible = true, onSearchKnowledge }: { visible?: b
                 onDrop={onTabDrop(index)}
                 onDragEnd={onTabDragEnd}
                 className={`browser-tab-title${isDragging ? ' is-dragging' : ''}${isDropTarget ? ' is-drop-target' : ''}${tab.private ? ' browser-tab-title--private' : ''}`}
-              >{tab.loading ? <LoadingOutlined spin/> : tab.private ? <LockOutlined /> : tab.favicon ? <img src={tab.favicon} alt=""/> : <GlobalOutlined/>}<span>{tab.title}</span></span>
+              >{tab.crashed ? <WarningOutlined aria-label="标签页崩溃" className="browser-tab-crash"/> : tab.loading ? <LoadingOutlined spin/> : tab.private ? <LockOutlined /> : tab.favicon ? <img src={tab.favicon} alt=""/> : <GlobalOutlined/>}{tab.muted ? <Tooltip title="已静音" mouseEnterDelay={0.6}><AudioMutedOutlined aria-label="已静音" className="browser-tab-audio"/></Tooltip> : tab.audible ? <Tooltip title="正在播放音频" mouseEnterDelay={0.6}><SoundOutlined aria-label="正在播放音频" className="browser-tab-audio"/></Tooltip> : null}<span>{tab.title}</span></span>
               </Tooltip>
             </Dropdown>,
-            className: `${tab.pinned ? 'browser-tab--pinned ' : ''}${tab.suspended ? 'browser-tab--suspended' : ''}${tab.private ? ' browser-tab--private' : ''}`.trim() || undefined,
+            style: group.groupId ? ({ '--tab-group-color': groupColor } as CSSProperties) : undefined,
+            className: `${tab.pinned ? 'browser-tab--pinned ' : ''}${tab.suspended ? 'browser-tab--suspended' : ''}${tab.private ? ' browser-tab--private' : ''}${tab.muted ? ' browser-tab--muted' : ''}${tab.crashed ? ' browser-tab--crashed' : ''}${group.groupId ? ' browser-tab--grouped' : ''}`.trim() || undefined,
             closable: tabs.length > 1 && !tab.pinned,
           }
-        })} activeKey={activeTabId} onChange={activateTab} addIcon={<Tooltip title="新建标签页 (Ctrl+T)"><PlusOutlined aria-label="新建标签页"/></Tooltip>} onEdit={(target, action) => action === 'add' ? openNewTab() : closeTab(String(target))}/></div>
+        })})()} activeKey={activeTabId} onChange={activateTab} addIcon={<Tooltip title="新建标签页 (Ctrl+T)"><PlusOutlined aria-label="新建标签页"/></Tooltip>} onEdit={(target, action) => action === 'add' ? openNewTab() : closeTab(String(target))}/></div>
     <div className="browser-toolbar"><Space><Button type="text" aria-label="后退" title="后退 (Alt+←)" icon={<ArrowLeftOutlined/>} disabled={!nativeMode || !active.canGoBack} onClick={() => void navigateHistory(active.id,-1)}/><Button type="text" aria-label="前进" title="前进 (Alt+→)" icon={<ArrowRightOutlined/>} disabled={!nativeMode || !active.canGoForward} onClick={() => void navigateHistory(active.id,1)}/><Button type="text" aria-label={active.loading?'停止加载':'重新加载'} title={active.loading?'停止加载 (Esc)':'重新加载 (F5)'} icon={active.loading?<CloseOutlined/>:<ReloadOutlined/>} disabled={!nativeMode} onClick={() => void (active.loading ? stopNativeTab(active.id) : reloadNativeTab(active.id))}/><Button type="text" icon={<BookOutlined/>} onClick={() => void openReader()}>阅读模式</Button></Space><form onSubmit={event => { event.preventDefault(); void navigate(address) }}><AutoComplete value={address} options={addressSuggestions} onChange={setAddress} onSelect={value=>void navigate(value)}><Input ref={addressRef} prefix={<SafetyCertificateOutlined/>} suffix={<button type="button" className={`browser-star${starredDocId ? ' is-active' : ''}`} disabled={!active.url} aria-label={starredDocId ? '取消收藏' : '收藏当前页'} title={starredDocId ? '取消收藏' : '收藏当前页'} onClick={event => { event.preventDefault(); event.stopPropagation(); void toggleStarCurrent() }}><StarOutlined/></button>} onFocus={event=>event.currentTarget.select()} placeholder="搜索或输入网址"/></AutoComplete></form><Tag icon={<SafetyCertificateOutlined/>} color="green">43</Tag><Button type={aiOpen?'primary':'text'} ghost={aiOpen} icon={<RobotOutlined/>} onClick={()=>setAiOpen(value=>!value)}/><Popover trigger="click" placement="bottomRight" content={downloadPanel}><Badge size="small" count={downloads.filter(item=>item.status==='downloading').length}><Button type="text" aria-label="下载" icon={<DownloadOutlined/>}/></Badge></Popover><Dropdown menu={{items:browserMenu}} trigger={['click']}><Button type="text" aria-label="浏览器菜单" icon={<MoreOutlined/>}/></Dropdown></div>
     {findOpen&&<div className="browser-find"><Input autoFocus allowClear prefix={<SearchOutlined/>} value={findQuery} status={findStatus==='missing'?'error':undefined} placeholder="在页面中查找" onChange={event=>{setFindQuery(event.target.value);setFindStatus('idle')}} onPressEnter={event=>void runFind(event.shiftKey)}/><Typography.Text type={findStatus==='missing'?'danger':'secondary'}>{findStatus==='missing'?'未找到':findStatus==='found'?'已定位':''}</Typography.Text><Button type="text" aria-label="上一个匹配项" icon={<ArrowUpOutlined/>} onClick={()=>void runFind(true)}/><Button type="text" aria-label="下一个匹配项" icon={<ArrowDownOutlined/>} onClick={()=>void runFind(false)}/><Button type="text" aria-label="关闭查找" icon={<CloseOutlined/>} onClick={closeFind}/></div>}
     <PermissionPromptBar prompt={permissionPrompt} />
@@ -981,8 +1034,10 @@ export function BrowserPage({ visible = true, onSearchKnowledge }: { visible?: b
     )}
     <div className="browser-content"><div className="web-surface" ref={surfaceRef}>{readerArticle
       ? <ReaderArticleView article={readerArticle}/>
-      : active.error
-        ? <BrowserErrorView tab={active} onRetry={retryActive} onNewTab={openNewTab} onCopy={copyUrl}/>
+      : active.crashed
+        ? <BrowserErrorView tab={{...active, error:{kind:'load-failed',message:'此标签页的底层视图已停止响应，可点击"重新打开"恢复。'}}} onRetry={retryActive} onNewTab={openNewTab} onCopy={copyUrl}/>
+        : active.error
+          ? <BrowserErrorView tab={active} onRetry={retryActive} onNewTab={openNewTab} onCopy={copyUrl}/>
         : nativeMode
           ? null
           : active.loading
