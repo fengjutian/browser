@@ -23,13 +23,18 @@ const PROVIDER_OPTIONS: { label: string; value: AIProviderType }[] = [
 ]
 
 const PROVIDER_PRESETS: Record<AIProviderType, { baseUrl: string; defaultModel: string; placeholderModel: string; embeddingModel?: string; embeddingPlaceholder: string }> = {
-  'openai-compatible': { baseUrl: 'https://api.openai.com/v1', defaultModel: 'gpt-4o-mini', placeholderModel: 'gpt-4o-mini', embeddingModel: 'text-embedding-3-small', embeddingPlaceholder: 'text-embedding-3-small' },
+  'openai-compatible': { baseUrl: 'https://api.siliconflow.cn/v1', defaultModel: 'Qwen/Qwen3.6-27B', placeholderModel: 'Qwen/Qwen3.6-27B', embeddingModel: 'BAAI/bge-m3', embeddingPlaceholder: 'BAAI/bge-m3' },
   ollama: { baseUrl: 'http://localhost:11434', defaultModel: 'llama3.1', placeholderModel: 'llama3.1', embeddingModel: 'nomic-embed-text', embeddingPlaceholder: 'nomic-embed-text' },
   deepseek: { baseUrl: 'https://api.deepseek.com', defaultModel: 'deepseek-flash', placeholderModel: 'deepseek-flash', embeddingPlaceholder: '该 Provider 暂无通用 Embedding 默认值' },
   qwen: { baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1', defaultModel: 'qwen-plus', placeholderModel: 'qwen-plus', embeddingModel: 'text-embedding-v3', embeddingPlaceholder: 'text-embedding-v3' },
   kimi: { baseUrl: 'https://api.moonshot.cn/v1', defaultModel: 'moonshot-v1-8k', placeholderModel: 'moonshot-v1-8k', embeddingPlaceholder: '该 Provider 暂无通用 Embedding 默认值' },
-  minimax: { baseUrl: 'https://api.minimax.chat/v1', defaultModel: 'MiniMax-Text-01', placeholderModel: 'MiniMax-Text-01', embeddingModel: 'embo-01', embeddingPlaceholder: 'embo-01' },
+  minimax: { baseUrl: 'https://api.minimaxi.com/v1', defaultModel: 'MiniMax-M3', placeholderModel: 'MiniMax-M3', embeddingPlaceholder: 'MiniMax 暂无通用 Embedding 默认值' },
 }
+
+const MINIMAX_MODEL_OPTIONS = [
+  { label: 'MiniMax M3（最新）', value: 'MiniMax-M3' },
+  { label: 'MiniMax M2.7', value: 'MiniMax-M2.7' },
+]
 
 const PROVIDER_TAG_COLOR: Record<AIProviderType, string> = {
   'openai-compatible': 'purple',
@@ -159,6 +164,7 @@ function AIProviderSettings() {
   const [messageApi, contextHolder] = message.useMessage()
   const [providers, setProviders] = useState<AIProvider[]>([])
   const [saving, setSaving] = useState(false)
+  const [testing, setTesting] = useState(false)
   const [form] = Form.useForm<ProviderFormValues>()
   const activeType: AIProviderType | undefined = Form.useWatch('type', form)
   const editingId = Form.useWatch('id', form)
@@ -258,18 +264,55 @@ function AIProviderSettings() {
     }
   }
 
+  async function handleTestCurrent() {
+    setTesting(true)
+    const key = 'test-current-provider'
+    try {
+      const values = await form.validateFields()
+      messageApi.open({ key, type: 'loading', content: '正在保存并测试连接…', duration: 0 })
+      const saved = await saveAIProvider({
+        id: values.id,
+        type: values.type,
+        baseUrl: values.baseUrl.trim(),
+        model: values.model.trim(),
+        embeddingModel: values.embeddingModel?.trim() || undefined,
+        timeoutSeconds: values.timeoutSeconds,
+        apiKey: values.apiKey?.trim() || undefined,
+        clearApiKey: false,
+      })
+      form.setFieldValue('id', saved.id)
+      await refresh()
+      const result = await aiTestProvider(saved.id)
+      messageApi.open({
+        key,
+        type: result.ok ? 'success' : 'error',
+        content: result.ok ? `${result.message}（${result.endpoint}）` : result.message,
+        duration: 4,
+      })
+    } catch (error) {
+      messageApi.open({ key, type: 'error', content: error instanceof Error ? error.message : '测试失败', duration: 4 })
+    } finally {
+      setTesting(false)
+    }
+  }
+
   return <>{contextHolder}<Card title="AI Provider" className="settings-card"><Typography.Paragraph type="secondary">连接兼容 Provider，用于摘要、翻译和知识问答。普通配置写入本地 SQLite，API Key 通过操作系统密钥环保存；前端不会回显 Key 明文。</Typography.Paragraph>
     <Form form={form} layout="vertical" initialValues={{type:'openai-compatible',timeoutSeconds:60}} onFinish={handleSubmit}>
       <Space wrap>
         <Form.Item name="type" label="Provider 类型" rules={[{required:true}]}><Select options={PROVIDER_OPTIONS} style={{minWidth:220}} onChange={handleProviderTypeChange}/></Form.Item>
         <Form.Item name="baseUrl" label="Base URL" rules={[{required:true,message:'请输入 Base URL'},{type:'url',message:'需为有效 http(s) URL'}]}><Input placeholder="https://api.example.com/v1" style={{minWidth:280}}/></Form.Item>
-        <Form.Item name="model" label="模型" rules={[{required:true,message:'请输入模型名称'}]}><Input placeholder={activeType ? PROVIDER_PRESETS[activeType].placeholderModel : 'gpt-4o-mini'} style={{minWidth:200}}/></Form.Item>
+        <Form.Item name="model" label="模型" rules={[{required:true,message:'请输入模型名称'}]}>
+          {activeType === 'minimax'
+            ? <Select options={MINIMAX_MODEL_OPTIONS} style={{minWidth:250}}/>
+            : <Input placeholder={activeType ? PROVIDER_PRESETS[activeType].placeholderModel : 'Qwen/Qwen3.6-27B'} style={{minWidth:250}}/>}
+        </Form.Item>
         <Form.Item name="embeddingModel" label="Embedding 模型（可选）"><Input placeholder={activeType ? PROVIDER_PRESETS[activeType].embeddingPlaceholder : 'text-embedding-3-small'} style={{minWidth:220}}/></Form.Item>
         <Form.Item name="timeoutSeconds" label="超时（秒）" rules={[{type:'number',min:1,max:600,message:'范围 1-600'}]}><InputNumber min={1} max={600} style={{width:120}}/></Form.Item>
         <Form.Item name="apiKey" label={activeType === 'ollama' ? 'API Key（可选）' : 'API Key'} tooltip="已保存的 Key 不会回显，留空表示不清除"><Input.Password prefix={<KeyOutlined/>} placeholder={activeType === 'ollama' ? '本地服务通常不需要' : 'sk-...'} style={{minWidth:260}} autoComplete="off"/></Form.Item>
       </Space>
       <Space>
         <Button type="primary" htmlType="submit" icon={<SaveOutlined/>} loading={saving}>保存到密钥环</Button>
+        <Button icon={<ThunderboltOutlined/>} loading={testing} onClick={() => void handleTestCurrent()}>测试连接</Button>
         <Button onClick={()=>form.resetFields()}>清空</Button>
       </Space>
     </Form>
