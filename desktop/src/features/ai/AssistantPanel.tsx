@@ -168,7 +168,7 @@ export function AssistantPanel({ close, saveToLibrary, currentUrl, currentTabId,
           {label:'详细',value:'detailed'},
           {label:'观点',value:'key-points'},
         ]}/>
-        <Space direction="vertical" className="panel-actions">
+        <Space orientation="vertical" className="panel-actions">
           <Button block icon={<ThunderboltOutlined/>} onClick={() => void generateSummary()} loading={busy} disabled={noProvider || noArticle}>生成 {summaryKindLabel(kind)}</Button>
           <Button block icon={<CopyOutlined/>} onClick={() => void copyText(summary)} disabled={!summary}>复制摘要</Button>
           <Button block icon={<ThunderboltOutlined/>} onClick={() => void generateSummary()} disabled={busy || noProvider || !summary}>重新生成</Button>
@@ -179,7 +179,7 @@ export function AssistantPanel({ close, saveToLibrary, currentUrl, currentTabId,
           {!busy && !error && summary && <Typography.Paragraph style={{whiteSpace:'pre-wrap'}}>{summary}</Typography.Paragraph>}
           {!busy && !error && !summary && <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="生成结果将出现在这里"/>}
         </Card>
-        <Space direction="vertical" style={{width:'100%'}}>
+        <Space orientation="vertical" style={{width:'100%'}}>
           <Button block icon={<SaveOutlined/>} onClick={() => void saveAsDocumentSummary()} disabled={!summary}>把摘要写回文档</Button>
           <Button block onClick={() => void saveToLibrary()}>保存到知识库</Button>
         </Space>
@@ -188,7 +188,7 @@ export function AssistantPanel({ close, saveToLibrary, currentUrl, currentTabId,
 
     {mode === 'ask' && (
       <>
-        <Space direction="vertical" className="panel-actions" style={{width:'100%'}}>
+        <Space orientation="vertical" className="panel-actions" style={{width:'100%'}}>
           <Input.TextArea autoSize={{minRows:2,maxRows:4}} value={question} onChange={event => setQuestion(event.target.value)} placeholder="向当前页面提问…" disabled={busy}/>
           <Button block type="primary" icon={<ArrowRightOutlined/>} onClick={() => void askQuestion()} loading={busy} disabled={noProvider || noArticle || !question.trim()}>提问</Button>
         </Space>
@@ -225,7 +225,7 @@ export function AssistantPanel({ close, saveToLibrary, currentUrl, currentTabId,
             {label:TRANSLATION_VIEW_LABEL.bilingual,value:'bilingual'},
           ]}/>
         </Space>
-        <Space direction="vertical" className="panel-actions" style={{width:'100%'}}>
+        <Space orientation="vertical" className="panel-actions" style={{width:'100%'}}>
           <Button block type="primary" icon={<TranslationOutlined/>} onClick={() => void translateArticle()} loading={busy} disabled={noProvider || noArticle}>翻译当前页面</Button>
           <Button block icon={<CopyOutlined/>} onClick={() => void copyText(translation)} disabled={!translation}>复制译文</Button>
         </Space>

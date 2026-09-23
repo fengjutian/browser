@@ -60,7 +60,7 @@ export function TabSearchPalette({ open, tabs, activeId, onClose, onPick, onClos
     open={open}
     footer={null}
     closable={false}
-    destroyOnClose
+    destroyOnHidden
     width={620}
     onCancel={onClose}
     styles={{ body: { padding: 0 } }}

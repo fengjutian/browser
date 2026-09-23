@@ -60,7 +60,7 @@ export function BookmarkSearchPalette({ open, bookmarks, onClose, onOpen, onRemo
     open={open}
     footer={null}
     closable={false}
-    destroyOnClose
+    destroyOnHidden
     width={680}
     onCancel={onClose}
     styles={{ body: { padding: 0 } }}

@@ -96,7 +96,7 @@ export function DownloadCenter({ center, limit = 200 }: DownloadCenterProps) {
       dataIndex: 'fileName',
       key: 'fileName',
       render: (_, record) => (
-        <Space direction="vertical" size={0}>
+        <Space orientation="vertical" size={0}>
           <Typography.Text strong ellipsis={{ tooltip: fileNameOf(record) }} style={{ maxWidth: 320 }}>
             {fileNameOf(record)}
           </Typography.Text>

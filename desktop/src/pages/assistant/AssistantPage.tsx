@@ -199,7 +199,7 @@ export function AssistantPage({ onNavigate }: { onNavigate?: (view: View) => voi
                 <span className="assistant-avatar"><RobotOutlined /></span>
                 <Typography.Title level={2}>你想了解什么？</Typography.Title>
                 <Typography.Paragraph>比较观点、发现联系，或把真实浏览资料整理成研究简报。</Typography.Paragraph>
-                <Space direction="vertical">
+                <Space orientation="vertical">
                   {SUGGESTED_PROMPTS.map(text => (
                     <Button key={text} onClick={() => applySuggestion(text)} disabled={noProvider}>{text}</Button>
                   ))}
@@ -229,7 +229,7 @@ export function AssistantPage({ onNavigate }: { onNavigate?: (view: View) => voi
                         <List.Item.Meta
                           avatar={<Avatar icon={<RobotOutlined />} style={{ background: '#16241f' }} />}
                           title={
-                            <Space direction="vertical" size={6} style={{ width: '100%' }}>
+                            <Space orientation="vertical" size={6} style={{ width: '100%' }}>
                               {turn.pending && <Spin size="small" />}
                               {!turn.pending && turn.error && <Alert type="error" message={turn.error} />}
                               {!turn.pending && !turn.error && turn.notFound && <Alert type="info" message={turn.content} />}

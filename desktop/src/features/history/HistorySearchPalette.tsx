@@ -72,7 +72,7 @@ export function HistorySearchPalette({ open, history, onClose, onOpen, onRemove,
     open={open}
     footer={null}
     closable={false}
-    destroyOnClose
+    destroyOnHidden
     width={680}
     onCancel={onClose}
     styles={{ body: { padding: 0 } }}

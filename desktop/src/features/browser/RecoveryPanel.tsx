@@ -30,14 +30,14 @@ export function RecoveryPanel({ open, state, onChoose }: RecoveryPanelProps) {
       }
       open={open}
       closable={false}
-      maskClosable={false}
+      mask={{ closable: false }}
       footer={null}
       width={520}
     >
       <Typography.Paragraph>
         上次会话约 <b>{ageMinutes} 分钟前</b> 未正常结束（崩溃 / 强杀 / 断电）。请选择如何恢复：
       </Typography.Paragraph>
-      <Space direction="vertical" size={8} style={{ width: '100%' }}>
+      <Space orientation="vertical" size={8} style={{ width: '100%' }}>
         <Button block type="primary" onClick={() => onChoose('all')}>
           恢复全部标签
         </Button>

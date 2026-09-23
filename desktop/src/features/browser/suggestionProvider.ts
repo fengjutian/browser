@@ -39,14 +39,21 @@ export interface SuggestionInputs {
 
 const TITLE_MAX = 120
 
-function trimTitle(value: string): string {
-  if (!value) return ''
-  if (value.length <= TITLE_MAX) return value
-  return `${value.slice(0, TITLE_MAX - 1)}…`
+function asText(value: unknown): string {
+  if (typeof value === 'string') return value
+  if (value == null) return ''
+  return String(value)
 }
 
-function norm(value: string): string {
-  return value.trim().toLocaleLowerCase()
+function trimTitle(value: unknown): string {
+  const text = asText(value)
+  if (!text) return ''
+  if (text.length <= TITLE_MAX) return text
+  return `${text.slice(0, TITLE_MAX - 1)}…`
+}
+
+function norm(value: unknown): string {
+  return asText(value).trim().toLocaleLowerCase()
 }
 
 function scoreUrl(query: string, url: string, now: number, visitedAt?: number): number {
@@ -77,11 +84,12 @@ export function buildSuggestions(input: SuggestionInputs): SuggestionItem[] {
   const q = norm(query)
   const items = new Map<string, SuggestionItem>()
 
-  const upsert = (url: string, title: string, source: SuggestionSource, score: number, searchTemplate?: string) => {
-    if (score <= 0) return
-    const existing = items.get(url)
+  const upsert = (url: unknown, title: unknown, source: SuggestionSource, score: number, searchTemplate?: string) => {
+    const safeUrl = asText(url)
+    if (score <= 0 || !safeUrl) return
+    const existing = items.get(safeUrl)
     if (!existing || existing.score < score) {
-      items.set(url, { url, title: trimTitle(title), source, score, searchTemplate })
+      items.set(safeUrl, { url: safeUrl, title: trimTitle(title), source, score, searchTemplate })
     }
   }
 
@@ -98,7 +106,7 @@ export function buildSuggestions(input: SuggestionInputs): SuggestionItem[] {
   }
   if (q) {
     items.set(`__search__:${q}`, {
-      url: searchTemplate.replace('{query}', encodeURIComponent(q)),
+      url: asText(searchTemplate).replace('{query}', encodeURIComponent(q)),
       title: `搜索 "${q}"`,
       source: 'search',
       score: 10,
