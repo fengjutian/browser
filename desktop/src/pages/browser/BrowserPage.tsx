@@ -1193,7 +1193,7 @@ export function BrowserPage({ visible = true, onSearchKnowledge }: { visible?: b
       onClose={() => setBookmarkPaletteOpen(false)}
       onOpen={bookmark => void navigate(bookmark.url)}
       onRemove={bookmark => void bookmarkActions.remove(bookmark.id)}
-      onUpdate={(bookmark, patch) => bookmarkActions.update(bookmark.id, patch)}
+      onUpdate={(bookmark, patch) => { void bookmarkActions.update(bookmark.id, patch) }}
     />
     {certificatePrompt.prompt && <CertificateErrorBar payload={certificatePrompt.prompt} onRespond={allow => void certificatePrompt.respond(allow)} />}
     <RecoveryPanel

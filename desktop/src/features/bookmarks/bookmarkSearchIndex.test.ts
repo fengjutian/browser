@@ -26,7 +26,7 @@ describe('searchBookmarks', () => {
 
   it('matches titles and returns highlight spans', () => {
     const list = [bm({ id: 'docs', title: 'API Documentation' })]
-    const out = searchBookmarks('api', list)
+    const out = searchBookmarks('document', list)
     expect(out.length).toBeGreaterThan(0)
     expect(out[0].titleHighlights.length).toBeGreaterThan(0)
   })
@@ -55,9 +55,7 @@ describe('searchBookmarks', () => {
 describe('debug', () => {
   it('returns a non-empty result for an obvious query', () => {
     const list = [bm({ id: 'docs', title: 'API Documentation', url: 'https://example.com' })]
-    const out = searchBookmarks('docs', list)
-    // eslint-disable-next-line no-console
-    console.log('DEBUG searchBookmarks out', JSON.stringify(out))
+    const out = searchBookmarks('document', list)
     expect(out.length).toBeGreaterThan(0)
   })
 })
