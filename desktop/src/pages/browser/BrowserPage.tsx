@@ -1,6 +1,6 @@
 import { MouseEvent, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import { AutoComplete, Badge, Button, Card, Dropdown, Input, Popover, Segmented, Select, Space, Tabs, Tag, Tooltip, Typography, message, type InputRef, type MenuProps } from 'antd'
-import { ArrowDownOutlined, ArrowLeftOutlined, ArrowRightOutlined, ArrowUpOutlined, BookOutlined, CheckCircleOutlined, CloseCircleOutlined, CloseOutlined, CopyOutlined, DatabaseOutlined, DownloadOutlined, FullscreenOutlined, GlobalOutlined, LoadingOutlined, MoreOutlined, PlusOutlined, PrinterOutlined, ReloadOutlined, SafetyCertificateOutlined, SaveOutlined, SearchOutlined, StarOutlined, ThunderboltOutlined, TranslationOutlined } from '@ant-design/icons'
+import { ArrowDownOutlined, ArrowLeftOutlined, ArrowRightOutlined, ArrowUpOutlined, BookOutlined, CheckCircleOutlined, CloseCircleOutlined, CloseOutlined, CopyOutlined, DownloadOutlined, FullscreenOutlined, GlobalOutlined, LoadingOutlined, MoreOutlined, PlusOutlined, PrinterOutlined, ReloadOutlined, SafetyCertificateOutlined, SaveOutlined, SearchOutlined, StarOutlined, ThunderboltOutlined, TranslationOutlined } from '@ant-design/icons'
 import { Sparkles as RobotOutlined } from 'lucide-react'
 import type { BrowserTab, BrowserTabError } from '../../types'
 import { findDocumentByUrl, getBrowserShortcutsEnabled, getDocument, getSession, saveDocument, setSession, toggleStarred } from '../../api'
@@ -14,7 +14,7 @@ import { reorderTabs } from '../../features/browser/reorderTabs'
 import { interpretShortcut } from '../../features/browser/shortcuts'
 import { popClosedTab, recordClosedTab, type ClosedTab } from '../../features/browser/closedTabs'
 import { AssistantPanel } from '../../features/ai/AssistantPanel'
-import { resolveNavigationInput } from '../../features/browser/navigation'
+import { classifyNavigationInput, renderSearchTemplate, resolveNavigationInput } from '../../features/browser/navigation'
 import { useDownloads } from '../../features/downloads/useDownloads'
 import { useTabRuntime } from '../../features/browser/useTabRuntime'
 import { buildAddressSuggestions } from '../../features/browser/addressSuggestions'
@@ -33,7 +33,6 @@ import { dropSessionLock, getSessionLockState, type SessionLockState } from '../
 import { toggleFullscreen as toggleWindowFullscreen } from '../../services/webviewCompat'
 import { buildSuggestions, trimSuggestions, type SuggestionItem } from '../../features/browser/suggestionProvider'
 import { readSearchEngineConfig, resolveActiveSearchTemplate, SEARCH_ENGINE_PRESETS } from '../../features/browser/searchEngine'
-import { classifyNavigationInput, resolveNavigationInput as resolveInput, renderSearchTemplate } from '../../features/browser/navigation'
 import { evaluateUrlSafety, highestLevel, type SafetyIssue, type SafetyLevel } from '../../features/browser/urlSafety'
 
 const SESSION_KEY = 'browser.tabs'
@@ -999,14 +998,13 @@ export function BrowserPage({ visible = true, onSearchKnowledge }: { visible?: b
   </div>
 }
 
-type SearchMode = 'single' | 'multiple' | 'knowledge'
+type SearchMode = 'web' | 'knowledge'
 
 function NewTab({address,setAddress,navigate,openNewTab,onSearchKnowledge}:{address:string;setAddress:(value:string)=>void;navigate:(input:string)=>Promise<void>;openNewTab:(url?:string)=>void;onSearchKnowledge?: (query:string)=>void}) {
   const configuredEngine = readSearchEngineConfig().presetId
   const initialEngine = SEARCH_ENGINE_PRESETS.some(engine => engine.id === configuredEngine) ? configuredEngine : 'google'
-  const [mode, setMode] = useState<SearchMode>('single')
-  const [engine, setEngine] = useState(initialEngine)
-  const [engines, setEngines] = useState<string[]>(['google', 'bing'])
+  const [mode, setMode] = useState<SearchMode>('web')
+  const [engines, setEngines] = useState<string[]>([initialEngine])
   const presets = SEARCH_ENGINE_PRESETS.map(item => ({ label: item.label, value: item.id }))
   const placeholder = mode === 'knowledge' ? '搜索本地知识库' : '搜索网页或输入 URL'
 
@@ -1015,9 +1013,8 @@ function NewTab({address,setAddress,navigate,openNewTab,onSearchKnowledge}:{addr
     const query = address.trim()
     if (!query) return
     if (mode === 'knowledge') { onSearchKnowledge?.(query); return }
-    if (mode === 'single') { void navigate(resolveInput(query, { searchTemplate: templateFor(engine) }) ?? query); return }
     if (classifyNavigationInput(query) !== 'search') { void navigate(query); return }
-    const selected = engines.length ? engines : ['google']
+    const selected = engines.length ? engines : [initialEngine]
     const urls = selected.map(id => renderSearchTemplate(templateFor(id), query))
     void navigate(urls[0])
     urls.slice(1).forEach(url => openNewTab(url))
