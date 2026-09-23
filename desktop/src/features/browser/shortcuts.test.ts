@@ -27,4 +27,8 @@ describe('interpretShortcut', () => {
     expect(interpretShortcut({ ctrlKey: true, metaKey: false, shiftKey: false, altKey: false, key: 'k' })).toBe('openTabSearch')
     expect(interpretShortcut({ ctrlKey: true, metaKey: false, shiftKey: true, altKey: false, key: 'A' })).toBe('openTabSearch')
   })
+
+  it('opens the history search palette on Ctrl+H', () => {
+    expect(interpretShortcut({ ctrlKey: true, metaKey: false, shiftKey: false, altKey: false, key: 'h' })).toBe('openHistorySearch')
+  })
 })

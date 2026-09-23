@@ -1155,7 +1155,8 @@ pub fn local_save_browser_workspace(app: tauri::AppHandle, workspace: LocalBrows
 pub fn local_list_closed_tabs(app: tauri::AppHandle) -> Result<Vec<LocalClosedTab>, String> {
     let database = connection(&app)?;
     let mut statement = database.prepare("SELECT id,url,title,favicon,closed_at FROM closed_tabs ORDER BY closed_at DESC LIMIT 20").map_err(|error| error.to_string())?;
-    statement.query_map([], |row| Ok(LocalClosedTab { id: row.get(0)?, url: row.get(1)?, title: row.get(2)?, favicon: row.get(3)?, closed_at: row.get(4)? })).map_err(|error| error.to_string())?.collect::<Result<Vec<_>, _>>().map_err(|error| error.to_string())
+    let rows = statement.query_map([], |row| Ok(LocalClosedTab { id: row.get(0)?, url: row.get(1)?, title: row.get(2)?, favicon: row.get(3)?, closed_at: row.get(4)? })).map_err(|error| error.to_string())?;
+    rows.collect::<Result<Vec<_>, _>>().map_err(|error| error.to_string())
 }
 
 #[tauri::command]
@@ -1183,7 +1184,8 @@ pub fn local_clear_closed_tabs(app: tauri::AppHandle) -> Result<(), String> {
 pub fn local_list_site_permissions(app: tauri::AppHandle) -> Result<Vec<LocalSitePermission>, String> {
     let database = connection(&app)?;
     let mut statement = database.prepare("SELECT origin,permission_kind,decision FROM site_permissions ORDER BY origin,permission_kind").map_err(|error| error.to_string())?;
-    statement.query_map([], |row| Ok(LocalSitePermission { origin: row.get(0)?, permission_kind: row.get(1)?, decision: row.get(2)? })).map_err(|error| error.to_string())?.collect::<Result<Vec<_>, _>>().map_err(|error| error.to_string())
+    let rows = statement.query_map([], |row| Ok(LocalSitePermission { origin: row.get(0)?, permission_kind: row.get(1)?, decision: row.get(2)? })).map_err(|error| error.to_string())?;
+    rows.collect::<Result<Vec<_>, _>>().map_err(|error| error.to_string())
 }
 
 #[tauri::command]

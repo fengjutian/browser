@@ -37,3 +37,21 @@ export function parseHistory(raw: string | null | undefined): HistoryEntry[] {
     return []
   }
 }
+
+/**
+ * Remove every history entry whose URL matches `url`. Returns the trimmed list
+ * and a `removed` flag so callers can surface a toast on the no-op path.
+ */
+export function removeHistoryEntry(entries: HistoryEntry[], url: string): { remaining: HistoryEntry[]; removed: boolean } {
+  const filtered = entries.filter(entry => entry.url !== url)
+  return { remaining: filtered, removed: filtered.length !== entries.length }
+}
+
+/**
+ * Hard cap the history to the N most-recent entries. Anything beyond is
+ * discarded. Pure so the caller can clamp before serialising to localStorage.
+ */
+export function limitHistory(entries: HistoryEntry[], max: number): HistoryEntry[] {
+  if (!Number.isFinite(max) || max <= 0 || entries.length <= max) return entries
+  return entries.slice(0, max)
+}

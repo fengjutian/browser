@@ -9,7 +9,7 @@ import { extractArticle } from '../../features/reader/extractArticle'
 import type { ReaderArticle } from '../../features/reader/types'
 import { classifySaveError } from '../../features/documents/saveClassifier'
 import { useDebouncedValue } from '../../shared/hooks/useDebouncedValue'
-import { dedupeHistory, HISTORY_CHANGE_EVENT, type HistoryEntry } from '../../features/history/dedupeHistory'
+import { dedupeHistory, HISTORY_CHANGE_EVENT, parseHistory, removeHistoryEntry, type HistoryEntry } from '../../features/history/dedupeHistory'
 import { reorderTabs } from '../../features/browser/reorderTabs'
 import { groupTabsByOrigin, idsToCloseForSameDomain } from '../../features/browser/tabGrouping'
 import { planLruSweep, type DownloadActivity } from '../../features/browser/lruPolicy'
@@ -34,8 +34,9 @@ import { PermissionPromptBar } from '../../features/browser/PermissionPromptBar'
 import { CertificateErrorBar } from '../../features/browser/CertificateErrorBar'
 import { useCertificatePrompt } from '../../features/browser/useCertificatePrompt'
 import { TabSearchPalette } from '../../features/browser/TabSearchPalette'
+import { HistorySearchPalette } from '../../features/history/HistorySearchPalette'
 import { isPrivateTab, makePrivateTab, stripPrivateTabs, resetPrivateSessionPermissions } from '../../features/browser/privateTabs'
-import { writeSitePermissions } from '../../features/browser/sitePermissions'
+import { readSitePermissions, writeSitePermissions } from '../../features/browser/sitePermissions'
 import { forceAllDenyFor } from '../../features/browser/usePermissionPrompt'
 import { LockOutlined } from '@ant-design/icons'
 import { readRecoverySnapshot, restoreFromSnapshot, writeSnapshot, type SessionSnapshot } from '../../features/browser/sessionStore'
@@ -140,6 +141,7 @@ export function BrowserPage({ visible = true, onSearchKnowledge }: { visible?: b
   const [findOpen, setFindOpen] = useState(false)
   const [pendingShellOpen, setPendingShellOpen] = useState<string | null>(null)
   const [tabSearchOpen, setTabSearchOpen] = useState(false)
+  const [historySearchOpen, setHistorySearchOpen] = useState(false)
   const [findQuery, setFindQuery] = useState('')
   const [findStatus, setFindStatus] = useState<'idle' | 'found' | 'missing'>('idle')
   const [zoomLevels, setZoomLevels] = useState<Record<string, number>>({})
@@ -225,6 +227,10 @@ export function BrowserPage({ visible = true, onSearchKnowledge }: { visible?: b
     ]).then(([storedHistory, storedClosedTabs, lockState, workspace, permissions]) => {
       if (cancelled) return
       if (permissions.length > 0) writeSitePermissions(permissions)
+      else {
+        const legacyPermissions = readSitePermissions()
+        if (legacyPermissions.length > 0) writeSitePermissions(legacyPermissions)
+      }
       setHistory(storedHistory)
       setClosedTabs(storedClosedTabs)
       const crash = lockState?.crashed ?? false
@@ -444,6 +450,9 @@ export function BrowserPage({ visible = true, onSearchKnowledge }: { visible?: b
         case 'openTabSearch':
           setTabSearchOpen(true)
           return
+        case 'openHistorySearch':
+          setHistorySearchOpen(true)
+          return
         case 'print':
           if (hasNativeTab(activeTabIdRef.current)) void printNativeTab(activeTabIdRef.current)
           return
@@ -601,6 +610,7 @@ export function BrowserPage({ visible = true, onSearchKnowledge }: { visible?: b
   const browserMenu: MenuProps['items'] = [
     { key: 'find', label: '在页面中查找', extra: 'Ctrl+F', onClick: () => setFindOpen(true) },
     { key: 'tab-search', label: '搜索标签页', extra: 'Ctrl+K', onClick: () => setTabSearchOpen(true) },
+    { key: 'history-search', label: '浏览历史记录', extra: 'Ctrl+H', onClick: () => setHistorySearchOpen(true) },
     { key: 'print', label: '打印', icon: <PrinterOutlined/>, extra: 'Ctrl+P', disabled: !nativeMode, onClick: () => void printNativeTab(active.id) },
     { type: 'divider' },
     { key: 'new-private', label: '新建私密窗口', icon: <LockOutlined/>, extra: 'Shift+Ctrl+N', onClick: () => openNewTab(undefined, { private: true }) },
@@ -1107,6 +1117,14 @@ export function BrowserPage({ visible = true, onSearchKnowledge }: { visible?: b
       onClose={() => setTabSearchOpen(false)}
       onPick={id => activateTab(id)}
       onCloseTab={id => closeTab(id)}
+    />
+    <HistorySearchPalette
+      open={historySearchOpen}
+      history={history}
+      onClose={() => setHistorySearchOpen(false)}
+      onOpen={entry => void navigate(entry.url)}
+      onRemove={entry => setHistory(current => removeHistoryEntry(current, entry.url).remaining)}
+      onClear={() => setHistory([])}
     />
     {certificatePrompt.prompt && <CertificateErrorBar payload={certificatePrompt.prompt} onRespond={allow => void certificatePrompt.respond(allow)} />}
     <RecoveryPanel
