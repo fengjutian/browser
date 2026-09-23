@@ -744,6 +744,22 @@ fn row_provider(row: &rusqlite::Row<'_>) -> rusqlite::Result<LocalAIProvider> {
     })
 }
 
+fn validate_provider_base_url(value: &str) -> Result<url::Url, String> {
+    let parsed = url::Url::parse(value).map_err(|error| format!("invalid provider base url: {error}"))?;
+    if !parsed.username().is_empty() || parsed.password().is_some() {
+        return Err("provider base url must not contain credentials".into());
+    }
+    if parsed.query().is_some() || parsed.fragment().is_some() {
+        return Err("provider base url must not contain a query or fragment".into());
+    }
+    let host = parsed.host_str().unwrap_or_default();
+    let loopback = host.eq_ignore_ascii_case("localhost") || host == "127.0.0.1" || host == "::1";
+    if parsed.scheme() != "https" && !(parsed.scheme() == "http" && loopback) {
+        return Err("provider base url must use https; http is allowed only for loopback hosts".into());
+    }
+    Ok(parsed)
+}
+
 #[tauri::command]
 pub fn local_save_ai_provider(
     app: tauri::AppHandle,
@@ -762,13 +778,22 @@ pub fn local_save_ai_provider(
     if trimmed_type.is_empty() || trimmed_base.is_empty() || trimmed_model.is_empty() {
         return Err("provider type, base url and model are required".into());
     }
+    if !matches!(trimmed_type, "openai-compatible" | "ollama" | "deepseek" | "qwen" | "kimi" | "minimax") {
+        return Err("unsupported provider type".into());
+    }
+    if trimmed_model.len() > 200 || embedding_model.as_deref().is_some_and(|value| value.len() > 200) {
+        return Err("model name is too long".into());
+    }
+    if api_key.as_deref().is_some_and(|value| value.len() > 8192) {
+        return Err("api key is too long".into());
+    }
+    if id.as_deref().is_some_and(|value| value.is_empty() || value.len() > 128 || !value.chars().all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_'))) {
+        return Err("invalid provider id".into());
+    }
     if !(1..=600).contains(&timeout_seconds) {
         return Err("timeout must be between 1 and 600 seconds".into());
     }
-    let parsed_base = url::Url::parse(trimmed_base).map_err(|e| e.to_string())?;
-    if !matches!(parsed_base.scheme(), "http" | "https") {
-        return Err("base url must use http or https".into());
-    }
+    let parsed_base = validate_provider_base_url(trimmed_base)?;
     let database = connection(&app)?;
     let now = chrono::Utc::now().to_rfc3339();
     let provider_id = id.unwrap_or_else(|| format!("provider-{}", uuid::Uuid::new_v4()));
@@ -798,7 +823,7 @@ pub fn local_save_ai_provider(
     database
         .execute(
             "INSERT INTO ai_providers(id,provider_type,base_url,model,embedding_model,timeout_seconds,has_api_key,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET provider_type=excluded.provider_type, base_url=excluded.base_url, model=excluded.model, embedding_model=excluded.embedding_model, timeout_seconds=excluded.timeout_seconds, has_api_key=excluded.has_api_key, updated_at=excluded.updated_at",
-            params![provider_id, trimmed_type, trimmed_base, trimmed_model, embedding_model, timeout_seconds, key_change as i64, created_at, now],
+            params![provider_id, trimmed_type, parsed_base.as_str(), trimmed_model, embedding_model, timeout_seconds, key_change as i64, created_at, now],
         )
         .map_err(|e| e.to_string())?;
     let mut statement = database
@@ -1221,6 +1246,16 @@ mod tests {
         let result = local_import_backup_for_test(&mut database, backup);
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("unsupported backup version"));
+    }
+
+    #[test]
+    fn provider_urls_require_https_except_for_loopback() {
+        assert!(validate_provider_base_url("https://api.example.com/v1").is_ok());
+        assert!(validate_provider_base_url("http://127.0.0.1:11434").is_ok());
+        assert!(validate_provider_base_url("http://localhost:11434").is_ok());
+        assert!(validate_provider_base_url("http://api.example.com/v1").is_err());
+        assert!(validate_provider_base_url("https://user:pass@api.example.com").is_err());
+        assert!(validate_provider_base_url("https://api.example.com?v=1").is_err());
     }
 
     fn local_import_backup_for_test(database: &mut Connection, backup: LocalBackup) -> Result<LocalImportSummary, String> {

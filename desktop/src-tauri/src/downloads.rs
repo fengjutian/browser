@@ -96,6 +96,31 @@ impl DangerType {
     }
 }
 
+fn validate_download_file_name(file_name: &str) -> Result<(), String> {
+    let trimmed = file_name.trim();
+    if trimmed.is_empty() || trimmed.len() > 255 || trimmed == "." || trimmed == ".." {
+        return Err("invalid download file name".into());
+    }
+    if trimmed.ends_with('.') || trimmed.chars().any(|ch| ch.is_control() || matches!(ch, '<' | '>' | ':' | '"' | '/' | '\\' | '|' | '?' | '*')) {
+        return Err("download file name contains unsafe characters".into());
+    }
+    if Path::new(trimmed).file_name().and_then(|name| name.to_str()) != Some(trimmed) {
+        return Err("download file name must not contain a path".into());
+    }
+    Ok(())
+}
+
+fn danger_from_file_name(file_name: &str) -> DangerType {
+    let extension = Path::new(file_name).extension().and_then(|value| value.to_str()).unwrap_or("").to_ascii_lowercase();
+    match extension.as_str() {
+        "exe" | "msi" | "com" | "scr" | "app" | "dmg" => DangerType::Executable,
+        "js" | "mjs" | "vbs" | "ps1" | "bat" | "cmd" | "sh" => DangerType::Script,
+        "zip" | "rar" | "7z" | "tar" | "gz" => DangerType::Archive,
+        "pdf" | "doc" | "docx" | "xls" | "xlsx" | "ppt" | "pptx" => DangerType::Document,
+        _ => DangerType::None,
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DownloadRecord {
@@ -148,8 +173,14 @@ pub fn insert_download(
     if input.id.is_empty() || input.url.is_empty() || input.file_name.is_empty() {
         return Err("download id, url and file_name are required".into());
     }
+    validate_download_file_name(&input.file_name)?;
+    let parsed_url = url::Url::parse(&input.url).map_err(|error| format!("invalid download url: {error}"))?;
+    if !matches!(parsed_url.scheme(), "http" | "https") {
+        return Err("download url must use http or https".into());
+    }
     let now = chrono::Utc::now().to_rfc3339();
-    let danger = input.danger_type.unwrap_or(DangerType::None);
+    let derived_danger = danger_from_file_name(&input.file_name);
+    let danger = if derived_danger == DangerType::None { input.danger_type.unwrap_or(DangerType::None) } else { derived_danger };
     let status = if input.private {
         // Private downloads are not persisted at all — the caller should drop
         // the record. We still allow the path to be set transiently for the
@@ -592,6 +623,7 @@ pub async fn download_start_reqwest(
     if input.id.is_empty() || input.url.is_empty() || input.file_name.is_empty() {
         return Err("download id, url and file_name are required".into());
     }
+    validate_download_file_name(&input.file_name)?;
     let url = url::Url::parse(&input.url).map_err(|error| error.to_string())?;
     if !matches!(url.scheme(), "http" | "https") {
         return Err(format!("unsupported scheme for reqwest download: {}", url.scheme()));
@@ -1303,5 +1335,20 @@ mod tests {
         )
         .unwrap_err();
         assert!(err.contains("id"), "error: {err}");
+    }
+
+    #[test]
+    fn rejects_path_traversal_and_unsafe_file_names() {
+        for name in ["../escape.exe", "folder/file.txt", "folder\\file.txt", "bad:name.txt", ".."] {
+            assert!(validate_download_file_name(name).is_err(), "accepted {name}");
+        }
+        assert!(validate_download_file_name("report 2026.pdf").is_ok());
+    }
+
+    #[test]
+    fn derives_danger_from_extension_without_trusting_frontend() {
+        assert_eq!(danger_from_file_name("setup.exe"), DangerType::Executable);
+        assert_eq!(danger_from_file_name("task.ps1"), DangerType::Script);
+        assert_eq!(danger_from_file_name("notes.txt"), DangerType::None);
     }
 }

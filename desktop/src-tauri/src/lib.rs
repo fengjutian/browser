@@ -5,6 +5,7 @@ pub mod plugins;
 pub mod providers;
 pub mod session_lock;
 pub mod webview_compat;
+pub mod certificate_guard;
 
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
@@ -529,6 +530,11 @@ async fn browser_create(
             tauri::LogicalSize::new(bounds.width.max(1.0), bounds.height.max(1.0)),
         )
         .map_err(|error| error.to_string())?;
+    // Hook the certificate-error stub onto the freshly created window. When
+    // webview2-com exposes a stable ICoreWebView2_5 binding, swap the stub
+    // for a real ServerCertificateErrorDetected registration that defers
+    // navigation until the user accepts.
+    certificate_guard::attach_certificate_guard(&app, &label);
     let navs = app.state::<NavStacks>();
     let mut guard = navs.stacks.lock().map_err(|_| "nav stack poisoned".to_string())?;
     let stack = guard.entry(label).or_default();
@@ -1035,6 +1041,7 @@ pub fn run() {
             browser_permission_respond,
             session_lock::browser_session_status,
             session_lock::browser_session_drop,
+            certificate_guard::browser_certificate_respond,
             webview_compat::shell_open,
             webview_compat::toggle_fullscreen,
             webview_compat::pick_files
@@ -1099,6 +1106,14 @@ mod tests {
     fn external_navigation_rejects_privileged_protocols() {
         assert!(external_url("file:///C:/Windows/System32").is_err());
         assert!(external_url("javascript:alert(1)").is_err());
+    }
+
+    #[test]
+    fn browser_labels_cannot_target_the_trusted_main_webview() {
+        assert!(validate_browser_label("browser-tab-123").is_ok());
+        assert!(validate_browser_label("main").is_err());
+        assert!(validate_browser_label("browser-").is_err());
+        assert!(validate_browser_label("browser-../main").is_err());
     }
 
     #[test]
