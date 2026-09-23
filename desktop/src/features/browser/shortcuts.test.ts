@@ -36,4 +36,8 @@ describe('interpretShortcut', () => {
     expect(interpretShortcut({ ctrlKey: true, metaKey: false, shiftKey: true, altKey: false, key: 'O' })).toBe('openBookmarks')
     expect(interpretShortcut({ ctrlKey: true, metaKey: false, shiftKey: false, altKey: false, key: 'd' })).toBe('addBookmark')
   })
+
+  it('opens the bulk summary palette on Ctrl+Shift+S', () => {
+    expect(interpretShortcut({ ctrlKey: true, metaKey: false, shiftKey: true, altKey: false, key: 'S' })).toBe('openBulkSummary')
+  })
 })

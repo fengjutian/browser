@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
-import { Empty, List, Popconfirm, Progress, Table, Typography } from 'antd'
-import { Button, Space, Tag, Tooltip } from '../../components/ui'
+import { Empty, List, Progress, Table, Typography } from 'antd'
+import { Button, Popconfirm, Space, Tag, Tooltip } from '../../components/ui'
 import type { ColumnsType } from 'antd/es/table'
 import { CheckCircleOutlined, CloseCircleOutlined, DeleteOutlined, ExclamationCircleOutlined, FileOutlined, FolderOpenOutlined, LoadingOutlined, MinusCircleOutlined, PauseOutlined, ReloadOutlined, StopOutlined } from '@ant-design/icons'
 import type { DownloadRecord } from '../../services/downloads'

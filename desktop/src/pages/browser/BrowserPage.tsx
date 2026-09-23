@@ -1,6 +1,6 @@
 import { MouseEvent, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
-import { AutoComplete, Badge, Modal, Segmented, Select, Typography, message } from 'antd'
-import { Button, Card, Dropdown, Input, Popover, Space, Tabs, Tag, Tooltip, type InputRef, type MenuProps } from '../../components/ui'
+import { AutoComplete, Badge, Segmented, Select, Typography, message } from 'antd'
+import { Button, Card, Dropdown, Input, Modal, Popover, Space, Tabs, Tag, Tooltip, UI_MODAL_OVERLAY_EVENT, type InputRef, type MenuProps } from '../../components/ui'
 import { ArrowDownOutlined, ArrowLeftOutlined, ArrowRightOutlined, ArrowUpOutlined, AudioMutedOutlined, BookOutlined, CheckCircleOutlined, CloseCircleOutlined, CloseOutlined, CopyOutlined, DownloadOutlined, FullscreenOutlined, GlobalOutlined, LoadingOutlined, MoreOutlined, PlusOutlined, PrinterOutlined, ReloadOutlined, SafetyCertificateOutlined, SaveOutlined, SearchOutlined, SoundOutlined, StarFilled, StarOutlined, ThunderboltOutlined, TranslationOutlined, WarningOutlined } from '@ant-design/icons'
 import { Sparkles as RobotOutlined } from 'lucide-react'
 import type { BrowserTab, BrowserTabError } from '../../types'
@@ -38,6 +38,8 @@ import { TabSearchPalette } from '../../features/browser/TabSearchPalette'
 import { HistorySearchPalette } from '../../features/history/HistorySearchPalette'
 import { BookmarkSearchPalette } from '../../features/bookmarks/BookmarkSearchPalette'
 import { useBookmarks } from '../../features/bookmarks/useBookmarks'
+import { BulkSummaryPalette } from '../../features/ai/BulkSummaryPalette'
+import type { BulkProgressEntry } from '../../features/ai/bulkSummary'
 import { isPrivateTab, makePrivateTab, stripPrivateTabs, resetPrivateSessionPermissions } from '../../features/browser/privateTabs'
 import { readSitePermissions, writeSitePermissions } from '../../features/browser/sitePermissions'
 import { forceAllDenyFor } from '../../features/browser/usePermissionPrompt'
@@ -147,6 +149,9 @@ export function BrowserPage({ visible = true, onSearchKnowledge }: { visible?: b
   const [tabSearchOpen, setTabSearchOpen] = useState(false)
   const [historySearchOpen, setHistorySearchOpen] = useState(false)
   const [bookmarkPaletteOpen, setBookmarkPaletteOpen] = useState(false)
+  const [bulkSummaryOpen, setBulkSummaryOpen] = useState(false)
+  const [bulkSummaryBusy, setBulkSummaryBusy] = useState(false)
+  const [bulkSummaryProgress, setBulkSummaryProgress] = useState<BulkProgressEntry[]>([])
   const [findQuery, setFindQuery] = useState('')
   const [findStatus, setFindStatus] = useState<'idle' | 'found' | 'missing'>('idle')
   const [zoomLevels, setZoomLevels] = useState<Record<string, number>>({})
@@ -177,6 +182,7 @@ export function BrowserPage({ visible = true, onSearchKnowledge }: { visible?: b
   const [adBlockerEnabled, setAdBlockerEnabledState] = useState(isAdBlockerEnabled)
   const [blockedAdsByTab, setBlockedAdsByTab] = useState<Record<string, number>>({})
   const [toolbarOverlay, setToolbarOverlay] = useState<'downloads' | 'bookmarks' | 'resources' | 'menu' | 'tab-menu' | null>(null)
+  const [modalOverlayCount, setModalOverlayCount] = useState(0)
   const surfaceRef = useRef<HTMLDivElement>(null)
   const addressRef = useRef<InputRef>(null)
   const previousTab = useRef<string | undefined>(undefined)
@@ -221,8 +227,17 @@ export function BrowserPage({ visible = true, onSearchKnowledge }: { visible?: b
 
   useEffect(() => {
     if (!visible || readerArticle || !hasNativeTab(active.id)) return
-    void (toolbarOverlay ? hideNativeTab(active.id) : showNativeTab(active.id))
-  }, [active.id, readerArticle, toolbarOverlay, visible])
+    void (toolbarOverlay || modalOverlayCount > 0 ? hideNativeTab(active.id) : showNativeTab(active.id))
+  }, [active.id, modalOverlayCount, readerArticle, toolbarOverlay, visible])
+
+  useEffect(() => {
+    const onModalOverlayChange = (event: Event) => {
+      const delta = Number((event as CustomEvent<number>).detail)
+      if (Number.isFinite(delta)) setModalOverlayCount(current => Math.max(0, current + delta))
+    }
+    window.addEventListener(UI_MODAL_OVERLAY_EVENT, onModalOverlayChange)
+    return () => window.removeEventListener(UI_MODAL_OVERLAY_EVENT, onModalOverlayChange)
+  }, [])
 
   useEffect(() => {
     const onAdvancedChange = (event: Event) => setAdvancedSettings((event as CustomEvent<AdvancedSettings>).detail)
@@ -490,6 +505,9 @@ export function BrowserPage({ visible = true, onSearchKnowledge }: { visible?: b
         case 'addBookmark':
           void addCurrentAsBookmark()
           return
+        case 'openBulkSummary':
+          setBulkSummaryOpen(true)
+          return
         case 'print':
           if (hasNativeTab(activeTabIdRef.current)) void printNativeTab(activeTabIdRef.current)
           return
@@ -650,6 +668,7 @@ export function BrowserPage({ visible = true, onSearchKnowledge }: { visible?: b
     { key: 'history-search', label: '浏览历史记录', extra: 'Ctrl+H', onClick: () => setHistorySearchOpen(true) },
     { key: 'bookmark-add', label: '收藏当前页', extra: 'Ctrl+D', onClick: () => void addCurrentAsBookmark() },
     { key: 'bookmarks', label: '打开收藏夹', extra: 'Ctrl+Shift+O', onClick: () => setBookmarkPaletteOpen(true) },
+    { key: 'bulk-summary', label: '多链接 AI 摘要', extra: 'Ctrl+Shift+S', onClick: () => setBulkSummaryOpen(true) },
     { key: 'print', label: '打印', icon: <PrinterOutlined/>, extra: 'Ctrl+P', disabled: !nativeMode, onClick: () => void printNativeTab(active.id) },
     { type: 'divider' },
     { key: 'new-private', label: '新建私密窗口', icon: <LockOutlined/>, extra: 'Shift+Ctrl+N', onClick: () => openNewTab(undefined, { private: true }) },
@@ -1063,6 +1082,66 @@ export function BrowserPage({ visible = true, onSearchKnowledge }: { visible?: b
     }
   }
 
+  async function runBulkSummary(urls: string[], kind: 'one-sentence' | 'short' | 'detailed' | 'key-points') {
+    const { aiChat: sendChat } = await import('../../api')
+    const { extractArticle } = await import('../../features/reader/extractArticle')
+    const { buildSummaryPrompt } = await import('../../features/ai/summarize')
+    const { listAIProviders } = await import('../../api')
+    const providers = await listAIProviders().catch(() => [])
+    const providerId = providers[0]?.id
+    if (!providerId) { messageApi.error('尚未配置 AI Provider'); return [] }
+    const entries: Array<{ index: number; total: number; url: string; title: string; status: 'fetched' | 'summarised' | 'skipped' | 'failed'; documentId?: string; message?: string }> = []
+    const titles: string[] = []
+    const partials: string[] = []
+    for (let index = 0; index < urls.length; index += 1) {
+      const url = urls[index]!
+      try {
+        const response = await fetch(url, { mode: 'cors' })
+        if (!response.ok) throw new Error(`HTTP ${response.status}`)
+        const html = await response.text()
+        const article = extractArticle({ url, html })
+        if (!article.markdown?.trim()) {
+          entries.push({ index, total: urls.length, url, title: url, status: 'skipped', message: '正文为空' })
+          continue
+        }
+        const request = buildSummaryPrompt(article.markdown, kind, article.title)
+        const summaryResponse = await sendChat(providerId, request)
+        const summary = summaryResponse.content
+        const saved = await saveDocument({ title: `摘要：${article.title || url}`, url, markdown: `# ${article.title}\n\n来源：${url}\n\n## 摘要\n\n${summary}\n\n## 正文\n\n${article.markdown}`, tags: ['bulk-summary', kind] })
+        entries.push({ index, total: urls.length, url, title: article.title, status: 'summarised', documentId: saved.id })
+        titles.push(article.title)
+        partials.push(summary)
+      } catch (error) {
+        entries.push({ index, total: urls.length, url, title: url, status: 'failed', message: String(error) })
+      }
+    }
+    if (titles.length > 1) {
+      try {
+        const crossPrompt = {
+          messages: [
+            { role: 'system', content: 'You merge multiple article summaries into one coherent cross-article summary. Never invent facts. Respond in the documents\' primary language.' },
+            { role: 'user', content: `Articles:\n\n${titles.map((title, i) => `## ${title}\n\n${partials[i] ?? ''}`).join('\n\n---\n\n')}\n\n---\n\nWrite a structured cross-article summary that links the topics together. Use markdown headings.` },
+          ],
+          temperature: 0.2,
+        }
+        const cross = await sendChat(providerId, crossPrompt)
+        const aggregated = `# 多链接综述（${titles.length} 条）\n\n${cross.content}\n\n## 各篇摘要\n\n${titles.map((title, i) => `### ${title}\n\n${partials[i] ?? ''}`).join('\n\n')}`
+        const saved = await saveDocument({ title: aggregatedTitleFor(titles), url: urls[0] ?? '', markdown: aggregated, tags: ['multi-summary', kind] })
+        messageApi.success(`多链接综述已存入知识库（${titles.length} 条）`, 3)
+        void saved
+      } catch (error) {
+        messageApi.warning(`交叉综述生成失败：${String(error)}`)
+      }
+    } else if (titles.length === 1) {
+      messageApi.success(`已存入 1 条摘要`, 2)
+    }
+    return entries
+  }
+
+  function aggregatedTitleFor(titles: string[]) {
+    return titles.length > 1 ? `多链接综述（${titles.length} 条）` : titles[0] ?? '多链接综述'
+  }
+
   function reopenLastClosed() {
     const result = popClosedTab(closedTabsRef.current)
     if (!result) return
@@ -1206,6 +1285,23 @@ export function BrowserPage({ visible = true, onSearchKnowledge }: { visible?: b
       onOpen={bookmark => void navigate(bookmark.url)}
       onRemove={bookmark => void bookmarkActions.remove(bookmark.id)}
       onUpdate={(bookmark, patch) => { void bookmarkActions.update(bookmark.id, patch) }}
+    />
+    <BulkSummaryPalette
+      open={bulkSummaryOpen}
+      busy={bulkSummaryBusy}
+      progress={bulkSummaryProgress}
+      onClose={() => { setBulkSummaryOpen(false); setBulkSummaryProgress([]) }}
+      onRun={async (urls, kind) => {
+        setBulkSummaryBusy(true)
+        setBulkSummaryProgress([])
+        try {
+          const result = await runBulkSummary(urls, kind)
+          setBulkSummaryProgress(result)
+          return result
+        } finally {
+          setBulkSummaryBusy(false)
+        }
+      }}
     />
     {certificatePrompt.prompt && <CertificateErrorBar payload={certificatePrompt.prompt} onRespond={allow => void certificatePrompt.respond(allow)} />}
     <RecoveryPanel

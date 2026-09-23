@@ -1,5 +1,5 @@
-import { Modal, Typography } from 'antd'
-import { Button, Space } from '../../components/ui'
+import { Typography } from 'antd'
+import { Button, Modal, Space } from '../../components/ui'
 import { ExclamationCircleOutlined } from '@ant-design/icons'
 import type { SessionLockState } from '../../services/session'
 

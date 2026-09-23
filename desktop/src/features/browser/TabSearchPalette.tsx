@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import { List, Modal, Typography } from 'antd'
-import { Input, Tag, type InputRef } from '../../components/ui'
+import { List, Typography } from 'antd'
+import { Input, Modal, Tag, type InputRef } from '../../components/ui'
 import { GlobalOutlined, LockOutlined } from '@ant-design/icons'
 import type { BrowserTab } from '../../types'
 import { searchTabs, type TabSearchResult } from './tabSearchIndex'

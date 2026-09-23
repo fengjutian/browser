@@ -1,5 +1,5 @@
-import { Descriptions, Drawer, Empty, Popconfirm, Typography, message } from 'antd'
-import { Button, Input, Space, Tag } from '../../components/ui'
+import { Descriptions, Empty, Typography, message } from 'antd'
+import { Button, Drawer, Input, Popconfirm, Space, Tag } from '../../components/ui'
 import { CopyOutlined, DeleteOutlined, ExportOutlined, InboxOutlined, LinkOutlined, PlusOutlined } from '@ant-design/icons'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
