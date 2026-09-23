@@ -184,6 +184,19 @@ const MIGRATIONS: &[(i64, &str)] = &[
         CREATE UNIQUE INDEX idx_bookmarks_url_unique ON bookmarks(url);
         CREATE INDEX idx_bookmarks_folder_position ON bookmarks(folder, position);",
     ),
+    (
+        13,
+        "CREATE TABLE workspaces (
+            id TEXT PRIMARY KEY,
+            name TEXT NOT NULL,
+            description TEXT NOT NULL DEFAULT '',
+            tab_count INTEGER NOT NULL DEFAULT 0,
+            payload TEXT NOT NULL DEFAULT '{}',
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+        CREATE INDEX idx_workspaces_updated_at ON workspaces(updated_at DESC);",
+    ),
 ];
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -224,6 +237,37 @@ pub struct LocalHistoryEntry {
 pub struct LocalBrowserWorkspace {
     tabs: Vec<serde_json::Value>,
     active_tab_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LocalWorkspaceSummary {
+    id: String,
+    name: String,
+    description: String,
+    tab_count: i64,
+    created_at: String,
+    updated_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LocalWorkspace {
+    id: String,
+    name: String,
+    description: String,
+    payload: serde_json::Value,
+    created_at: String,
+    updated_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LocalWorkspaceSaveInput {
+    id: Option<String>,
+    name: String,
+    description: String,
+    payload: serde_json::Value,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1165,6 +1209,102 @@ pub fn local_save_browser_workspace(app: tauri::AppHandle, workspace: LocalBrows
         transaction.execute("INSERT INTO browser_tabs(id,session_id,position,payload,updated_at) VALUES(?,'main',?,?,?)", params![id, position as i64, payload, unix_seconds()]).map_err(|error| error.to_string())?;
     }
     transaction.commit().map_err(|error| error.to_string())
+}
+
+fn validate_workspace_name(name: &str) -> Result<(), String> {
+    let trimmed = name.trim();
+    if trimmed.is_empty() { return Err("workspace name is required".into()); }
+    if trimmed.chars().count() > 80 { return Err("workspace name too long (max 80 chars)".into()); }
+    Ok(())
+}
+
+fn count_tabs(payload: &serde_json::Value) -> i64 {
+    payload.get("tabs").and_then(|v| v.as_array()).map(|arr| arr.len() as i64).unwrap_or(0)
+}
+
+#[tauri::command]
+pub fn local_list_workspaces(app: tauri::AppHandle) -> Result<Vec<LocalWorkspaceSummary>, String> {
+    let database = connection(&app)?;
+    let mut statement = database.prepare("SELECT id, name, description, tab_count, created_at, updated_at FROM workspaces ORDER BY updated_at DESC LIMIT 200")
+        .map_err(|error| error.to_string())?;
+    let rows = statement.query_map([], |row| Ok(LocalWorkspaceSummary {
+        id: row.get(0)?,
+        name: row.get(1)?,
+        description: row.get(2)?,
+        tab_count: row.get(3)?,
+        created_at: row.get(4)?,
+        updated_at: row.get(5)?,
+    })).map_err(|error| error.to_string())?;
+    rows.collect::<Result<Vec<_>, _>>().map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub fn local_get_workspace(app: tauri::AppHandle, id: String) -> Result<Option<LocalWorkspace>, String> {
+    if id.trim().is_empty() { return Err("workspace id is required".into()); }
+    let database = connection(&app)?;
+    let row = database.query_row(
+        "SELECT id, name, description, payload, created_at, updated_at FROM workspaces WHERE id = ?",
+        params![id],
+        |row| {
+                let payload_raw: String = row.get(3)?;
+                let payload: serde_json::Value = serde_json::from_str(&payload_raw).unwrap_or_else(|_| serde_json::json!({}));
+                Ok(LocalWorkspace {
+                    id: row.get(0)?,
+                    name: row.get(1)?,
+                    description: row.get(2)?,
+                    payload,
+                    created_at: row.get(4)?,
+                    updated_at: row.get(5)?,
+                })
+            },
+        );
+    match row {
+        Ok(workspace) => Ok(Some(workspace)),
+        Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+        Err(error) => Err(error.to_string()),
+    }
+}
+
+#[tauri::command]
+pub fn local_save_workspace(app: tauri::AppHandle, input: LocalWorkspaceSaveInput) -> Result<LocalWorkspaceSummary, String> {
+    validate_workspace_name(&input.name)?;
+    if input.description.chars().count() > 240 { return Err("workspace description too long (max 240 chars)".into()); }
+    let database = connection(&app)?;
+    let now = iso8601_now();
+    let epoch = unix_seconds();
+    let tab_count = count_tabs(&input.payload);
+    let payload_str = serde_json::to_string(&input.payload).map_err(|error| error.to_string())?;
+    let id = match input.id.as_deref().filter(|value| !value.trim().is_empty()) {
+        Some(existing) => existing.to_string(),
+        None => format!("ws-{}", uuid::Uuid::new_v4()),
+    };
+    if id.len() > 128 { return Err("invalid workspace id".into()); }
+    database.execute(
+        "INSERT INTO workspaces (id, name, description, tab_count, payload, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT(id) DO UPDATE SET name=excluded.name, description=excluded.description, tab_count=excluded.tab_count, payload=excluded.payload, updated_at=excluded.updated_at",
+        params![id, input.name.trim(), input.description, tab_count, payload_str, now, now],
+    ).map_err(|error| error.to_string())?;
+    database.query_row(
+        "SELECT id, name, description, tab_count, created_at, updated_at FROM workspaces WHERE id = ?",
+        params![id],
+        |row| Ok(LocalWorkspaceSummary {
+            id: row.get(0)?,
+            name: row.get(1)?,
+            description: row.get(2)?,
+            tab_count: row.get(3)?,
+            created_at: row.get(4)?,
+            updated_at: row.get(5)?,
+        }),
+    ).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub fn local_delete_workspace(app: tauri::AppHandle, id: String) -> Result<(), String> {
+    if id.trim().is_empty() { return Err("workspace id is required".into()); }
+    let database = connection(&app)?;
+    database.execute("DELETE FROM workspaces WHERE id = ?", params![id])
+        .map_err(|error| error.to_string())?;
+    Ok(())
 }
 
 #[tauri::command]
