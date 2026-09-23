@@ -43,6 +43,13 @@ export function decorateSummaries(items: WorkspaceSummary[], now: number = Date.
 const NAME_MAX = 80
 const DESC_MAX = 240
 
+/**
+ * Cross-component restore request. SettingsPage dispatches this event when
+ * the user clicks "恢复" in the workspace editor; BrowserPage listens and
+ * performs the actual tab swap.
+ */
+export const WORKSPACE_RESTORE_EVENT = 'arcadia-workspace-restore'
+
 export interface WorkspaceValidationResult {
   ok: boolean
   reason?: string

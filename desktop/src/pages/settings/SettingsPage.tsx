@@ -27,7 +27,7 @@ import {
   type ShortcutAction,
   type ShortcutOverrides,
 } from '../../features/browser/shortcuts'
-import { deleteWorkspace, listWorkspaces, saveWorkspace, validateWorkspaceDescription, validateWorkspaceName, decorateSummaries, relativeUpdatedAt, type WorkspaceDisplayRow } from '../../features/browser/workspaces'
+import { deleteWorkspace, listWorkspaces, saveWorkspace, validateWorkspaceDescription, validateWorkspaceName, decorateSummaries, relativeUpdatedAt, type WorkspaceDisplayRow, WORKSPACE_RESTORE_EVENT } from '../../features/browser/workspaces'
 import { getWorkspace } from '../../services/workspaces'
 
 const PROVIDER_OPTIONS: { label: string; value: AIProviderType }[] = [
@@ -189,6 +189,15 @@ function WorkspacesEditor() {
     }
   }
 
+  async function restore(row: WorkspaceDisplayRow) {
+    try {
+      window.dispatchEvent(new CustomEvent(WORKSPACE_RESTORE_EVENT, { detail: { id: row.id } }))
+      messageApi.info(`正在恢复「${row.name}」…`, 1.5)
+    } catch (error) {
+      messageApi.error(`恢复请求失败：${String(error)}`)
+    }
+  }
+
   return <>{contextHolder}<div className="workspaces-editor">
     <div className="workspaces-editor__header">
       <Typography.Paragraph type="secondary">从浏览器工具栏的「⋯」→「保存当前标签为工作区」可保存快照；这里可以改名、刷新时间戳或删除。</Typography.Paragraph>
@@ -213,7 +222,7 @@ function WorkspacesEditor() {
                   <span className="workspaces-editor__meta">{row.tabCount} 个标签 · {row.relativeUpdated}</span>
                   {row.description ? <Typography.Paragraph type="secondary" ellipsis={{ rows: 2, tooltip: row.description }} className="workspaces-editor__desc">{row.description}</Typography.Paragraph> : <span/>}
                   <Space size={4}>
-                    <Button size="small" disabled onClick={() => messageApi.info('切换工作区请在「工具栏 ⋯ → 保存当前标签为工作区」覆盖同名条目后重启,或在新窗口批量打开。')}>恢复</Button>
+                    <Button size="small" onClick={() => void restore(row)} disabled={row.isEmpty}>恢复</Button>
                     <Button size="small" onClick={() => startEdit(row)}>编辑</Button>
                     <Button size="small" onClick={() => void overwrite(row)}>刷新时间戳</Button>
                     <Popconfirm title={`删除工作区「${row.name}」？`} description="仅移除数据库中的工作区记录，不影响已打开的标签页。" okText="删除" cancelText="取消" okButtonProps={{ danger: true }} onConfirm={() => void remove(row)}>

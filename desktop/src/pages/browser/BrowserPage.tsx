@@ -22,7 +22,9 @@ import { AssistantPanel } from '../../features/ai/AssistantPanel'
 import { classifyNavigationInput, renderSearchTemplate, resolveNavigationInput } from '../../features/browser/navigation'
 import { useDownloads } from '../../features/downloads/useDownloads'
 import { useDownloadQueue } from '../../features/downloads/useDownloadQueue'
-import { saveWorkspace, snapshotTabsToPayload } from '../../services/workspaces'
+import { saveWorkspace, snapshotTabsToPayload, getWorkspace, type WorkspaceRecord } from '../../services/workspaces'
+import { restoreTabsFromWorkspace } from '../../features/browser/restoreWorkspace'
+import { WORKSPACE_RESTORE_EVENT } from '../../features/browser/workspaces'
 import { useTabRuntime } from '../../features/browser/useTabRuntime'
 import { buildAddressSuggestions } from '../../features/browser/addressSuggestions'
 import { DownloadSummary } from '../../features/downloads/DownloadCenter'
@@ -581,6 +583,24 @@ export function BrowserPage({ visible = true, onSearchKnowledge }: { visible?: b
     }
   }, [])
 
+  // Workspace restore is requested from the Settings page via a custom event;
+  // BrowserPage is the only place that owns the live tab list, so the swap
+  // happens here.
+  useEffect(() => {
+    async function onRestoreWorkspace(event: Event) {
+      const detail = (event as CustomEvent<{ id: string }>).detail
+      if (!detail?.id) return
+      const workspace = await getWorkspace(detail.id)
+      if (!workspace) {
+        messageApi.error('工作区不存在或已删除')
+        return
+      }
+      await applyWorkspaceRestore(workspace)
+    }
+    window.addEventListener(WORKSPACE_RESTORE_EVENT, onRestoreWorkspace)
+    return () => window.removeEventListener(WORKSPACE_RESTORE_EVENT, onRestoreWorkspace)
+  }, [])
+
   function onShortcutsChange(event: Event) {
     const detail = (event as CustomEvent<{ enabled: boolean }>).detail
     shortcutsEnabledRef.current = detail.enabled !== false
@@ -906,6 +926,39 @@ export function BrowserPage({ visible = true, onSearchKnowledge }: { visible?: b
     } catch (error) {
       messageApi.error(`保存失败：${String(error)}`)
     }
+  }
+
+  async function applyWorkspaceRestore(workspace: WorkspaceRecord) {
+    const result = restoreTabsFromWorkspace(tabs, workspace)
+    if (result.tabs.length === 0) {
+      messageApi.warning('工作区为空')
+      return
+    }
+    setTabs(result.tabs)
+    setActiveTabId(result.activeTabId)
+    // Re-create native tabs for the entries that did not previously exist
+    // (i.e. those marked loading=true by the restore) so WebView2 actually
+    // opens them. Existing tabs keep their native handles.
+    const newOnes = result.tabs.filter(tab => tab.loading && tab.url && !hasNativeTab(tab.id))
+    const nextBounds = bounds()
+    if (nextBounds) {
+      await Promise.all(newOnes.map(async tab => {
+        try {
+          const opened = await openNativeTab(tab.id, tab.url!, nextBounds)
+          if (!opened) {
+            setTabs(current => current.map(item => item.id === tab.id ? { ...item, loading: false, error: { kind: 'web-mode-required', message: '网页浏览仅在 Tauri 桌面应用中可用。' } } : item))
+            return
+          }
+          setTabs(current => current.map(item => item.id === tab.id ? { ...item, loading: false, error: undefined } : item))
+        } catch (error) {
+          setTabs(current => current.map(item => item.id === tab.id ? { ...item, loading: false, crashed: true, error: { kind: 'load-failed', message: String(error) } } : item))
+        }
+      }))
+    } else {
+      setTabs(current => current.map(item => item.loading ? { ...item, loading: false } : item))
+    }
+    void enforceLiveTabLimit(result.activeTabId)
+    messageApi.success(`已恢复工作区（+${result.addedCount} / −${result.removedCount}）`)
   }
 
   async function retryTab(id: string) {
