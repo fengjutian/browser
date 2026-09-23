@@ -54,6 +54,17 @@ describe('buildContextMenu', () => {
     expect(items.find(i => i.action === 'open-link-current')!.enabled).toBe(true)
     expect(items.find(i => i.action === 'open-link-new')!.enabled).toBe(true)
     expect(items.find(i => i.action === 'copy-link')!.enabled).toBe(true)
+    expect(items.find(i => i.action === 'open-link-external')!.enabled).toBe(false)
+  })
+
+  it('link region exposes shell-open for vscode:// and disables it for javascript:', () => {
+    const vscode = buildContextMenu({ ...baseRequest, kind: 'link', linkUrl: 'vscode://file/path' }, caps)
+    const external = vscode.sections.flatMap(s => s.items).find(i => i.action === 'open-link-external')!
+    expect(external.enabled).toBe(true)
+
+    const js = buildContextMenu({ ...baseRequest, kind: 'link', linkUrl: 'javascript:alert(1)' }, caps)
+    const externalJs = js.sections.flatMap(s => s.items).find(i => i.action === 'open-link-external')!
+    expect(externalJs.enabled).toBe(false)
   })
 
   it('image region uses open/copy/save and rejects file: src', () => {

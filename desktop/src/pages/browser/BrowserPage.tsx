@@ -1,5 +1,5 @@
 import { MouseEvent, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
-import { AutoComplete, Badge, Button, Card, Dropdown, Input, Popover, Segmented, Select, Space, Tabs, Tag, Tooltip, Typography, message, type InputRef, type MenuProps } from 'antd'
+import { AutoComplete, Badge, Button, Card, Dropdown, Input, Modal, Popover, Segmented, Select, Space, Tabs, Tag, Tooltip, Typography, message, type InputRef, type MenuProps } from 'antd'
 import { ArrowDownOutlined, ArrowLeftOutlined, ArrowRightOutlined, ArrowUpOutlined, AudioMutedOutlined, BookOutlined, CheckCircleOutlined, CloseCircleOutlined, CloseOutlined, CopyOutlined, DownloadOutlined, FullscreenOutlined, GlobalOutlined, LoadingOutlined, MoreOutlined, PlusOutlined, PrinterOutlined, ReloadOutlined, SafetyCertificateOutlined, SaveOutlined, SearchOutlined, SoundOutlined, StarOutlined, ThunderboltOutlined, TranslationOutlined, WarningOutlined } from '@ant-design/icons'
 import { Sparkles as RobotOutlined } from 'lucide-react'
 import type { BrowserTab, BrowserTabError } from '../../types'
@@ -25,6 +25,10 @@ import { DownloadSummary } from '../../features/downloads/DownloadCenter'
 import { ContextMenu } from '../../features/browser/ContextMenuView'
 import type { ContextMenuAction } from '../../features/browser/contextMenu'
 import { startDownload } from '../../services/downloads'
+import { classifyDownload } from '../../features/downloads/dangerClassifier'
+import { shellOpen } from '../../services/webviewCompat'
+import { classifyShellOpenUrl, describeScheme } from '../../features/browser/externalSchemes'
+import { redactUrl } from '../../features/browser/logRedaction'
 import { usePermissionPrompt } from '../../features/browser/usePermissionPrompt'
 import { PermissionPromptBar } from '../../features/browser/PermissionPromptBar'
 import { isPrivateTab, makePrivateTab, stripPrivateTabs, resetPrivateSessionPermissions } from '../../features/browser/privateTabs'
@@ -146,6 +150,7 @@ export function BrowserPage({ visible = true, onSearchKnowledge }: { visible?: b
   const [address, setAddress] = useState('')
   const [aiOpen, setAiOpen] = useState(false)
   const [findOpen, setFindOpen] = useState(false)
+  const [pendingShellOpen, setPendingShellOpen] = useState<string | null>(null)
   const [findQuery, setFindQuery] = useState('')
   const [findStatus, setFindStatus] = useState<'idle' | 'found' | 'missing'>('idle')
   const [zoomLevels, setZoomLevels] = useState<Record<string, number>>({})
@@ -315,7 +320,7 @@ export function BrowserPage({ visible = true, onSearchKnowledge }: { visible?: b
     if (!hydrated || !active.url || active.url === lastHistoryUrl.current) return
     if (isPrivateTab(active)) return
     lastHistoryUrl.current = active.url
-    setHistory(current => dedupeHistory(current, { url: active.url, title: active.title, visitedAt: Date.now() }))
+    setHistory(current => dedupeHistory(current, { url: redactUrl(active.url), title: active.title, visitedAt: Date.now() }))
   }, [active.url, active.title, active.private, hydrated])
 
   useEffect(() => { activeTabIdRef.current = activeTabId }, [activeTabId])
@@ -744,23 +749,30 @@ export function BrowserPage({ visible = true, onSearchKnowledge }: { visible?: b
         return
       case 'open-link-current': if (request.linkUrl) void navigate(request.linkUrl); return
       case 'open-link-new': if (request.linkUrl) openNewTab(request.linkUrl); return
+      case 'open-link-external': if (request.linkUrl) {
+        const verdict = classifyShellOpenUrl(request.linkUrl)
+        if (verdict.shellOpenable) setPendingShellOpen(request.linkUrl)
+        else if (!verdict.irreversible) openNewTab(request.linkUrl)
+      }
+      return
       case 'copy-link': if (request.linkUrl) await writeClipboard(request.linkUrl, '链接'); return
       case 'open-image-new': if (request.imageUrl) openNewTab(request.imageUrl); return
       case 'copy-image': if (request.imageUrl) await writeClipboard(request.imageUrl, '图片地址'); return
       case 'save-image':
         if (request.imageUrl) {
           try {
+            const derivedName = (() => {
+              try { return new URL(request.imageUrl!).pathname.split('/').pop() || 'image' }
+              catch { return 'image' }
+            })()
             await startDownload({
               id: crypto.randomUUID(),
               url: request.imageUrl,
-              fileName: (() => {
-                try { return new URL(request.imageUrl!).pathname.split('/').pop() || 'image' }
-                catch { return 'image' }
-              })(),
+              fileName: derivedName,
               mimeType: undefined,
+              dangerType: classifyDownload({ fileName: derivedName }),
               sourceOrigin: request.imageUrl ? new URL(request.imageUrl).origin : undefined,
               sourceTabLabel: active.id,
-              dangerType: 'none',
             })
             messageApi.success('图片加入下载队列')
           } catch (error) {
@@ -1116,6 +1128,27 @@ export function BrowserPage({ visible = true, onSearchKnowledge }: { visible?: b
       }}
       onAction={handleContextAction}
     />
+    <Modal
+      open={pendingShellOpen !== null}
+      title="打开外部应用"
+      okText="在系统应用中打开"
+      cancelText="取消"
+      onCancel={() => setPendingShellOpen(null)}
+      onOk={async () => {
+        const url = pendingShellOpen
+        setPendingShellOpen(null)
+        if (!url) return
+        try { await shellOpen(url) } catch (error) { messageApi.error(`无法启动外部应用：${String(error)}`) }
+      }}
+    >
+      {pendingShellOpen && (() => {
+        const verdict = classifyShellOpenUrl(pendingShellOpen)
+        return <>
+            <Typography.Paragraph>即将离开浏览器，由 <b>{describeScheme(verdict.scheme)}</b> 处理：</Typography.Paragraph>
+            <Typography.Text code className="browser-error__url">{pendingShellOpen}</Typography.Text>
+          </>
+      })()}
+    </Modal>
   </div>
 }
 

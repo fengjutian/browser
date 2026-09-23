@@ -7,6 +7,7 @@
  */
 import type { ContextMenuRequest } from '../../services/nativeBrowser'
 import { isAllowedExternalUrl } from '../../services/nativeBrowser'
+import { classifyShellOpenUrl } from './externalSchemes'
 
 export type ContextMenuRegion = ContextMenuRequest['kind']
 
@@ -25,6 +26,7 @@ export type ContextMenuAction =
   | 'ask-ai'
   | 'open-link-current'
   | 'open-link-new'
+  | 'open-link-external'
   | 'copy-link'
   | 'open-image-new'
   | 'copy-image'
@@ -114,11 +116,13 @@ function buildSelectionSections(request: ContextMenuRequest, cap: ContextMenuCap
 function buildLinkSections(request: ContextMenuRequest, cap: ContextMenuCapabilities): ContextMenuSection[] {
   const url = request.linkUrl ?? ''
   const allowed = isAllowedExternalUrl(url)
+  const shell = classifyShellOpenUrl(url)
   return [
     {
       items: [
         { action: 'open-link-current', label: '在当前标签打开', enabled: allowed, disabledReason: allowed ? undefined : '链接协议不安全' },
         { action: 'open-link-new', label: '在新标签打开', enabled: allowed, disabledReason: allowed ? undefined : '链接协议不安全' },
+        { action: 'open-link-external', label: '在系统应用中打开', enabled: shell.shellOpenable, disabledReason: shell.shellOpenable ? undefined : '链接协议不支持' },
         { action: 'copy-link', label: '复制链接地址', enabled: ALWAYS_ENABLED },
       ],
     },

@@ -378,9 +378,12 @@ function PrivacySettings() {
     messageApi.success(next ? '退出时将自动清理浏览痕迹' : '已关闭退出清理')
   }
 
-  return <>{contextHolder}<Card title="隐私与站点数据" className="settings-card">
+  const privateContent = <div className="privacy-section">
     <Alert type="info" showIcon message="私密标签已就绪" description="通过工具栏「⋯ → 新建私密窗口」打开；私密窗口不会写入历史、关闭列表或下载数据库。" />
-    <Typography.Title level={5} style={{ marginTop: 24 }}>浏览历史</Typography.Title>
+    <Typography.Paragraph type="secondary">私密标签关闭后不会出现在最近关闭列表，也不会参与会话恢复。</Typography.Paragraph>
+  </div>
+
+  const historyContent = <div className="privacy-section">
     <Typography.Paragraph type="secondary">按时间范围清理浏览历史（只删数据，不会删除已保存到知识库的文档）。</Typography.Paragraph>
     <Space wrap>
       <Button onClick={() => void clearHistory('hour')}>最近 1 小时</Button>
@@ -390,18 +393,31 @@ function PrivacySettings() {
     </Space>
     <div className="privacy-history-head"><Typography.Text strong>全部记录</Typography.Text><Typography.Text type="secondary">{historyEntries.length} 条</Typography.Text></div>
     <List className="privacy-history-list" size="small" dataSource={historyEntries} locale={{ emptyText: '暂无浏览历史' }} renderItem={item => <List.Item key={`${item.url}-${item.visitedAt}`}><List.Item.Meta title={item.title || item.url} description={<><Typography.Text type="secondary">{new Date(item.visitedAt).toLocaleString()}</Typography.Text><Typography.Text className="privacy-history-url" copyable={{ text: item.url }}>{item.url}</Typography.Text></>}/></List.Item>}/>
-    <Typography.Title level={5} style={{ marginTop: 24 }}>其他清理</Typography.Title>
+  </div>
+
+  const cleanupContent = <div className="privacy-section">
+    <Typography.Paragraph type="secondary">清理浏览器生成的辅助数据，不会删除知识库文档或磁盘中的下载文件。</Typography.Paragraph>
     <Space wrap>
       <Button onClick={clearClosedTabs}>清空最近关闭</Button>
       <Button onClick={clearDownloads}>清空下载记录</Button>
       <Button onClick={clearAllPermissions}>重置所有站点权限</Button>
     </Space>
-    <Typography.Title level={5} style={{ marginTop: 24 }}>退出时</Typography.Title>
-    <Space>
+  </div>
+
+  const exitContent = <div className="privacy-section">
+    <Typography.Paragraph type="secondary">控制应用正常退出时是否自动清理本地浏览痕迹。</Typography.Paragraph>
+    <Space align="start">
       <Switch checked={cleanupOnExit} onChange={toggleCleanupOnExit} />
       <Typography.Text>退出时清空浏览历史 / 最近关闭 / 下载记录（保留私密窗口未关闭时已持久化的内容）</Typography.Text>
     </Space>
-  </Card></>
+  </div>
+
+  return <>{contextHolder}<Card title="隐私与站点数据" className="settings-card privacy-settings-card"><Tabs className="privacy-section-tabs" defaultActiveKey="history" destroyOnHidden={false} items={[
+    { key: 'private', label: '私密浏览', children: privateContent },
+    { key: 'history', label: `浏览历史 ${historyEntries.length}`, children: historyContent },
+    { key: 'cleanup', label: '数据清理', children: cleanupContent },
+    { key: 'exit', label: '退出时', children: exitContent },
+  ]}/></Card></>
 }
 
 const CLEANUP_ON_EXIT_KEY = 'browser.cleanupOnExit.v1'

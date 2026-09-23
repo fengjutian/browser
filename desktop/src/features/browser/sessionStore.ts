@@ -9,6 +9,7 @@
  * Rust owns the matching "session lock" — see `lib.rs::browser_session_*`.
  */
 import type { BrowserTab } from '../../types'
+import { redactSessionTabs, redactUrl } from './logRedaction'
 
 export const SESSION_SCHEMA_VERSION = 2
 
@@ -101,8 +102,22 @@ export function readLatestSnapshot(): SessionParseResult | null {
 export function writeSnapshot(snapshot: SessionSnapshot, options: { rotatedAt?: number } = {}): void {
   if (typeof localStorage === 'undefined') return
   const rotatedAt = options.rotatedAt ?? Date.now()
-  const next: SessionSnapshot = { ...snapshot, savedAt: rotatedAt, schemaVersion: SESSION_SCHEMA_VERSION }
-  const raw = JSON.stringify(next)
+  // Strip credential material from tab URLs and history / closed-tabs lists
+  // before persisting — session files live on disk and could be inspected by
+  // anyone with file access. We never persist private tabs (already stripped
+  // upstream); this just hardens the remaining entries.
+  const sanitised: SessionSnapshot = {
+    ...snapshot,
+    savedAt: rotatedAt,
+    schemaVersion: SESSION_SCHEMA_VERSION,
+    windows: snapshot.windows.map(window => ({
+      ...window,
+      tabs: redactSessionTabs(window.tabs),
+    })),
+    history: snapshot.history.map(entry => ({ ...entry, url: redactUrl(entry.url) })),
+    closedTabs: snapshot.closedTabs.map(tab => ({ ...tab, url: redactUrl(tab.url) })),
+  }
+  const raw = JSON.stringify(sanitised)
   const probe = readLatestSnapshot()
   const olderKey = probe?.source === 'v1' ? SESSION_KEY_V2 : SESSION_KEY_V1
   const newerKey = probe?.source === 'v1' ? SESSION_KEY_V1 : SESSION_KEY_V2

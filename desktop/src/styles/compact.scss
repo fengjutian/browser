@@ -213,6 +213,19 @@
   padding-bottom: 8px;
 }
 
+.privacy-section-tabs {
+  > .ant-tabs-nav { margin-bottom: 18px !important; }
+  > .ant-tabs-nav::before { border-color: var(--accent-border); }
+  .ant-tabs-tab { padding-block: 10px !important; }
+}
+
+.privacy-section {
+  min-height: 150px;
+
+  > .ant-alert { margin-bottom: 14px; }
+  > p.ant-typography:first-child { margin-bottom: 18px; }
+}
+
 .privacy-history-list {
   max-height: 360px;
   overflow: auto;
