@@ -1,7 +1,6 @@
 import { useMemo, useState } from 'react'
 import { Typography } from 'antd'
-import { Button, Empty, List, Popconfirm, Progress, Space, Table, Tag, Tooltip } from '../../components/ui'
-import type { ColumnsType } from 'antd/es/table'
+import { Button, Empty, List, Popconfirm, Progress, Space, Table, Tag, Tooltip, type TableColumn } from '../../components/ui'
 import { CheckCircleOutlined, CloseCircleOutlined, DeleteOutlined, ExclamationCircleOutlined, FileOutlined, FolderOpenOutlined, LoadingOutlined, MinusCircleOutlined, PauseOutlined, ReloadOutlined, StopOutlined } from '@ant-design/icons'
 import type { DownloadRecord } from '../../services/downloads'
 import { fileNameOf } from '../../services/downloads'
@@ -265,7 +264,7 @@ export function DownloadCenter({ center, limit = 200 }: DownloadCenterProps) {
         </Space>
       ),
     },
-  ] as ColumnsType<DownloadRecord>
+  ] satisfies TableColumn<DownloadRecord>[]
 
   return (
     <Table<DownloadRecord>
