@@ -3,13 +3,13 @@ import { AutoComplete, Badge, Button, Card, Dropdown, Input, Modal, Popover, Seg
 import { ArrowDownOutlined, ArrowLeftOutlined, ArrowRightOutlined, ArrowUpOutlined, AudioMutedOutlined, BookOutlined, CheckCircleOutlined, CloseCircleOutlined, CloseOutlined, CopyOutlined, DownloadOutlined, FullscreenOutlined, GlobalOutlined, LoadingOutlined, MoreOutlined, PlusOutlined, PrinterOutlined, ReloadOutlined, SafetyCertificateOutlined, SaveOutlined, SearchOutlined, SoundOutlined, StarOutlined, ThunderboltOutlined, TranslationOutlined, WarningOutlined } from '@ant-design/icons'
 import { Sparkles as RobotOutlined } from 'lucide-react'
 import type { BrowserTab, BrowserTabError } from '../../types'
-import { findDocumentByUrl, getBrowserShortcutsEnabled, getDocument, getSession, saveDocument, setSession, toggleStarred } from '../../api'
+import { addBrowserHistory, findDocumentByUrl, getBrowserShortcutsEnabled, getDocument, getSession, listBrowserHistory, saveDocument, setSession, toggleStarred } from '../../api'
 import { captureNativePage, closeNativeTab, ensureNativeTab, findInNativeTab, hasNativeTab, hideNativeTab, isNativeBrowserAvailable, navigateHistory, onNativeNewTab, openNativeTab, printNativeTab, readNativeState, reloadNativeTab, resizeNativeTab, showNativeTab, stopNativeTab, zoomNativeTab } from '../../services/nativeBrowser'
 import { extractArticle } from '../../features/reader/extractArticle'
 import type { ReaderArticle } from '../../features/reader/types'
 import { classifySaveError } from '../../features/documents/saveClassifier'
 import { useDebouncedValue } from '../../shared/hooks/useDebouncedValue'
-import { dedupeHistory, HISTORY_CHANGE_EVENT, parseHistory, type HistoryEntry } from '../../features/history/dedupeHistory'
+import { dedupeHistory, HISTORY_CHANGE_EVENT, type HistoryEntry } from '../../features/history/dedupeHistory'
 import { reorderTabs } from '../../features/browser/reorderTabs'
 import { groupTabsByOrigin, idsToCloseForSameDomain } from '../../features/browser/tabGrouping'
 import { planLruSweep, type DownloadActivity } from '../../features/browser/lruPolicy'
@@ -33,10 +33,11 @@ import { usePermissionPrompt } from '../../features/browser/usePermissionPrompt'
 import { PermissionPromptBar } from '../../features/browser/PermissionPromptBar'
 import { CertificateErrorBar } from '../../features/browser/CertificateErrorBar'
 import { useCertificatePrompt } from '../../features/browser/useCertificatePrompt'
+import { TabSearchPalette } from '../../features/browser/TabSearchPalette'
 import { isPrivateTab, makePrivateTab, stripPrivateTabs, resetPrivateSessionPermissions } from '../../features/browser/privateTabs'
 import { forceAllDenyFor } from '../../features/browser/usePermissionPrompt'
 import { LockOutlined } from '@ant-design/icons'
-import { readLatestSnapshot, restoreFromSnapshot, writeSnapshot, type SessionSnapshot } from '../../features/browser/sessionStore'
+import { readRecoverySnapshot, restoreFromSnapshot, writeSnapshot, type SessionSnapshot } from '../../features/browser/sessionStore'
 import { RecoveryPanel, type RecoveryChoice } from '../../features/browser/RecoveryPanel'
 import { dropSessionLock, getSessionLockState, type SessionLockState } from '../../services/session'
 import { toggleFullscreen as toggleWindowFullscreen } from '../../services/webviewCompat'
@@ -48,7 +49,6 @@ import { cleanTrackingParameters, isTrackingCleanerEnabled, TRACKING_CLEANER_EVE
 
 const SESSION_KEY = 'browser.tabs'
 const SESSION_DEBOUNCE_MS = 500
-const HISTORY_KEY = 'browser.history'
 const CLOSED_KEY = 'browser.closed'
 const TAB_GROUP_PALETTE = ['#a7dfbd', '#9bc6e8', '#dfc0a7', '#c8a7df', '#dfb5b5', '#bce0c6']
 const tabGroupColor = (id: string | null | undefined): string => {
@@ -153,6 +153,7 @@ export function BrowserPage({ visible = true, onSearchKnowledge }: { visible?: b
   const [aiOpen, setAiOpen] = useState(false)
   const [findOpen, setFindOpen] = useState(false)
   const [pendingShellOpen, setPendingShellOpen] = useState<string | null>(null)
+  const [tabSearchOpen, setTabSearchOpen] = useState(false)
   const [findQuery, setFindQuery] = useState('')
   const [findStatus, setFindStatus] = useState<'idle' | 'found' | 'missing'>('idle')
   const [zoomLevels, setZoomLevels] = useState<Record<string, number>>({})
@@ -230,17 +231,17 @@ export function BrowserPage({ visible = true, onSearchKnowledge }: { visible?: b
   useEffect(() => {
     let cancelled = false
     void Promise.all([
-      getSession(HISTORY_KEY),
+      listBrowserHistory(),
       getSession(CLOSED_KEY),
       getSessionLockState(),
-    ]).then(([historyRaw, closedRaw, lockState]) => {
+    ]).then(([storedHistory, closedRaw, lockState]) => {
       if (cancelled) return
-      setHistory(parseHistory(historyRaw))
+      setHistory(storedHistory)
       setClosedTabs(parseClosedTabs(closedRaw))
       const crash = lockState?.crashed ?? false
-      const snapshot = readLatestSnapshot()
+      const snapshot = readRecoverySnapshot()
       const restored = snapshot ? restoreFromSnapshot(snapshot.snapshot) : null
-      if (crash && restored && restored.tabs.length > 0) {
+      if (crash && restored && restored.tabs.some(tab => tab.url.trim().length > 0)) {
         recoveryPendingRef.current = true
         setLockState(lockState)
         setRecoveredTabs(restored.tabs)
@@ -257,7 +258,7 @@ export function BrowserPage({ visible = true, onSearchKnowledge }: { visible?: b
         setAddress(activeTab?.url ?? '')
         if (activeTab?.url) lastHistoryUrl.current = activeTab.url
       }
-      setHistory(parseHistory(historyRaw))
+      setHistory(storedHistory)
       setClosedTabs(parseClosedTabs(closedRaw))
       setHydrated(true)
       if (parsed) {
@@ -310,12 +311,6 @@ export function BrowserPage({ visible = true, onSearchKnowledge }: { visible?: b
     writeSnapshot(snapshot)
   }, [sessionJson, hydrated])
 
-  const historyJson = useDebouncedValue(JSON.stringify(history), SESSION_DEBOUNCE_MS)
-  useEffect(() => {
-    if (!hydrated || recoveryPendingRef.current) return
-    void setSession(HISTORY_KEY, historyJson)
-  }, [historyJson, hydrated])
-
   const closedJson = useDebouncedValue(JSON.stringify(closedTabs), SESSION_DEBOUNCE_MS)
   useEffect(() => {
     if (!hydrated || recoveryPendingRef.current) return
@@ -326,7 +321,9 @@ export function BrowserPage({ visible = true, onSearchKnowledge }: { visible?: b
     if (!hydrated || !active.url || active.url === lastHistoryUrl.current) return
     if (isPrivateTab(active)) return
     lastHistoryUrl.current = active.url
-    setHistory(current => dedupeHistory(current, { url: redactUrl(active.url), title: active.title, visitedAt: Date.now() }))
+    const entry = { url: redactUrl(active.url), title: active.title, visitedAt: Date.now() }
+    setHistory(current => dedupeHistory(current, entry))
+    void addBrowserHistory(entry).catch(() => undefined)
   }, [active.url, active.title, active.private, hydrated])
 
   useEffect(() => { activeTabIdRef.current = activeTabId }, [activeTabId])
@@ -459,6 +456,9 @@ export function BrowserPage({ visible = true, onSearchKnowledge }: { visible?: b
           return
         case 'find':
           setFindOpen(true)
+          return
+        case 'openTabSearch':
+          setTabSearchOpen(true)
           return
         case 'print':
           if (hasNativeTab(activeTabIdRef.current)) void printNativeTab(activeTabIdRef.current)
@@ -616,6 +616,7 @@ export function BrowserPage({ visible = true, onSearchKnowledge }: { visible?: b
   }
   const browserMenu: MenuProps['items'] = [
     { key: 'find', label: '在页面中查找', extra: 'Ctrl+F', onClick: () => setFindOpen(true) },
+    { key: 'tab-search', label: '搜索标签页', extra: 'Ctrl+K', onClick: () => setTabSearchOpen(true) },
     { key: 'print', label: '打印', icon: <PrinterOutlined/>, extra: 'Ctrl+P', disabled: !nativeMode, onClick: () => void printNativeTab(active.id) },
     { type: 'divider' },
     { key: 'new-private', label: '新建私密窗口', icon: <LockOutlined/>, extra: 'Shift+Ctrl+N', onClick: () => openNewTab(undefined, { private: true }) },
@@ -1113,6 +1114,14 @@ export function BrowserPage({ visible = true, onSearchKnowledge }: { visible?: b
     <div className="browser-toolbar"><Space><Button type="text" aria-label="后退" title="后退 (Alt+←)" icon={<ArrowLeftOutlined/>} disabled={!nativeMode || !active.canGoBack} onClick={() => void navigateHistory(active.id,-1)}/><Button type="text" aria-label="前进" title="前进 (Alt+→)" icon={<ArrowRightOutlined/>} disabled={!nativeMode || !active.canGoForward} onClick={() => void navigateHistory(active.id,1)}/><Button type="text" aria-label={active.loading?'停止加载':'重新加载'} title={active.loading?'停止加载 (Esc)':'重新加载 (F5)'} icon={active.loading?<CloseOutlined/>:<ReloadOutlined/>} disabled={!nativeMode} onClick={() => void (active.loading ? stopNativeTab(active.id) : reloadNativeTab(active.id))}/><Button type="text" icon={<BookOutlined/>} onClick={() => void openReader()}>阅读模式</Button></Space><form onSubmit={event => { event.preventDefault(); void navigate(address) }}><AutoComplete value={address} options={addressSuggestions} onChange={setAddress} onSelect={value=>void navigate(value)}><Input ref={addressRef} prefix={<SafetyCertificateOutlined/>} suffix={<button type="button" className={`browser-star${starredDocId ? ' is-active' : ''}`} disabled={!active.url} aria-label={starredDocId ? '取消收藏' : '收藏当前页'} title={starredDocId ? '取消收藏' : '收藏当前页'} onClick={event => { event.preventDefault(); event.stopPropagation(); void toggleStarCurrent() }}><StarOutlined/></button>} onFocus={event=>event.currentTarget.select()} placeholder="搜索或输入网址"/></AutoComplete></form><Tag icon={<SafetyCertificateOutlined/>} color="green">43</Tag><Button type={aiOpen?'primary':'text'} ghost={aiOpen} icon={<RobotOutlined/>} onClick={()=>setAiOpen(value=>!value)}/><Popover trigger="click" placement="bottomRight" content={downloadPanel}><Badge size="small" count={downloads.filter(item=>item.status==='downloading').length}><Button type="text" aria-label="下载" icon={<DownloadOutlined/>}/></Badge></Popover><Popover trigger="click" placement="bottomRight" content={resourcePanel}><Button type="text" aria-label="资源面板" icon={<ThunderboltOutlined/>} title={`${resourceStats.liveTabs} 个 WebView / ${resourceStats.totalTabs} 标签`}/></Popover><Dropdown menu={{items:browserMenu}} trigger={['click']}><Button type="text" aria-label="浏览器菜单" icon={<MoreOutlined/>}/></Dropdown></div>
     {findOpen&&<div className="browser-find"><Input autoFocus allowClear prefix={<SearchOutlined/>} value={findQuery} status={findStatus==='missing'?'error':undefined} placeholder="在页面中查找" onChange={event=>{setFindQuery(event.target.value);setFindStatus('idle')}} onPressEnter={event=>void runFind(event.shiftKey)}/><Typography.Text type={findStatus==='missing'?'danger':'secondary'}>{findStatus==='missing'?'未找到':findStatus==='found'?'已定位':''}</Typography.Text><Button type="text" aria-label="上一个匹配项" icon={<ArrowUpOutlined/>} onClick={()=>void runFind(true)}/><Button type="text" aria-label="下一个匹配项" icon={<ArrowDownOutlined/>} onClick={()=>void runFind(false)}/><Button type="text" aria-label="关闭查找" icon={<CloseOutlined/>} onClick={closeFind}/></div>}
     <PermissionPromptBar prompt={permissionPrompt} />
+    <TabSearchPalette
+      open={tabSearchOpen}
+      tabs={tabs}
+      activeId={activeTabId}
+      onClose={() => setTabSearchOpen(false)}
+      onPick={id => activateTab(id)}
+      onCloseTab={id => closeTab(id)}
+    />
     {certificatePrompt.prompt && <CertificateErrorBar payload={certificatePrompt.prompt} onRespond={allow => void certificatePrompt.respond(allow)} />}
     <RecoveryPanel
       open={lockState !== null}

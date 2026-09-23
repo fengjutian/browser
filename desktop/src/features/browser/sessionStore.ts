@@ -96,6 +96,31 @@ export function readLatestSnapshot(): SessionParseResult | null {
 }
 
 /**
+ * Crash recovery must not prefer a newer placeholder-only snapshot over an
+ * older snapshot that still contains navigable tabs. This can happen when the
+ * app creates its initial blank tab immediately before an abnormal exit.
+ */
+export function readRecoverySnapshot(): SessionParseResult | null {
+  const v1Raw = typeof localStorage !== 'undefined' ? localStorage.getItem(SESSION_KEY_V1) : null
+  const v2Raw = typeof localStorage !== 'undefined' ? localStorage.getItem(SESSION_KEY_V2) : null
+  const candidates = ([
+    ['v1', parseSlot(v1Raw)],
+    ['v2', parseSlot(v2Raw)],
+  ] as const).filter((entry): entry is readonly ['v1' | 'v2', SessionSnapshot] => entry[1] !== null)
+  if (candidates.length === 0) return null
+
+  const navigable = candidates.filter(([, snapshot]) => (
+    snapshot.windows.some(window => window.tabs.some(tab => !tab.private && tab.url.trim().length > 0))
+  ))
+  const pool = navigable.length > 0 ? navigable : candidates
+  const [source, snapshot] = pool.reduce((latest, current) => (
+    current[1].savedAt >= latest[1].savedAt ? current : latest
+  ))
+  const newestSavedAt = Math.max(...candidates.map(([, value]) => value.savedAt))
+  return { snapshot, source, suspect: snapshot.savedAt < newestSavedAt }
+}
+
+/**
  * Persist the snapshot to the older slot only. On the next save that slot is
  * the newest, so the other slot is selected. Alternating the slots keeps one
  * previous-good snapshot available if a write or process exit is interrupted.

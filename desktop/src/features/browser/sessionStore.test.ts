@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import {
   emptySnapshot,
   readLatestSnapshot,
+  readRecoverySnapshot,
   restoreFromSnapshot,
   SESSION_KEY_V1,
   SESSION_KEY_V2,
@@ -74,6 +75,19 @@ describe('writeSnapshot + readLatestSnapshot', () => {
   it('ignores snapshots with the wrong schema version', () => {
     localStorage.setItem(SESSION_KEY_V1, JSON.stringify({ ...sample, schemaVersion: 1 }))
     expect(readLatestSnapshot()).toBeNull()
+  })
+
+  it('prefers an older navigable snapshot over a newer blank placeholder', () => {
+    localStorage.setItem(SESSION_KEY_V1, JSON.stringify({ ...sample, savedAt: 1_000_000 }))
+    localStorage.setItem(SESSION_KEY_V2, JSON.stringify({
+      ...sample,
+      savedAt: 2_000_000,
+      windows: [{ ...sample.windows[0], tabs: [{ id: 'new', url: '', title: 'New tab', loading: false, active: true, pinned: false }], activeTabId: 'new' }],
+    }))
+    const result = readRecoverySnapshot()
+    expect(result?.source).toBe('v1')
+    expect(result?.snapshot.windows[0].tabs[0].url).toBe('https://a.example')
+    expect(result?.suspect).toBe(true)
   })
 })
 

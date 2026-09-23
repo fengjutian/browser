@@ -2,13 +2,13 @@ import { Alert, Button, Card, Descriptions, Form, Input, InputNumber, List, Segm
 import { BgColorsOutlined, DeleteOutlined, KeyOutlined, MoonOutlined, SafetyCertificateOutlined, SaveOutlined, SunOutlined, ThunderboltOutlined } from '@ant-design/icons'
 import { useEffect, useState } from 'react'
 import { PageHeader } from '../../shared/components/PageHeader'
-import { deleteAIProvider, exportBackup, getAIProvider, getBrowserShortcutsEnabled, getSession, importBackup, listAIProviders, saveAIProvider, aiTestProvider, setBrowserShortcutsEnabled, setSession, type AIProviderInput } from '../../api'
+import { clearBrowserHistory, deleteAIProvider, exportBackup, getAIProvider, getBrowserShortcutsEnabled, importBackup, listAIProviders, listBrowserHistory, saveAIProvider, aiTestProvider, setBrowserShortcutsEnabled, type AIProviderInput } from '../../api'
 import type { AIProvider, AIProviderType } from '../../types'
 import { normalizeOrigin, readSitePermissions, writeSitePermissions, type SitePermissionKind, type SitePermissionRule } from '../../features/browser/sitePermissions'
 import { readThemePreference, writeThemePreference, type ThemePreference } from '../../features/settings/theme'
 import { readSearchEngineConfig, resolveActiveSearchTemplate, SEARCH_ENGINE_PRESETS, writeSearchEngineConfig } from '../../features/browser/searchEngine'
 import { isSearchTemplateValid } from '../../features/browser/navigation'
-import { HISTORY_CHANGE_EVENT, parseHistory, type HistoryEntry } from '../../features/history/dedupeHistory'
+import { HISTORY_CHANGE_EVENT, type HistoryEntry } from '../../features/history/dedupeHistory'
 import { DEFAULT_ADVANCED_SETTINGS, readAdvancedSettings, writeAdvancedSettings, type AdvancedSettings } from '../../features/settings/advanced'
 import { isTrackingCleanerEnabled, setTrackingCleanerEnabled } from '../../features/plugins/trackingCleaner'
 import { getBrowserCapabilities, type BrowserCapabilities } from '../../services/browserCapabilities'
@@ -330,8 +330,8 @@ function PrivacySettings() {
 
   useEffect(() => {
     let active = true
-    void getSession('browser.history').then(raw => {
-      if (active) setHistoryEntries(parseHistory(raw ?? localStorage.getItem('browser.history')))
+    void listBrowserHistory().then(entries => {
+      if (active) setHistoryEntries(entries)
     })
     return () => { active = false }
   }, [])
@@ -339,15 +339,17 @@ function PrivacySettings() {
   async function clearHistory(scope: 'hour' | 'day' | 'week' | 'all') {
     const all = historyEntries
     if (scope === 'all') {
-      await writeHistoryEntries([])
+      await clearBrowserHistory()
       setHistoryEntries([])
+      window.dispatchEvent(new CustomEvent<HistoryEntry[]>(HISTORY_CHANGE_EVENT, { detail: [] }))
       messageApi.success(`已清理全部 ${all.length} 条浏览记录`)
       return
     }
     const cutoff = cutoffForScope(scope)
     const next = all.filter(item => item.visitedAt < cutoff)
-    await writeHistoryEntries(next)
+    await clearBrowserHistory(cutoff)
     setHistoryEntries(next)
+    window.dispatchEvent(new CustomEvent<HistoryEntry[]>(HISTORY_CHANGE_EVENT, { detail: next }))
     messageApi.success(`已清理 ${all.length - next.length} 条浏览记录`)
   }
 
@@ -434,14 +436,6 @@ function writeCleanupOnExitPreference(value: boolean): void {
   try {
     localStorage.setItem(CLEANUP_ON_EXIT_KEY, value ? 'true' : 'false')
   } catch { /* ignore */ }
-}
-
-async function writeHistoryEntries(entries: HistoryEntry[]): Promise<void> {
-  try {
-    localStorage.setItem('browser.history', JSON.stringify(entries))
-  } catch { /* ignore */ }
-  await setSession('browser.history', JSON.stringify(entries))
-  window.dispatchEvent(new CustomEvent<HistoryEntry[]>(HISTORY_CHANGE_EVENT, { detail: entries }))
 }
 
 function cutoffForScope(scope: 'hour' | 'day' | 'week'): number {

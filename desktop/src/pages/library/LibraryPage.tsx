@@ -6,8 +6,8 @@ import { DocumentCard } from '../../features/documents/DocumentCard'
 import { DocumentDetailDrawer } from '../../features/documents/DocumentDetailDrawer'
 import { TaskPanel } from '../../features/tasks/TaskPanel'
 import { loadDocuments } from '../../features/documents/documentService'
-import { createCollection, deleteCollection, getSession, listCollections, toggleStarred, type Collection } from '../../api'
-import { parseHistory, type HistoryEntry } from '../../features/history/dedupeHistory'
+import { createCollection, deleteCollection, listBrowserHistory, listCollections, toggleStarred, type Collection } from '../../api'
+import type { HistoryEntry } from '../../features/history/dedupeHistory'
 import { trackDownload, type DownloadEntry } from '../../features/downloads/trackDownload'
 import { useDownloadCenter } from '../../features/downloads/useDownloadCenter'
 import { DownloadCenter } from '../../features/downloads/DownloadCenter'
@@ -28,7 +28,7 @@ export function LibraryPage() {
   async function refreshCollections() { setCollections(await listCollections()) }
   useEffect(()=>{
     void loadDocuments().then(result=>{setDocuments(result.items);setOffline(result.offline);setLoaded(true)})
-    void getSession('browser.history').then(raw => setHistory(parseHistory(raw)))
+    void listBrowserHistory().then(setHistory)
     void refreshCollections()
   },[])
   function onExported(document: Document) {

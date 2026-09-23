@@ -1,5 +1,6 @@
 import { invoke } from '@tauri-apps/api/core'
 import type { AIProvider, AIProviderType, ChatRequest, ChatResponse, Document, ProviderTestResult, Task } from './types'
+import type { HistoryEntry } from './features/history/dedupeHistory'
 
 const isTauri = () => '__TAURI_INTERNALS__' in window
 
@@ -202,6 +203,33 @@ export async function getSession(key: string): Promise<string | null> {
 export async function setSession(key: string, value: string): Promise<void> {
   if (!isTauri()) return
   await invoke('local_set_session', { key, value })
+}
+
+export async function listBrowserHistory(): Promise<HistoryEntry[]> {
+  if (!isTauri()) {
+    try { return JSON.parse(localStorage.getItem('browser.history') ?? '[]') as HistoryEntry[] }
+    catch { return [] }
+  }
+  return invoke<HistoryEntry[]>('local_list_history')
+}
+
+export async function addBrowserHistory(entry: HistoryEntry): Promise<void> {
+  if (!isTauri()) {
+    const entries = await listBrowserHistory()
+    localStorage.setItem('browser.history', JSON.stringify([entry, ...entries]))
+    return
+  }
+  await invoke('local_add_history', { entry })
+}
+
+export async function clearBrowserHistory(since?: number): Promise<number> {
+  if (!isTauri()) {
+    const entries = await listBrowserHistory()
+    const remaining = since === undefined ? [] : entries.filter(entry => entry.visitedAt < since)
+    localStorage.setItem('browser.history', JSON.stringify(remaining))
+    return entries.length - remaining.length
+  }
+  return invoke<number>('local_clear_history', { since: since ?? null })
 }
 
 export const BROWSER_SHORTCUTS_STORAGE_KEY = 'arcadia-browser-shortcuts-enabled'

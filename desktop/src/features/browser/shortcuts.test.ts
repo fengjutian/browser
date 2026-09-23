@@ -22,4 +22,9 @@ describe('interpretShortcut', () => {
   it('opens a new tab on plain Ctrl+T (without shift)', () => {
     expect(interpretShortcut({ ctrlKey: true, metaKey: false, shiftKey: false, altKey: false, key: 't' })).toBe('newTab')
   })
+
+  it('opens the tab search palette on Ctrl+K and Ctrl+Shift+A', () => {
+    expect(interpretShortcut({ ctrlKey: true, metaKey: false, shiftKey: false, altKey: false, key: 'k' })).toBe('openTabSearch')
+    expect(interpretShortcut({ ctrlKey: true, metaKey: false, shiftKey: true, altKey: false, key: 'A' })).toBe('openTabSearch')
+  })
 })

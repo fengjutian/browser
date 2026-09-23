@@ -24,3 +24,5 @@
   &__hint{margin-top:10px;font-size:11px!important;color:#748078!important}
 }
 .browser-tab-audio,.browser-tab-crash{flex:none;font-size:12px}
+.tab-search-palette{display:flex;flex-direction:column;gap:8px;padding:16px 18px 14px;&__list{max-height:420px;overflow:auto;margin-top:8px}&__empty{padding:18px;text-align:center;color:#748078}&__hint{display:block;margin-top:8px;font-size:12px!important}}
+.tab-search-row{cursor:pointer;border-radius:8px;padding:6px 10px;margin:0 -4px;transition:background-color .12s;&.is-active,&:hover{background-color:rgba(167,223,189,.22)}mark{background:rgba(244,213,90,.45);color:#1d2421;padding:0 2px;border-radius:3px}}

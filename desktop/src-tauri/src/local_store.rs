@@ -126,6 +126,16 @@ const MIGRATIONS: &[(i64, &str)] = &[
             clean_exit_at INTEGER
         );",
     ),
+    (
+        10,
+        "CREATE TABLE browser_history (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            url TEXT NOT NULL,
+            title TEXT NOT NULL,
+            visited_at INTEGER NOT NULL
+        );
+        CREATE INDEX idx_browser_history_visited_at ON browser_history(visited_at DESC);",
+    ),
 ];
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -151,6 +161,14 @@ pub struct LocalDocument {
 pub struct LocalMigrationStatus {
     version: i64,
     pending: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LocalHistoryEntry {
+    url: String,
+    title: String,
+    visited_at: i64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -239,6 +257,9 @@ pub(crate) fn run_migrations(database: &mut Connection) -> Result<(), String> {
         transaction
             .execute_batch(sql)
             .map_err(|error| error.to_string())?;
+        if *version == 10 {
+            migrate_legacy_history(&transaction)?;
+        }
         transaction
             .execute(
                 "INSERT INTO schema_version(version, applied_at) VALUES(?, ?)",
@@ -248,6 +269,43 @@ pub(crate) fn run_migrations(database: &mut Connection) -> Result<(), String> {
         transaction.commit().map_err(|error| error.to_string())?;
         applied.push(*version);
         applied.sort_unstable();
+    }
+    Ok(())
+}
+
+fn migrate_legacy_history(database: &Connection) -> Result<(), String> {
+    let legacy = database.query_row(
+        "SELECT value FROM local_session WHERE key='browser.history'",
+        [],
+        |row| row.get::<_, String>(0),
+    );
+    if let Ok(raw) = legacy {
+        if let Ok(entries) = serde_json::from_str::<Vec<LocalHistoryEntry>>(&raw) {
+            for entry in entries {
+                if validate_history_entry(&entry).is_ok() {
+                    database
+                        .execute(
+                            "INSERT INTO browser_history(url,title,visited_at) VALUES(?,?,?)",
+                            params![entry.url, entry.title, entry.visited_at],
+                        )
+                        .map_err(|error| error.to_string())?;
+                }
+            }
+        }
+        database
+            .execute("DELETE FROM local_session WHERE key='browser.history'", [])
+            .map_err(|error| error.to_string())?;
+    }
+    Ok(())
+}
+
+fn validate_history_entry(entry: &LocalHistoryEntry) -> Result<(), String> {
+    if entry.url.len() > 8192 || entry.title.len() > 2048 || entry.visited_at <= 0 {
+        return Err("invalid browser history entry".into());
+    }
+    let parsed = url::Url::parse(&entry.url).map_err(|error| format!("invalid history url: {error}"))?;
+    if !matches!(parsed.scheme(), "http" | "https") {
+        return Err("history url must use http or https".into());
     }
     Ok(())
 }
@@ -933,6 +991,53 @@ pub fn local_set_session(app: tauri::AppHandle, key: String, value: String) -> R
     Ok(())
 }
 
+#[tauri::command]
+pub fn local_list_history(app: tauri::AppHandle) -> Result<Vec<LocalHistoryEntry>, String> {
+    let database = connection(&app)?;
+    let mut statement = database
+        .prepare("SELECT url,title,visited_at FROM browser_history ORDER BY visited_at DESC, id DESC")
+        .map_err(|error| error.to_string())?;
+    let rows = statement
+        .query_map([], |row| {
+            Ok(LocalHistoryEntry {
+                url: row.get(0)?,
+                title: row.get(1)?,
+                visited_at: row.get(2)?,
+            })
+        })
+        .map_err(|error| error.to_string())?;
+    rows.collect::<Result<Vec<_>, _>>()
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub fn local_add_history(app: tauri::AppHandle, entry: LocalHistoryEntry) -> Result<(), String> {
+    validate_history_entry(&entry)?;
+    let database = connection(&app)?;
+    database
+        .execute(
+            "INSERT INTO browser_history(url,title,visited_at) VALUES(?,?,?)",
+            params![entry.url, entry.title, entry.visited_at],
+        )
+        .map_err(|error| error.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+pub fn local_clear_history(app: tauri::AppHandle, since: Option<i64>) -> Result<i64, String> {
+    let database = connection(&app)?;
+    let deleted = match since {
+        Some(cutoff) if cutoff > 0 => database.execute(
+            "DELETE FROM browser_history WHERE visited_at >= ?",
+            params![cutoff],
+        ),
+        Some(_) => return Err("history cutoff must be positive".into()),
+        None => database.execute("DELETE FROM browser_history", []),
+    }
+    .map_err(|error| error.to_string())?;
+    Ok(deleted as i64)
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct LocalBackup {
@@ -1072,7 +1177,7 @@ mod tests {
             .unwrap()
             .collect::<Result<Vec<_>, _>>()
             .unwrap();
-        assert_eq!(versions, vec![1, 2, 3, 4, 5, 6, 7, 8, 9]);
+        assert_eq!(versions, vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
     }
 
     #[test]
@@ -1104,7 +1209,7 @@ mod tests {
             .unwrap()
             .collect::<Result<Vec<_>, _>>()
             .unwrap();
-        assert_eq!(versions, vec![1, 2, 3, 4, 5, 6, 7, 8, 9]);
+        assert_eq!(versions, vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
     }
 
     #[test]
@@ -1120,7 +1225,34 @@ mod tests {
             .unwrap()
             .collect::<Result<Vec<_>, _>>()
             .unwrap();
-        assert_eq!(versions, vec![1, 2, 3, 4, 5, 6, 7, 8, 9]);
+        assert_eq!(versions, vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
+    }
+
+    #[test]
+    fn v10_migrates_legacy_history_json_into_rows() {
+        let mut database = fresh();
+        run_migrations(&mut database).unwrap();
+        database.execute("DELETE FROM schema_version WHERE version=10", []).unwrap();
+        database.execute("DROP TABLE browser_history", []).unwrap();
+        database.execute(
+            "INSERT INTO local_session(key,value,updated_at) VALUES('browser.history',?,1)",
+            params![r#"[{"url":"https://example.com/a","title":"A","visitedAt":1000},{"url":"javascript:alert(1)","title":"blocked","visitedAt":1001}]"#],
+        ).unwrap();
+
+        run_migrations(&mut database).unwrap();
+
+        let rows: Vec<(String, String, i64)> = database
+            .prepare("SELECT url,title,visited_at FROM browser_history")
+            .unwrap()
+            .query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))
+            .unwrap()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+        assert_eq!(rows, vec![("https://example.com/a".into(), "A".into(), 1000)]);
+        let legacy_count: i64 = database
+            .query_row("SELECT COUNT(*) FROM local_session WHERE key='browser.history'", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(legacy_count, 0);
     }
 
     #[test]

@@ -16,6 +16,7 @@ export type ShortcutAction =
   | 'reload'
   | 'stop'
   | 'find'
+  | 'openTabSearch'
   | 'zoomIn'
   | 'zoomOut'
   | 'zoomReset'
@@ -35,6 +36,7 @@ export function interpretShortcut(event: ShortcutEvent): ShortcutAction | null {
   const lower = key.toLowerCase()
   if (modifier && lower === 'l') return 'focusAddress'
   if (modifier && lower === 'f') return 'find'
+  if (modifier && (lower === 'k' || (event.shiftKey && lower === 'a'))) return 'openTabSearch'
   if (modifier && lower === 'p') return 'print'
   if (modifier && (key === '+' || key === '=')) return 'zoomIn'
   if (modifier && key === '-') return 'zoomOut'
