@@ -766,6 +766,52 @@ fn browser_restore_scroll(app: tauri::AppHandle, label: String, x: f64, y: f64) 
 }
 
 #[tauri::command]
+fn browser_toolbar_menu(app: tauri::AppHandle, label: String, open: bool, zoom_percent: u16) -> Result<(), String> {
+    validate_browser_label(&label)?;
+    let webview = app
+        .get_webview(&label)
+        .ok_or_else(|| "browser tab webview not found".to_string())?;
+    let script = if !open {
+        "window.__arcadiaToolbarMenu?.close(false)".to_string()
+    } else {
+        format!(r#"(() => {{
+          window.__arcadiaToolbarMenu?.close(false);
+          const host = document.createElement('div');
+          host.id = '__arcadia-toolbar-menu';
+          const shadow = host.attachShadow({{mode:'closed'}});
+          const emit = action => window.__TAURI_INTERNALS__?.invoke('tauri://emit', {{event:'browser://toolbar-menu-action', payload:{{version:1,tabLabel:'{label}',action}}}}).catch(()=>undefined);
+          const close = (notify=true) => {{ document.removeEventListener('pointerdown', outside, true); document.removeEventListener('keydown', keydown, true); host.remove(); delete window.__arcadiaToolbarMenu; if(notify) emit('__dismiss__'); }};
+          const outside = event => {{ if(!event.composedPath().includes(host)) close(); }};
+          const keydown = event => {{ if(event.key === 'Escape') close(); }};
+          const items = [
+            ['find','在页面中查找'],['tab-search','搜索标签页'],['history-search','浏览历史记录'],
+            ['bookmark-add','收藏当前页'],['bookmarks','打开收藏夹'],['bulk-summary','多链接 AI 摘要'],
+            ['toggle-notes','网页笔记面板'],['save-workspace','保存当前标签为工作区'],['print','打印'],
+            null,['new-private','新建私密窗口'],['fullscreen','进入全屏'],null
+          ];
+          shadow.innerHTML = `<style>
+            :host{{all:initial}} .menu{{font:14px/1.4 system-ui,"Microsoft YaHei",sans-serif;color:#202521;background:#fff;border:1px solid #d9dfda;border-radius:12px;box-shadow:0 12px 32px rgba(20,35,27,.18);padding:8px;width:224px;box-sizing:border-box}}
+            button{{all:unset;box-sizing:border-box;display:block;width:100%;padding:9px 10px;border-radius:7px;cursor:pointer}} button:hover{{background:#edf5ef}} .sep{{height:1px;background:#e1e6e2;margin:5px 2px}} .zoom{{display:grid;grid-template-columns:34px 1fr 34px;align-items:center;gap:6px;padding:5px 3px}} .zoom button{{padding:6px;text-align:center;border:1px solid #d9dfda;background:#fff}} .zoom span{{text-align:center;font:13px system-ui}}
+          </style><div class="menu" role="menu"></div>`;
+          const menu = shadow.querySelector('.menu');
+          for(const item of items) {{
+            if(!item) {{ const sep=document.createElement('div'); sep.className='sep'; menu.append(sep); continue; }}
+            const button=document.createElement('button'); button.type='button'; button.textContent=item[1]; button.onclick=()=>{{emit(item[0]);close(false)}}; menu.append(button);
+          }}
+          const zoom=document.createElement('div'); zoom.className='zoom';
+          zoom.innerHTML='<button type="button" data-action="zoom-out">−</button><span>{zoom_percent}%</span><button type="button" data-action="zoom-in">+</button>';
+          zoom.querySelectorAll('button').forEach(button=>button.onclick=event=>{{event.stopPropagation();emit(button.dataset.action)}}); menu.append(zoom);
+          const reset=document.createElement('button'); reset.type='button'; reset.textContent='重置缩放'; reset.onclick=()=>{{emit('zoom-reset');close(false)}}; menu.append(reset);
+          Object.assign(host.style,{{position:'fixed',top:'8px',right:'8px',zIndex:'2147483647'}});
+          document.documentElement.append(host);
+          setTimeout(()=>{{document.addEventListener('pointerdown',outside,true);document.addEventListener('keydown',keydown,true)}},0);
+          window.__arcadiaToolbarMenu={{close}};
+        }})()"#)
+    };
+    webview.eval(script).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
 async fn browser_snapshot(app: tauri::AppHandle, label: String) -> Result<PageSnapshot, String> {
     validate_browser_label(&label)?;
     let webview = app
@@ -1056,6 +1102,7 @@ pub fn run() {
             browser_history,
             browser_state,
             browser_restore_scroll,
+            browser_toolbar_menu,
             browser_snapshot,
             browser_capabilities,
             browser_permission_request,

@@ -43,6 +43,20 @@ body[data-theme='dark'] .shortcut-editor__row.is-recording{outline-color:#65a77d
 body[data-theme='dark'] .shortcut-editor__row.is-overridden{background:rgba(255,165,76,.12)}
 body[data-theme='dark'] .shortcut-editor__label{color:#f0f4f1}
 body[data-theme='dark'] .shortcut-editor__hint{color:#7a857f}
+.workspaces-editor{margin-top:18px;padding:14px 16px;border:1px solid #d8ded9;border-radius:12px;background:#fafbf9}
+.workspaces-editor__header{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:10px}
+.workspaces-editor__list{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:8px}
+.workspaces-editor__row{display:grid;grid-template-columns:160px 1fr 1fr auto;align-items:center;gap:14px;padding:10px 12px;border-radius:10px;background:#fff;border:1px solid #e1e7e2}
+.workspaces-editor__row.is-editing{grid-template-columns:1fr;gap:10px;background:rgba(167,223,189,.18);border-color:#a7dfbd}
+.workspaces-editor__name{font-weight:600;color:#1d2421}
+.workspaces-editor__meta{font-size:12px;color:#748078;font-variant-numeric:tabular-nums}
+.workspaces-editor__desc{grid-column:1 / -1;margin:0!important;color:#4c5740}
+body[data-theme='dark'] .workspaces-editor{background:#18211d;border-color:#2a352f}
+body[data-theme='dark'] .workspaces-editor__row{background:#111714;border-color:#243028}
+body[data-theme='dark'] .workspaces-editor__row.is-editing{background:rgba(101,167,125,.16);border-color:#375342}
+body[data-theme='dark'] .workspaces-editor__name{color:#f0f4f1}
+body[data-theme='dark'] .workspaces-editor__meta{color:#7a857f}
+body[data-theme='dark'] .workspaces-editor__desc{color:#9aa69e}
 .browser-tab-audio,.browser-tab-crash{flex:none;font-size:12px}
 .tab-search-palette{display:flex;flex-direction:column;gap:8px;padding:16px 18px 14px;&__list{max-height:420px;overflow:auto;margin-top:8px}&__empty{padding:18px;text-align:center;color:#748078}&__hint{display:block;margin-top:8px;font-size:12px!important}}
 .tab-search-row{cursor:pointer;border-radius:8px;padding:6px 10px;margin:0 -4px;transition:background-color .12s;&.is-active,&:hover{background-color:rgba(167,223,189,.22)}mark{background:rgba(244,213,90,.45);color:#1d2421;padding:0 2px;border-radius:3px}}

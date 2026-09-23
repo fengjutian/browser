@@ -1,10 +1,10 @@
 import { MouseEvent, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import { AutoComplete, Badge, Button, Dropdown, Input, message, Modal, Popover, Segmented, Select, Space, Tabs, Tag, Tooltip, Typography, UI_MODAL_OVERLAY_EVENT, type InputRef, type MenuProps } from '../../components/ui'
-import { ArrowDownOutlined, ArrowLeftOutlined, ArrowRightOutlined, ArrowUpOutlined, AudioMutedOutlined, BookOutlined, CheckCircleOutlined, CloseCircleOutlined, CloseOutlined, CopyOutlined, DownloadOutlined, FullscreenOutlined, GlobalOutlined, LoadingOutlined, MoreOutlined, PlusOutlined, PrinterOutlined, ReloadOutlined, SafetyCertificateOutlined, SearchOutlined, SoundOutlined, StarFilled, StarOutlined, ThunderboltOutlined, TranslationOutlined, WarningOutlined } from '../../components/ui/icons'
+import { ArrowDownOutlined, ArrowLeftOutlined, ArrowRightOutlined, ArrowUpOutlined, AudioMutedOutlined, BookOutlined, CheckCircleOutlined, CloseCircleOutlined, CloseOutlined, CopyOutlined, DownloadOutlined, FullscreenOutlined, GlobalOutlined, LoadingOutlined, MoreOutlined, PlusOutlined, PrinterOutlined, ReloadOutlined, SafetyCertificateOutlined, SaveOutlined, SearchOutlined, SoundOutlined, StarFilled, StarOutlined, ThunderboltOutlined, TranslationOutlined, WarningOutlined } from '../../components/ui/icons'
 import { Sparkles as RobotOutlined } from 'lucide-react'
 import type { BrowserTab, BrowserTabError } from '../../types'
 import { addBrowserHistory, deleteClosedTab, findDocumentByUrl, getBrowserShortcutsEnabled, getBrowserWorkspace, getDocument, listBrowserHistory, listClosedTabs, listSitePermissions, saveBrowserWorkspace, saveClosedTab, saveDocument, setSession, toggleStarred } from '../../api'
-import { captureNativePage, closeNativeTab, ensureNativeTab, findInNativeTab, hasNativeTab, hideNativeTab, isNativeBrowserAvailable, navigateHistory, onNativeAdBlockUpdate, onNativeNewTab, openNativeTab, printNativeTab, readNativeState, reloadNativeTab, resizeNativeTab, showNativeTab, stopNativeTab, zoomNativeTab } from '../../services/nativeBrowser'
+import { captureNativePage, closeNativeTab, ensureNativeTab, findInNativeTab, hasNativeTab, hideNativeTab, isNativeBrowserAvailable, navigateHistory, onNativeAdBlockUpdate, onNativeNewTab, onNativeToolbarMenuAction, openNativeTab, printNativeTab, readNativeState, reloadNativeTab, resizeNativeTab, setNativeToolbarMenu, showNativeTab, stopNativeTab, zoomNativeTab } from '../../services/nativeBrowser'
 import { extractArticle } from '../../features/reader/extractArticle'
 import type { ReaderArticle } from '../../features/reader/types'
 import { classifySaveError } from '../../features/documents/saveClassifier'
@@ -62,6 +62,16 @@ import { AD_BLOCKER_EVENT, isAdBlockerEnabled } from '../../features/plugins/adB
 
 const SESSION_KEY = 'browser.tabs'
 const SESSION_DEBOUNCE_MS = 500
+type ToolbarOverlay = 'downloads' | 'bookmarks' | 'resources' | 'menu' | 'tab-menu'
+
+// Native child WebViews are always composited above the React window on
+// Windows. Keep enough room for toolbar popovers instead of hiding the whole
+// page (which made opening the browser menu look like a blank-page failure).
+const TOOLBAR_OVERLAY_INSET: Partial<Record<ToolbarOverlay, number>> = {
+  downloads: 420,
+  bookmarks: 340,
+  resources: 280,
+}
 const TAB_GROUP_PALETTE = ['#a7dfbd', '#9bc6e8', '#dfc0a7', '#c8a7df', '#dfb5b5', '#bce0c6']
 const tabGroupColor = (id: string | null | undefined): string => {
   if (!id) return 'transparent'
@@ -189,7 +199,7 @@ export function BrowserPage({ visible = true, onSearchKnowledge }: { visible?: b
   const [trackingCleanerEnabled, setTrackingCleanerEnabledState] = useState(isTrackingCleanerEnabled)
   const [adBlockerEnabled, setAdBlockerEnabledState] = useState(isAdBlockerEnabled)
   const [blockedAdsByTab, setBlockedAdsByTab] = useState<Record<string, number>>({})
-  const [toolbarOverlay, setToolbarOverlay] = useState<'downloads' | 'bookmarks' | 'resources' | 'menu' | 'tab-menu' | null>(null)
+  const [toolbarOverlay, setToolbarOverlay] = useState<ToolbarOverlay | null>(null)
   const [modalOverlayCount, setModalOverlayCount] = useState(0)
   const surfaceRef = useRef<HTMLDivElement>(null)
   const addressRef = useRef<InputRef>(null)
@@ -228,14 +238,26 @@ export function BrowserPage({ visible = true, onSearchKnowledge }: { visible?: b
   const safetyLevel: SafetyLevel = highestLevel(safetyIssues)
   const showSafety = advancedSettings.safetyWarnings && safetyLevel !== 'safe' && address.trim().length > 0
 
-  function changeToolbarOverlay(kind: 'downloads' | 'bookmarks' | 'resources' | 'menu' | 'tab-menu', open: boolean) {
+  function changeToolbarOverlay(kind: ToolbarOverlay, open: boolean) {
     if (open) { setToolbarOverlay(kind); return }
     setToolbarOverlay(current => current === kind ? null : current)
   }
 
   useEffect(() => {
     if (!visible || readerArticle || !hasNativeTab(active.id)) return
-    void (toolbarOverlay || modalOverlayCount > 0 ? hideNativeTab(active.id) : showNativeTab(active.id))
+    if (modalOverlayCount > 0 || toolbarOverlay === 'tab-menu') {
+      void hideNativeTab(active.id)
+      return
+    }
+    const next = bounds()
+    const inset = toolbarOverlay ? TOOLBAR_OVERLAY_INSET[toolbarOverlay] ?? 0 : 0
+    if (next && inset > 0) {
+      void resizeNativeTab(active.id, { ...next, width: Math.max(1, next.width - inset) })
+        .then(() => showNativeTab(active.id))
+      return
+    }
+    if (next) void resizeNativeTab(active.id, next).then(() => showNativeTab(active.id))
+    else void showNativeTab(active.id)
   }, [active.id, modalOverlayCount, readerArticle, toolbarOverlay, visible])
 
   useEffect(() => {
@@ -405,13 +427,22 @@ export function BrowserPage({ visible = true, onSearchKnowledge }: { visible?: b
     previousTab.current = active.id
     if (hasNativeTab(active.id)) {
       if (visible) {
-        void showNativeTab(active.id)
-        requestAnimationFrame(() => { const next = bounds(); if (next) void resizeNativeTab(active.id, next) })
+        if (modalOverlayCount > 0 || toolbarOverlay === 'tab-menu') {
+          void hideNativeTab(active.id)
+        } else {
+          void showNativeTab(active.id)
+          requestAnimationFrame(() => {
+            const next = bounds()
+            if (!next) return
+            const inset = toolbarOverlay ? TOOLBAR_OVERLAY_INSET[toolbarOverlay] ?? 0 : 0
+            void resizeNativeTab(active.id, { ...next, width: Math.max(1, next.width - inset) })
+          })
+        }
       } else {
         void hideNativeTab(active.id)
       }
     }
-  }, [active.id, visible])
+  }, [active.id, modalOverlayCount, toolbarOverlay, visible])
 
   const tabRuntime = useTabRuntime({
     tab: active,
@@ -435,10 +466,15 @@ export function BrowserPage({ visible = true, onSearchKnowledge }: { visible?: b
 
   useEffect(() => {
     if (!surfaceRef.current || !visible) return
-    const observer = new ResizeObserver(() => { const next = bounds(); if (next) void resizeNativeTab(active.id, next) })
+    const observer = new ResizeObserver(() => {
+      const next = bounds()
+      if (!next || modalOverlayCount > 0 || toolbarOverlay === 'tab-menu') return
+      const inset = toolbarOverlay ? TOOLBAR_OVERLAY_INSET[toolbarOverlay] ?? 0 : 0
+      void resizeNativeTab(active.id, { ...next, width: Math.max(1, next.width - inset) })
+    })
     observer.observe(surfaceRef.current)
     return () => observer.disconnect()
-  }, [active.id, aiOpen, findOpen, visible])
+  }, [active.id, aiOpen, findOpen, modalOverlayCount, toolbarOverlay, visible])
 
   useEffect(() => () => { tabsRef.current.forEach(tab => { void closeNativeTab(tab.id) }) }, [])
 
@@ -674,19 +710,81 @@ export function BrowserPage({ visible = true, onSearchKnowledge }: { visible?: b
     const next = await toggleWindowFullscreen()
     setIsWindowFullscreen(next)
   }
+  function runBrowserMenuAction(action: string) {
+    switch (action) {
+      case 'find': setFindOpen(true); break
+      case 'tab-search': setTabSearchOpen(true); break
+      case 'history-search': setHistorySearchOpen(true); break
+      case 'bookmark-add': void addCurrentAsBookmark(); break
+      case 'bookmarks': setBookmarkPaletteOpen(true); break
+      case 'bulk-summary': setBulkSummaryOpen(true); break
+      case 'toggle-notes': setNotesOpen(value => !value); break
+      case 'save-workspace': void saveAsWorkspace(); break
+      case 'print': void printNativeTab(active.id); break
+      case 'new-private': openNewTab(undefined, { private: true }); break
+      case 'fullscreen': void handleToggleFullscreen(); break
+      case 'zoom-out': changeZoom(active.id, -0.1); break
+      case 'zoom-in': changeZoom(active.id, 0.1); break
+      case 'zoom-reset': setZoom(active.id, 1); break
+    }
+  }
+
+  useEffect(() => {
+    let disposed = false
+    let unlisten: (() => void) | undefined
+    void onNativeToolbarMenuAction(({ tabId, action }) => {
+      if (disposed || tabId !== activeTabIdRef.current) return
+      if (action !== '__dismiss__') runBrowserMenuAction(action)
+      if (!action.startsWith('zoom-') || action === 'zoom-reset') setToolbarOverlay(null)
+    }).then(stop => {
+      if (disposed) stop()
+      else unlisten = stop
+    })
+    return () => { disposed = true; unlisten?.() }
+  })
+
+  function toggleBrowserMenu() {
+    const open = toolbarOverlay !== 'menu'
+    setToolbarOverlay(open ? 'menu' : null)
+    void setNativeToolbarMenu(active.id, open, Math.round((zoomLevels[active.id] ?? 1) * 100)).catch(() => {
+      setToolbarOverlay(null)
+      messageApi.error('菜单浮层加载失败，请重启桌面应用后重试')
+    })
+  }
+
+  useEffect(() => {
+    if (!nativeMode) return
+    const isMenuTrigger = (event: Event) => event.target instanceof Element && !!event.target.closest('button[aria-label="浏览器菜单"]')
+    const stopPointerDown = (event: Event) => {
+      if (isMenuTrigger(event)) event.stopImmediatePropagation()
+    }
+    const interceptClick = (event: Event) => {
+      if (!isMenuTrigger(event)) return
+      event.preventDefault()
+      event.stopImmediatePropagation()
+      toggleBrowserMenu()
+    }
+    document.addEventListener('pointerdown', stopPointerDown, true)
+    document.addEventListener('click', interceptClick, true)
+    return () => {
+      document.removeEventListener('pointerdown', stopPointerDown, true)
+      document.removeEventListener('click', interceptClick, true)
+    }
+  }, [active.id, nativeMode, toolbarOverlay, zoomLevels])
+
   const browserMenu: MenuProps['items'] = ([
-    { key: 'find', label: '在页面中查找', extra: 'Ctrl+F', onClick: () => setFindOpen(true) },
-    { key: 'tab-search', label: '搜索标签页', extra: 'Ctrl+K', onClick: () => setTabSearchOpen(true) },
-    { key: 'history-search', label: '浏览历史记录', extra: 'Ctrl+H', onClick: () => setHistorySearchOpen(true) },
-    { key: 'bookmark-add', label: '收藏当前页', extra: 'Ctrl+D', onClick: () => void addCurrentAsBookmark() },
-    { key: 'bookmarks', label: '打开收藏夹', extra: 'Ctrl+Shift+O', onClick: () => setBookmarkPaletteOpen(true) },
-    { key: 'bulk-summary', label: '多链接 AI 摘要', extra: 'Ctrl+Shift+S', onClick: () => setBulkSummaryOpen(true) },
-    { key: 'toggle-notes', label: '网页笔记面板', extra: 'Ctrl+Shift+N', onClick: () => setNotesOpen(value => !value) },
-    { key: 'save-workspace', label: '保存当前标签为工作区', icon: <SaveOutlined/>, disabled: tabs.length === 0, onClick: () => void saveAsWorkspace() },
-    { key: 'print', label: '打印', icon: <PrinterOutlined/>, extra: 'Ctrl+P', disabled: !nativeMode, onClick: () => void printNativeTab(active.id) },
+    { key: 'find', label: '在页面中查找', extra: 'Ctrl+F', onClick: () => runBrowserMenuAction('find') },
+    { key: 'tab-search', label: '搜索标签页', extra: 'Ctrl+K', onClick: () => runBrowserMenuAction('tab-search') },
+    { key: 'history-search', label: '浏览历史记录', extra: 'Ctrl+H', onClick: () => runBrowserMenuAction('history-search') },
+    { key: 'bookmark-add', label: '收藏当前页', extra: 'Ctrl+D', onClick: () => runBrowserMenuAction('bookmark-add') },
+    { key: 'bookmarks', label: '打开收藏夹', extra: 'Ctrl+Shift+O', onClick: () => runBrowserMenuAction('bookmarks') },
+    { key: 'bulk-summary', label: '多链接 AI 摘要', extra: 'Ctrl+Shift+S', onClick: () => runBrowserMenuAction('bulk-summary') },
+    { key: 'toggle-notes', label: '网页笔记面板', extra: 'Ctrl+Shift+N', onClick: () => runBrowserMenuAction('toggle-notes') },
+    { key: 'save-workspace', label: '保存当前标签为工作区', icon: <SaveOutlined/>, disabled: tabs.length === 0, onClick: () => runBrowserMenuAction('save-workspace') },
+    { key: 'print', label: '打印', icon: <PrinterOutlined/>, extra: 'Ctrl+P', disabled: !nativeMode, onClick: () => runBrowserMenuAction('print') },
     { type: 'divider' },
-    { key: 'new-private', label: '新建私密窗口', icon: <LockOutlined/>, extra: 'Shift+Ctrl+N', onClick: () => openNewTab(undefined, { private: true }) },
-    { key: 'fullscreen', label: isWindowFullscreen ? '退出全屏' : '进入全屏', icon: <FullscreenOutlined/>, extra: 'F11', onClick: () => void handleToggleFullscreen() },
+    { key: 'new-private', label: '新建私密窗口', icon: <LockOutlined/>, extra: 'Shift+Ctrl+N', onClick: () => runBrowserMenuAction('new-private') },
+    { key: 'fullscreen', label: isWindowFullscreen ? '退出全屏' : '进入全屏', icon: <FullscreenOutlined/>, extra: 'F11', onClick: () => runBrowserMenuAction('fullscreen') },
     { type: 'divider' },
     { key: 'zoom', label: <Space><Button size="small" onClick={event => { event.stopPropagation(); changeZoom(active.id, -0.1) }}>−</Button><span className="browser-zoom-value">{Math.round((zoomLevels[active.id] ?? 1) * 100)}%</span><Button size="small" onClick={event => { event.stopPropagation(); changeZoom(active.id, 0.1) }}>+</Button></Space> },
     { key: 'zoom-reset', label: '重置缩放', extra: 'Ctrl+0', onClick: () => setZoom(active.id, 1) },
@@ -1408,7 +1506,7 @@ export function BrowserPage({ visible = true, onSearchKnowledge }: { visible?: b
       onOk={() => void confirmSaveWorkspace()}
       okText="保存"
       cancelText="取消"
-      destroyOnClose
+      destroyOnHidden
     >
       <Typography.Paragraph type="secondary">工作区会记住当前所有标签页的 URL、标题、固定/静音状态。点击保存后可在「设置 → 浏览器 → 工作区」中恢复或删除。</Typography.Paragraph>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>

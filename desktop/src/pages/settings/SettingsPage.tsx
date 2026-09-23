@@ -1,4 +1,4 @@
-import { Alert, Button, Card, Descriptions, Form, Input, InputNumber, List, message, Segmented, Select, Space, Switch, Tabs, Tag, Typography } from '../../components/ui'
+import { Alert, Button, Card, Descriptions, Form, Input, InputNumber, List, message, Popconfirm, Segmented, Select, Space, Switch, Tabs, Tag, Typography } from '../../components/ui'
 import { BgColorsOutlined, DeleteOutlined, KeyOutlined, MoonOutlined, SafetyCertificateOutlined, SaveOutlined, SunOutlined, ThunderboltOutlined } from '../../components/ui/icons'
 import { useEffect, useState } from 'react'
 import { PageHeader } from '../../shared/components/PageHeader'
@@ -27,6 +27,8 @@ import {
   type ShortcutAction,
   type ShortcutOverrides,
 } from '../../features/browser/shortcuts'
+import { deleteWorkspace, listWorkspaces, saveWorkspace, validateWorkspaceDescription, validateWorkspaceName, decorateSummaries, relativeUpdatedAt, type WorkspaceDisplayRow } from '../../features/browser/workspaces'
+import { getWorkspace } from '../../services/workspaces'
 
 const PROVIDER_OPTIONS: { label: string; value: AIProviderType }[] = [
   { label: 'OpenAI 兼容（API Key）', value: 'openai-compatible' },
@@ -93,6 +95,137 @@ function GeneralSettings() {
 }
 
 const SHORTCUTS_EVENT = 'arcadia-shortcuts-change'
+
+function WorkspacesEditor() {
+  const [messageApi, contextHolder] = message.useMessage()
+  const [rows, setRows] = useState<WorkspaceDisplayRow[]>([])
+  const [loading, setLoading] = useState(false)
+  const [editingId, setEditingId] = useState<string | null>(null)
+  const [draftName, setDraftName] = useState('')
+  const [draftDescription, setDraftDescription] = useState('')
+
+  async function refresh() {
+    if (!('__TAURI_INTERNALS__' in window)) {
+      setRows([])
+      return
+    }
+    setLoading(true)
+    try {
+      const items = await listWorkspaces()
+      setRows(decorateSummaries(items))
+    } catch (error) {
+      messageApi.error(`读取工作区失败：${String(error)}`)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  useEffect(() => { void refresh() }, [])
+
+  function startEdit(row: WorkspaceDisplayRow) {
+    setEditingId(row.id)
+    setDraftName(row.name)
+    setDraftDescription(row.description)
+  }
+
+  function cancelEdit() {
+    setEditingId(null)
+    setDraftName('')
+    setDraftDescription('')
+  }
+
+  async function saveEdit(row: WorkspaceDisplayRow) {
+    const nameCheck = validateWorkspaceName(draftName)
+    if (!nameCheck.ok) {
+      messageApi.warning(nameCheck.reason ?? '名称无效')
+      return
+    }
+    const descCheck = validateWorkspaceDescription(draftDescription)
+    if (!descCheck.ok) {
+      messageApi.warning(descCheck.reason ?? '描述无效')
+      return
+    }
+    try {
+      const payload = await getWorkspace(row.id)
+      const summary = await saveWorkspace({
+        id: row.id,
+        name: nameCheck.reason ? row.name : draftName.trim(),
+        description: draftDescription.trim(),
+        payload: payload?.payload ?? { tabs: [], activeTabId: '' },
+      })
+      messageApi.success(`已更新工作区「${summary.name}」`)
+      cancelEdit()
+      await refresh()
+    } catch (error) {
+      messageApi.error(`更新失败：${String(error)}`)
+    }
+  }
+
+  async function overwrite(row: WorkspaceDisplayRow) {
+    try {
+      const payload = await getWorkspace(row.id)
+      if (!payload) return
+      const summary = await saveWorkspace({
+        id: row.id,
+        name: row.name,
+        description: row.description,
+        payload: { ...payload.payload, refreshedAt: new Date().toISOString() },
+      })
+      messageApi.success(`已刷新「${summary.name}」时间戳`)
+      await refresh()
+    } catch (error) {
+      messageApi.error(`刷新失败：${String(error)}`)
+    }
+  }
+
+  async function remove(row: WorkspaceDisplayRow) {
+    try {
+      await deleteWorkspace(row.id)
+      messageApi.success(`已删除工作区「${row.name}」`)
+      if (editingId === row.id) cancelEdit()
+      await refresh()
+    } catch (error) {
+      messageApi.error(`删除失败：${String(error)}`)
+    }
+  }
+
+  return <>{contextHolder}<div className="workspaces-editor">
+    <div className="workspaces-editor__header">
+      <Typography.Paragraph type="secondary">从浏览器工具栏的「⋯」→「保存当前标签为工作区」可保存快照；这里可以改名、刷新时间戳或删除。</Typography.Paragraph>
+    </div>
+    {rows.length === 0
+      ? <Typography.Text type="secondary">{loading ? '读取中…' : '还没有保存过工作区'}</Typography.Text>
+      : <ul className="workspaces-editor__list">
+          {rows.map(row => {
+              const isEditing = editingId === row.id
+              return <li key={row.id} className={`workspaces-editor__row${isEditing ? ' is-editing' : ''}`}>
+                {isEditing ? <>
+                  <Space.Compact block>
+                    <Input value={draftName} onChange={event => setDraftName(event.target.value)} maxLength={80} placeholder="名称" />
+                  </Space.Compact>
+                  <Input.TextArea value={draftDescription} onChange={event => setDraftDescription(event.target.value)} maxLength={240} rows={2} placeholder="描述" />
+                  <Space size={4}>
+                    <Button size="small" type="primary" onClick={() => void saveEdit(row)}>保存</Button>
+                    <Button size="small" onClick={cancelEdit}>取消</Button>
+                  </Space>
+                </> : <>
+                  <span className="workspaces-editor__name">{row.name}</span>
+                  <span className="workspaces-editor__meta">{row.tabCount} 个标签 · {row.relativeUpdated}</span>
+                  {row.description ? <Typography.Paragraph type="secondary" ellipsis={{ rows: 2, tooltip: row.description }} className="workspaces-editor__desc">{row.description}</Typography.Paragraph> : <span/>}
+                  <Space size={4}>
+                    <Button size="small" disabled onClick={() => messageApi.info('切换工作区请在「工具栏 ⋯ → 保存当前标签为工作区」覆盖同名条目后重启,或在新窗口批量打开。')}>恢复</Button>
+                    <Button size="small" onClick={() => startEdit(row)}>编辑</Button>
+                    <Button size="small" onClick={() => void overwrite(row)}>刷新时间戳</Button>
+                    <Popconfirm title={`删除工作区「${row.name}」？`} description="仅移除数据库中的工作区记录，不影响已打开的标签页。" okText="删除" cancelText="取消" okButtonProps={{ danger: true }} onConfirm={() => void remove(row)}>
+                      <Button size="small" danger icon={<DeleteOutlined/>}/>
+                    </Popconfirm>
+                  </Space>
+                </>}
+              </li>
+            })}
+        </ul>}
+  </div></>
+}
 
 function BrowserSettings() {
   const [enabled, setEnabled] = useState<boolean>(() => getBrowserShortcutsEnabled())
@@ -211,6 +344,7 @@ function BrowserSettings() {
         })}
       </ul>
     </div>
+    <WorkspacesEditor/>
     <Typography.Title level={5} style={{ marginTop: 24 }}>默认搜索引擎</Typography.Title>
     <Typography.Paragraph type="secondary">地址栏中非 URL 输入会展开为搜索引擎查询；模板必须包含 <code>{'{query}'}</code> 占位符。</Typography.Paragraph>
     <Segmented
