@@ -1270,7 +1270,7 @@ pub fn local_save_workspace(app: tauri::AppHandle, input: LocalWorkspaceSaveInpu
     validate_workspace_name(&input.name)?;
     if input.description.chars().count() > 240 { return Err("workspace description too long (max 240 chars)".into()); }
     let database = connection(&app)?;
-    let now = iso8601_now();
+    let now = chrono::Utc::now().to_rfc3339();
     let epoch = unix_seconds();
     let tab_count = count_tabs(&input.payload);
     let payload_str = serde_json::to_string(&input.payload).map_err(|error| error.to_string())?;
@@ -1708,6 +1708,41 @@ mod tests {
         assert!(validate_provider_base_url("http://api.example.com/v1").is_err());
         assert!(validate_provider_base_url("https://user:pass@api.example.com").is_err());
         assert!(validate_provider_base_url("https://api.example.com?v=1").is_err());
+    }
+
+    #[test]
+    fn workspace_validators_reject_empty_and_oversize_names() {
+        assert!(validate_workspace_name("").is_err());
+        assert!(validate_workspace_name("   ").is_err());
+        let long = "中".repeat(81);
+        assert!(validate_workspace_name(&long).is_err());
+        assert!(validate_workspace_name("  工作日  ").is_ok());
+    }
+
+    #[test]
+    fn count_tabs_reads_payload_array_length() {
+        let payload = serde_json::json!({ "tabs": [{}, {}, {}] });
+        assert_eq!(count_tabs(&payload), 3);
+        assert_eq!(count_tabs(&serde_json::json!({})), 0);
+        assert_eq!(count_tabs(&serde_json::json!({ "tabs": "not-an-array" })), 0);
+    }
+
+    #[test]
+    fn workspace_table_exists_after_v13_migration() {
+        let mut database = fresh();
+        run_migrations(&mut database).unwrap();
+        let count: i64 = database
+            .query_row("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='workspaces'", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(count, 1);
+        let versions: Vec<i64> = database
+            .prepare("SELECT version FROM schema_version ORDER BY version")
+            .unwrap()
+            .query_map([], |row| row.get(0))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        assert!(versions.contains(&13), "schema_version must include 13, got {versions:?}");
     }
 
     fn local_import_backup_for_test(database: &mut Connection, backup: LocalBackup) -> Result<LocalImportSummary, String> {

@@ -90,7 +90,7 @@ export function LibraryPage() {
     <DownloadCenter center={downloadCenter} />
   </div>
   const documentContent = <div className="library-module"><div className="library-module__head"><div><Typography.Title level={3}>最近保存</Typography.Title><Typography.Text type="secondary">已沉淀到本地知识库的内容。</Typography.Text></div></div>
-    {!loaded?<Skeleton active/>:!documents.length?<Empty description={offline?'本地数据服务未连接':'暂无保存内容，请先从浏览器保存网页。'}/>:<Row gutter={[16,16]}>{documents.map(document=><Col xs={24} lg={12} key={document.id}><DocumentCard document={document} onOpen={setSelected} onToggleStarred={toggleStar} onArchived={handleArchived} onChanged={refreshCollections}/></Col>)}</Row>}
+    {!loaded?<Skeleton active/>:!documents.length?<Empty description={offline?'本地数据服务未连接':'暂无保存内容，请先从浏览器保存网页。'}/>:<div className="library-document-grid">{documents.map(document=><DocumentCard key={document.id} document={document} onOpen={setSelected} onToggleStarred={toggleStar} onArchived={handleArchived} onChanged={refreshCollections}/>)}</div>}
     <TaskPanel/>
   </div>
   return <section className="page">{contextHolder}<PageHeader eyebrow="KNOWLEDGE BASE" title="你的知识库" description="保存的网页会在这里沉淀、组织并被重新发现。" action="添加文档"/>

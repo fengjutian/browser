@@ -22,6 +22,7 @@ import { AssistantPanel } from '../../features/ai/AssistantPanel'
 import { classifyNavigationInput, renderSearchTemplate, resolveNavigationInput } from '../../features/browser/navigation'
 import { useDownloads } from '../../features/downloads/useDownloads'
 import { useDownloadQueue } from '../../features/downloads/useDownloadQueue'
+import { saveWorkspace, snapshotTabsToPayload } from '../../services/workspaces'
 import { useTabRuntime } from '../../features/browser/useTabRuntime'
 import { buildAddressSuggestions } from '../../features/browser/addressSuggestions'
 import { DownloadSummary } from '../../features/downloads/DownloadCenter'
@@ -681,6 +682,7 @@ export function BrowserPage({ visible = true, onSearchKnowledge }: { visible?: b
     { key: 'bookmarks', label: '打开收藏夹', extra: 'Ctrl+Shift+O', onClick: () => setBookmarkPaletteOpen(true) },
     { key: 'bulk-summary', label: '多链接 AI 摘要', extra: 'Ctrl+Shift+S', onClick: () => setBulkSummaryOpen(true) },
     { key: 'toggle-notes', label: '网页笔记面板', extra: 'Ctrl+Shift+N', onClick: () => setNotesOpen(value => !value) },
+    { key: 'save-workspace', label: '保存当前标签为工作区', icon: <SaveOutlined/>, disabled: tabs.length === 0, onClick: () => void saveAsWorkspace() },
     { key: 'print', label: '打印', icon: <PrinterOutlined/>, extra: 'Ctrl+P', disabled: !nativeMode, onClick: () => void printNativeTab(active.id) },
     { type: 'divider' },
     { key: 'new-private', label: '新建私密窗口', icon: <LockOutlined/>, extra: 'Shift+Ctrl+N', onClick: () => openNewTab(undefined, { private: true }) },
@@ -763,6 +765,49 @@ export function BrowserPage({ visible = true, onSearchKnowledge }: { visible?: b
     const url = active.url
     if (!url) return
     await navigate(url)
+  }
+
+  const [saveWorkspaceOpen, setSaveWorkspaceOpen] = useState(false)
+  const [saveWorkspaceName, setSaveWorkspaceName] = useState('')
+  const [saveWorkspaceDescription, setSaveWorkspaceDescription] = useState('')
+
+  function openSaveWorkspaceDialog() {
+    if (tabs.length === 0) {
+      messageApi.warning('当前没有可保存的标签页')
+      return
+    }
+    const stamp = new Date()
+    const stampLabel = `${stamp.getFullYear()}-${String(stamp.getMonth() + 1).padStart(2, '0')}-${String(stamp.getDate()).padStart(2, '0')} ${String(stamp.getHours()).padStart(2, '0')}:${String(stamp.getMinutes()).padStart(2, '0')}`
+    setSaveWorkspaceName(`工作区 ${stampLabel}`)
+    setSaveWorkspaceDescription('')
+    setSaveWorkspaceOpen(true)
+  }
+
+  async function saveAsWorkspace() {
+    openSaveWorkspaceDialog()
+  }
+
+  async function confirmSaveWorkspace() {
+    const name = saveWorkspaceName.trim()
+    if (!name) {
+      messageApi.warning('请填写工作区名称')
+      return
+    }
+    if (name.length > 80) {
+      messageApi.warning('名称最多 80 个字符')
+      return
+    }
+    try {
+      const summary = await saveWorkspace({
+        name,
+        description: saveWorkspaceDescription.trim(),
+        payload: snapshotTabsToPayload(tabs),
+      })
+      messageApi.success(`已保存工作区「${summary.name}」(${summary.tabCount} 个标签)`)
+      setSaveWorkspaceOpen(false)
+    } catch (error) {
+      messageApi.error(`保存失败：${String(error)}`)
+    }
   }
 
   async function retryTab(id: string) {
@@ -1356,6 +1401,39 @@ export function BrowserPage({ visible = true, onSearchKnowledge }: { visible?: b
       onRemove={id => setNotes(current => dropNoteEntry(current, id))}
       onUpdate={(id, patch) => setNotes(current => patchNoteEntry(current, id, patch))}
     />
+    <Modal
+      title="保存工作区"
+      open={saveWorkspaceOpen}
+      onCancel={() => setSaveWorkspaceOpen(false)}
+      onOk={() => void confirmSaveWorkspace()}
+      okText="保存"
+      cancelText="取消"
+      destroyOnClose
+    >
+      <Typography.Paragraph type="secondary">工作区会记住当前所有标签页的 URL、标题、固定/静音状态。点击保存后可在「设置 → 浏览器 → 工作区」中恢复或删除。</Typography.Paragraph>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+        <label>
+          <Typography.Text strong>名称</Typography.Text>
+          <Input
+            value={saveWorkspaceName}
+            onChange={event => setSaveWorkspaceName(event.target.value)}
+            maxLength={80}
+            placeholder="例如：工作日上午"
+            autoFocus
+          />
+        </label>
+        <label>
+          <Typography.Text strong>描述（可选）</Typography.Text>
+          <Input.TextArea
+            value={saveWorkspaceDescription}
+            onChange={event => setSaveWorkspaceDescription(event.target.value)}
+            maxLength={240}
+            rows={3}
+            placeholder="这个工作区用来做什么？"
+          />
+        </label>
+      </div>
+    </Modal>
     {certificatePrompt.prompt && <CertificateErrorBar payload={certificatePrompt.prompt} onRespond={allow => void certificatePrompt.respond(allow)} />}
     <RecoveryPanel
       open={lockState !== null}
