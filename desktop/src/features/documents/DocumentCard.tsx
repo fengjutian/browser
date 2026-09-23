@@ -1,6 +1,5 @@
-import { message } from 'antd'
-import { Button, Card, Dropdown, Input, Popover, Space, Tag, Tooltip, Typography } from '../../components/ui'
-import { ClockCircleOutlined, FileTextOutlined, FolderAddOutlined, InboxOutlined, MoreOutlined, StarFilled, StarOutlined } from '@ant-design/icons'
+import { Button, Card, Dropdown, Input, message, Popover, Space, Tag, Tooltip, Typography } from '../../components/ui'
+import { ClockCircleOutlined, FileTextOutlined, FolderAddOutlined, InboxOutlined, MoreOutlined, StarFilled, StarOutlined } from '../../components/ui/icons'
 import { useEffect, useState } from 'react'
 import type { Document } from '../../types'
 import { addToCollection, archiveDocument, createCollection, listCollections, type Collection } from '../../api'

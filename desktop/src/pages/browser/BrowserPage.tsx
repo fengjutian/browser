@@ -1,7 +1,6 @@
 import { MouseEvent, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
-import { message } from 'antd'
-import { AutoComplete, Badge, Button, Card, Dropdown, Input, Modal, Popover, Segmented, Select, Space, Tabs, Tag, Tooltip, Typography, UI_MODAL_OVERLAY_EVENT, type InputRef, type MenuProps } from '../../components/ui'
-import { ArrowDownOutlined, ArrowLeftOutlined, ArrowRightOutlined, ArrowUpOutlined, AudioMutedOutlined, BookOutlined, CheckCircleOutlined, CloseCircleOutlined, CloseOutlined, CopyOutlined, DownloadOutlined, FullscreenOutlined, GlobalOutlined, LoadingOutlined, MoreOutlined, PlusOutlined, PrinterOutlined, ReloadOutlined, SafetyCertificateOutlined, SaveOutlined, SearchOutlined, SoundOutlined, StarFilled, StarOutlined, ThunderboltOutlined, TranslationOutlined, WarningOutlined } from '@ant-design/icons'
+import { AutoComplete, Badge, Button, Dropdown, Input, message, Modal, Popover, Segmented, Select, Space, Tabs, Tag, Tooltip, Typography, UI_MODAL_OVERLAY_EVENT, type InputRef, type MenuProps } from '../../components/ui'
+import { ArrowDownOutlined, ArrowLeftOutlined, ArrowRightOutlined, ArrowUpOutlined, AudioMutedOutlined, BookOutlined, CheckCircleOutlined, CloseCircleOutlined, CloseOutlined, CopyOutlined, DownloadOutlined, FullscreenOutlined, GlobalOutlined, LoadingOutlined, MoreOutlined, PlusOutlined, PrinterOutlined, ReloadOutlined, SafetyCertificateOutlined, SearchOutlined, SoundOutlined, StarFilled, StarOutlined, ThunderboltOutlined, TranslationOutlined, WarningOutlined } from '../../components/ui/icons'
 import { Sparkles as RobotOutlined } from 'lucide-react'
 import type { BrowserTab, BrowserTabError } from '../../types'
 import { addBrowserHistory, deleteClosedTab, findDocumentByUrl, getBrowserShortcutsEnabled, getBrowserWorkspace, getDocument, listBrowserHistory, listClosedTabs, listSitePermissions, saveBrowserWorkspace, saveClosedTab, saveDocument, setSession, toggleStarred } from '../../api'
@@ -22,6 +21,7 @@ import { popClosedTab, recordClosedTab, type ClosedTab } from '../../features/br
 import { AssistantPanel } from '../../features/ai/AssistantPanel'
 import { classifyNavigationInput, renderSearchTemplate, resolveNavigationInput } from '../../features/browser/navigation'
 import { useDownloads } from '../../features/downloads/useDownloads'
+import { useDownloadQueue } from '../../features/downloads/useDownloadQueue'
 import { useTabRuntime } from '../../features/browser/useTabRuntime'
 import { buildAddressSuggestions } from '../../features/browser/addressSuggestions'
 import { DownloadSummary } from '../../features/downloads/DownloadCenter'
@@ -47,7 +47,7 @@ import { addNote as appendNoteEntry, readNotes as loadStoredNotes, removeNote as
 import { isPrivateTab, makePrivateTab, stripPrivateTabs, resetPrivateSessionPermissions } from '../../features/browser/privateTabs'
 import { readSitePermissions, writeSitePermissions } from '../../features/browser/sitePermissions'
 import { forceAllDenyFor } from '../../features/browser/usePermissionPrompt'
-import { LockOutlined } from '@ant-design/icons'
+import { LockOutlined } from '../../components/ui/icons'
 import { readRecoverySnapshot, restoreFromSnapshot, writeSnapshot, type SessionSnapshot } from '../../features/browser/sessionStore'
 import { RecoveryPanel, type RecoveryChoice } from '../../features/browser/RecoveryPanel'
 import { dropSessionLock, getSessionLockState, type SessionLockState } from '../../services/session'
@@ -167,6 +167,7 @@ export function BrowserPage({ visible = true, onSearchKnowledge }: { visible?: b
       else if (entry.status === 'failed') messageApi.error('下载失败')
     },
   })
+  const downloadQueue = useDownloadQueue({ runningDownloads: downloads })
   const permissionPrompt = usePermissionPrompt()
   const certificatePrompt = useCertificatePrompt()
   const bookmarkActions = useBookmarks()
@@ -711,6 +712,8 @@ export function BrowserPage({ visible = true, onSearchKnowledge }: { visible?: b
     <DownloadSummary
       feed={downloads.map(item => ({ ...item, targetPath: item.targetPath ?? item.path }))}
       inFlight={downloads.filter(item => item.status === 'downloading').length}
+      pendingCount={downloadQueue.pending.length}
+      maxConcurrent={downloadQueue.maxConcurrent}
     />
   )
 
@@ -1437,7 +1440,7 @@ function NewTab({address,setAddress,navigate,openNewTab,onSearchKnowledge}:{addr
     urls.slice(1).forEach(url => openNewTab(url))
   }
 
-  return <div className="new-tab"><div className="new-tab__hero"><Typography.Title>今天想探索什么？</Typography.Title><Typography.Paragraph>在网页与个人知识之间，选择最合适的探索方式。</Typography.Paragraph></div><div className="new-tab-search"><Segmented<SearchMode> block value={mode} onChange={setMode} options={[{label:'网页搜索',value:'web'},{label:'本地知识库',value:'knowledge'}]}/><form onSubmit={event=>{event.preventDefault();submit()}}><Input size="large" autoFocus prefix={<SearchOutlined/>} value={address} onChange={event=>setAddress(event.target.value)} placeholder={placeholder} suffix={<Button type="primary" htmlType="submit">{mode === 'knowledge' ? '查询' : '搜索'}</Button>}/></form>{mode === 'web' && <div className="search-engine-picker"><span>搜索引擎</span><Select mode="multiple" maxTagCount="responsive" value={engines} onChange={setEngines} options={presets} placeholder="选择一个或多个搜索引擎"/></div>}{mode === 'knowledge' && <div className="new-tab-search__hint">仅查询保存在本机的网页、笔记和标签，不会发送到外部搜索引擎。</div>}</div><div className="quick-actions"><Card><BookOutlined/><b>Reader Mode</b><small>更专注地阅读</small></Card><Card><RobotOutlined/><b>AI 摘要</b><small>快速理解页面</small></Card><Card><SaveOutlined/><b>知识库</b><small>沉淀重要内容</small></Card></div><div className="quick-sites"><div className="quick-sites__label">常用网站</div><div className="quick-sites__grid">{QUICK_SITES.map(site => <button key={site.url} type="button" className="quick-site" title={site.name} aria-label={`打开 ${site.name}`} onClick={(event:MouseEvent<HTMLButtonElement>)=>{event.currentTarget.blur();void navigate(site.url)}}><span className="quick-site__mark" style={{background:site.color}}>{site.initial}</span><span className="quick-site__name">{site.name}</span></button>)}</div></div></div>
+  return <div className="new-tab"><div className="new-tab__hero"><Typography.Title>今天想探索什么？</Typography.Title><Typography.Paragraph>在网页与个人知识之间，选择最合适的探索方式。</Typography.Paragraph></div><div className="new-tab-search"><Segmented<SearchMode> block value={mode} onChange={setMode} options={[{label:'网页搜索',value:'web'},{label:'本地知识库',value:'knowledge'}]}/><form onSubmit={event=>{event.preventDefault();submit()}}><Input size="large" autoFocus prefix={<SearchOutlined/>} value={address} onChange={event=>setAddress(event.target.value)} placeholder={placeholder} suffix={<Button type="primary" htmlType="submit">{mode === 'knowledge' ? '查询' : '搜索'}</Button>}/></form>{mode === 'web' && <div className="search-engine-picker"><span>搜索引擎</span><Select mode="multiple" maxTagCount="responsive" value={engines} onChange={setEngines} options={presets} placeholder="选择一个或多个搜索引擎"/></div>}{mode === 'knowledge' && <div className="new-tab-search__hint">仅查询保存在本机的网页、笔记和标签，不会发送到外部搜索引擎。</div>}</div><div className="quick-sites"><div className="quick-sites__label">常用网站</div><div className="quick-sites__grid">{QUICK_SITES.map(site => <button key={site.url} type="button" className="quick-site" title={site.name} aria-label={`打开 ${site.name}`} onClick={(event:MouseEvent<HTMLButtonElement>)=>{event.currentTarget.blur();void navigate(site.url)}}><span className="quick-site__mark" style={{background:site.color}}>{site.initial}</span><span className="quick-site__name">{site.name}</span></button>)}</div></div></div>
 }
 
 function BrowserErrorView({tab, onRetry, onNewTab, onCopy}:{tab:BrowserTab;onRetry:()=>void;onNewTab:()=>void;onCopy:()=>void}) {

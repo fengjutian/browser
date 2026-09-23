@@ -1,5 +1,5 @@
 import { Button, Modal, Space, Typography } from '../../components/ui'
-import { ExclamationCircleOutlined } from '@ant-design/icons'
+import { ExclamationCircleOutlined } from '../../components/ui/icons'
 import type { SessionLockState } from '../../services/session'
 
 export type RecoveryChoice = 'all' | 'pinned' | 'discard'

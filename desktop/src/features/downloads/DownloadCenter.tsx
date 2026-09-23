@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import { Button, Empty, List, Popconfirm, Progress, Space, Table, Tag, Tooltip, Typography, type TableColumn } from '../../components/ui'
-import { CheckCircleOutlined, CloseCircleOutlined, DeleteOutlined, ExclamationCircleOutlined, FileOutlined, FolderOpenOutlined, LoadingOutlined, MinusCircleOutlined, PauseOutlined, ReloadOutlined, StopOutlined } from '@ant-design/icons'
+import { CheckCircleOutlined, CloseCircleOutlined, DeleteOutlined, ExclamationCircleOutlined, FileOutlined, FolderOpenOutlined, LoadingOutlined, MinusCircleOutlined, PauseOutlined, ReloadOutlined, StopOutlined } from '../../components/ui/icons'
 import type { DownloadRecord } from '../../services/downloads'
 import { fileNameOf } from '../../services/downloads'
 import type { UseDownloadCenterResult } from './useDownloadCenter'
@@ -285,18 +285,25 @@ export function DownloadCenter({ center, limit = 200 }: DownloadCenterProps) {
 export function DownloadSummary({
   feed,
   inFlight,
+  pendingCount = 0,
+  maxConcurrent,
 }: {
   feed: UseDownloadCenterResult['feed']
   inFlight: number
+  pendingCount?: number
+  maxConcurrent?: number
 }) {
   const items = feed.slice(0, 5)
+  const subtitle = inFlight > 0
+    ? `${inFlight} 个正在下载${maxConcurrent ? ` / 上限 ${maxConcurrent}` : ''}${pendingCount > 0 ? ` · ${pendingCount} 排队中` : ''}`
+    : pendingCount > 0
+      ? `${pendingCount} 排队中${maxConcurrent ? ` / 上限 ${maxConcurrent}` : ''}`
+      : '暂无活动'
   return (
     <div className="browser-downloads">
       <div className="browser-downloads__head">
         <b>下载</b>
-        <Typography.Text type="secondary">
-          {inFlight > 0 ? `${inFlight} 个正在下载` : '暂无活动'}
-        </Typography.Text>
+        <Typography.Text type="secondary">{subtitle}</Typography.Text>
       </div>
       {items.length === 0
         ? <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无下载" />

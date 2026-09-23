@@ -476,7 +476,7 @@ button,
 input,
 textarea,
 select {
-  font-family: Inter, 'PingFang SC', 'Microsoft YaHei', system-ui, sans-serif;
+  font-family: 'Source Han Serif SC', 'Noto Serif CJK SC', 'Source Han Serif CN', 'Songti SC', SimSun, serif;
 }
 
 .app-sider {
@@ -974,7 +974,7 @@ body[data-theme='dark'] {
 
   > .ant-segmented {
     width: 100%;
-    margin-bottom: 10px;
+    margin-bottom: 4px;
     padding: 4px;
     border-radius: 12px;
     background: var(--accent-soft);
@@ -985,7 +985,7 @@ body[data-theme='dark'] {
   form { width: 100%; }
 
   form .ant-input-affix-wrapper {
-    min-height: 52px;
+    min-height: 44px;
     padding: 5px 6px 5px 15px;
     border-color: var(--accent-border);
     border-radius: 13px;
@@ -993,7 +993,7 @@ body[data-theme='dark'] {
   }
 
   form .ant-input-suffix .ant-btn {
-    height: 40px;
+    height: 34px;
     padding-inline: 21px;
     border-radius: 9px;
   }
@@ -1016,8 +1016,7 @@ body[data-theme='dark'] {
   .ui-select { border-color: transparent !important; background: transparent !important; box-shadow: none !important; }
 }
 
-.new-tab .quick-actions { width: min(720px, 86%) !important; margin-top: 16px !important; }
-.new-tab .quick-sites { width: min(800px, 92%) !important; margin-top: 20px !important; }
+.new-tab .quick-sites { width: min(800px, 92%) !important; margin-top: 14px !important; }
 
 body[data-theme='dark'] {
   .browser-toolbar > form .ant-input-affix-wrapper { background: #202823; }
@@ -1155,9 +1154,11 @@ body[data-theme='dark'] {
 }
 
 .rail-nav--utility {
-  padding-top: 10px;
-  border-top: 1px solid rgba(100,115,106,.14);
+  margin-top: auto;
+  padding-top: 4px;
 }
+
+.app-sider .user-card { border-top: 0; }
 
 .rail-button {
   width: 100%;
@@ -1316,7 +1317,7 @@ body[data-theme='dark'] {
     }
 
     &.browser-tab--grouped {
-      box-shadow: inset 0 -2px 0 var(--tab-group-color, rgba(167, 223, 189, .85));
+      box-shadow: none;
     }
   }
 

@@ -1,6 +1,5 @@
-import { message } from 'antd'
-import { Alert, Button, Card, Empty, Input, Segmented, Select, Space, Spin, Tag, Typography } from '../../components/ui'
-import { ArrowRightOutlined, BookOutlined, CloseOutlined, CopyOutlined, GlobalOutlined, RobotOutlined, SaveOutlined, ThunderboltOutlined, TranslationOutlined } from '@ant-design/icons'
+import { Alert, Button, Card, Empty, Input, message, Segmented, Select, Space, Spin, Tag, Typography } from '../../components/ui'
+import { ArrowRightOutlined, BookOutlined, CloseOutlined, CopyOutlined, GlobalOutlined, RobotOutlined, SaveOutlined, ThunderboltOutlined, TranslationOutlined } from '../../components/ui/icons'
 import { useEffect, useMemo, useState } from 'react'
 import { aiChat, findDocumentByUrl, getSession, listAIProviders, setSession, updateDocument } from '../../api'
 import type { AIProvider } from '../../types'

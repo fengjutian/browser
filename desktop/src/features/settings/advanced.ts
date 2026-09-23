@@ -5,6 +5,7 @@ export interface AdvancedSettings {
   backgroundPollingEnabled: boolean
   backgroundPollIntervalMs: number
   idleSuspendMinutes: number
+  maxConcurrentDownloads: number
 }
 
 export const ADVANCED_SETTINGS_KEY = 'arcadia-advanced-settings.v1'
@@ -16,6 +17,7 @@ export const DEFAULT_ADVANCED_SETTINGS: AdvancedSettings = {
   backgroundPollingEnabled: true,
   backgroundPollIntervalMs: 3000,
   idleSuspendMinutes: 30,
+  maxConcurrentDownloads: 3,
 }
 
 export function readAdvancedSettings(): AdvancedSettings {
@@ -28,6 +30,7 @@ export function readAdvancedSettings(): AdvancedSettings {
       backgroundPollingEnabled: value.backgroundPollingEnabled !== false,
       backgroundPollIntervalMs: Math.min(15000, Math.max(1000, Math.round(value.backgroundPollIntervalMs ?? 3000))),
       idleSuspendMinutes: Math.min(180, Math.max(1, Math.round(value.idleSuspendMinutes ?? 30))),
+      maxConcurrentDownloads: Math.min(8, Math.max(1, Math.round(value.maxConcurrentDownloads ?? 3))),
     }
   } catch {
     return DEFAULT_ADVANCED_SETTINGS

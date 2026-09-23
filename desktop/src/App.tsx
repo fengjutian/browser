@@ -1,6 +1,5 @@
-import { ConfigProvider, theme as antdTheme } from 'antd'
-import zhCN from 'antd/locale/zh_CN'
-import { useEffect, useState } from 'react'
+import { useEffect, useState, type CSSProperties } from 'react'
+import { UIProvider } from './components/ui'
 import { AppRouter } from './app/AppRouter'
 import { readThemePreference, THEME_CHANGE_EVENT, type ThemePreference } from './features/settings/theme'
 import { readAdvancedSettings } from './features/settings/advanced'
@@ -35,7 +34,5 @@ export default function App() {
   }, [])
 
   const palette = PALETTES[preference]
-  const dark = preference === 'dark'
-  const github = preference === 'github'
-  return <ConfigProvider locale={zhCN} theme={{ algorithm: dark ? antdTheme.darkAlgorithm : antdTheme.defaultAlgorithm, token: { colorPrimary: palette.primary, borderRadius: github ? 6 : 10, fontSize: 14, controlHeight: 36, colorBorder: github ? '#d0d7de' : undefined, colorText: github ? '#1f2328' : undefined, colorBgContainer: github ? '#ffffff' : undefined, fontFamily: github ? '-apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif' : 'Inter, "PingFang SC", "Microsoft YaHei", system-ui, sans-serif' }, components: { Layout: { siderBg: palette.sider }, Menu: { itemBg: palette.sider, itemColor: palette.item, itemHoverBg: palette.hover, itemHoverColor: palette.hoverText, itemSelectedBg: palette.selected, itemSelectedColor: palette.selectedText, itemHeight: 44 }, Card: { headerHeight: 44, bodyPadding: 16 }, Form: { itemMarginBottom: 14 }, Tabs: { horizontalItemPadding: '8px 12px', verticalItemPadding: '8px 16px' } } }}><AppRouter /></ConfigProvider>
+  return <UIProvider><div style={{ '--ui-primary': palette.primary, '--ui-sider': palette.sider, '--ui-item': palette.item, '--ui-hover': palette.hover, '--ui-hover-text': palette.hoverText, '--ui-selected': palette.selected, '--ui-selected-text': palette.selectedText } as CSSProperties}><AppRouter /></div></UIProvider>
 }

@@ -1,6 +1,5 @@
-import { message } from 'antd'
-import { Button, Empty, Space, Table, Tag, Tooltip, Typography } from '../../components/ui'
-import { ReloadOutlined, SyncOutlined } from '@ant-design/icons'
+import { Button, Empty, message, Space, Table, Tag, Tooltip, Typography } from '../../components/ui'
+import { ReloadOutlined, SyncOutlined } from '../../components/ui/icons'
 import { useEffect, useState } from 'react'
 import type { Task } from '../../types'
 import { listRecentTasks, recoverStaleTasks, retryTask } from '../../api'

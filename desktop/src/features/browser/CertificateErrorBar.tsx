@@ -1,5 +1,5 @@
 import { Alert, Button, Space, Typography } from '../../components/ui'
-import { SafetyCertificateOutlined } from '@ant-design/icons'
+import { SafetyCertificateOutlined } from '../../components/ui/icons'
 import type { CertificateErrorPayload } from '../../services/nativeBrowser'
 
 export interface CertificateErrorBarProps {

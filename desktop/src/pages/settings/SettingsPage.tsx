@@ -1,6 +1,5 @@
-import { message } from 'antd'
-import { Alert, Button, Card, Descriptions, Form, Input, InputNumber, List, Segmented, Select, Space, Switch, Tabs, Tag, Typography } from '../../components/ui'
-import { BgColorsOutlined, DeleteOutlined, KeyOutlined, MoonOutlined, SafetyCertificateOutlined, SaveOutlined, SunOutlined, ThunderboltOutlined } from '@ant-design/icons'
+import { Alert, Button, Card, Descriptions, Form, Input, InputNumber, List, message, Segmented, Select, Space, Switch, Tabs, Tag, Typography } from '../../components/ui'
+import { BgColorsOutlined, DeleteOutlined, KeyOutlined, MoonOutlined, SafetyCertificateOutlined, SaveOutlined, SunOutlined, ThunderboltOutlined } from '../../components/ui/icons'
 import { useEffect, useState } from 'react'
 import { PageHeader } from '../../shared/components/PageHeader'
 import { clearBrowserHistory, clearClosedTabs as clearClosedTabsInDb, deleteAIProvider, exportBackup, getAIProvider, getBrowserShortcutsEnabled, importBackup, listAIProviders, listBrowserHistory, replaceSitePermissions, saveAIProvider, aiTestProvider, setBrowserShortcutsEnabled, type AIProviderInput } from '../../api'
@@ -635,6 +634,7 @@ function AdvancedSettingsPanel() {
     <div className="advanced-setting-row"><div><Typography.Text strong>空闲自动休眠</Typography.Text><Typography.Paragraph type="secondary">超过设定分钟数未访问的标签页会被列入休眠候选；固定标签、有音频、或正在下载的标签页会豁免。</Typography.Paragraph></div><InputNumber min={1} max={180} value={settings.idleSuspendMinutes} addonAfter="分钟" onChange={value => update({ idleSuspendMinutes: value ?? 30 })}/></div>
     <div className="advanced-setting-row"><div><Typography.Text strong>后台标签轮询</Typography.Text><Typography.Paragraph type="secondary">关闭后非活动标签完全停止轮询，仅在切换时刷新状态；适合极低功耗设备。</Typography.Paragraph></div><Switch checked={settings.backgroundPollingEnabled} onChange={value => update({ backgroundPollingEnabled: value })}/></div>
     <div className="advanced-setting-row"><div><Typography.Text strong>后台轮询频率</Typography.Text><Typography.Paragraph type="secondary">后台标签状态同步的频率，越小越实时但 CPU 越高。</Typography.Paragraph></div><InputNumber min={1000} max={15000} step={500} value={settings.backgroundPollIntervalMs} addonAfter="ms" onChange={value => update({ backgroundPollIntervalMs: value ?? 3000 })} disabled={!settings.backgroundPollingEnabled}/></div>
+    <div className="advanced-setting-row"><div><Typography.Text strong>下载并发上限</Typography.Text><Typography.Paragraph type="secondary">同时进行的下载超过上限时，新任务会按 FIFO 进入本地排队；任意一个任务结束自动接力下一个。</Typography.Paragraph></div><InputNumber min={1} max={8} value={settings.maxConcurrentDownloads} onChange={value => update({ maxConcurrentDownloads: value ?? 3 })}/></div>
     <Typography.Title level={5} style={{ marginTop: 26 }}>运行环境诊断</Typography.Title>
     <Descriptions size="small" bordered column={2} items={[
       { key: 'runtime', label: 'Tauri', children: capabilities?.tauriRuntimeVersion ?? '网页预览模式' },

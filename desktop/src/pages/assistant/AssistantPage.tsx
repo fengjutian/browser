@@ -1,6 +1,5 @@
-import { message } from 'antd'
-import { Alert, Avatar, Button, Card, Drawer, Empty, Input, List, Space, Spin, Tag, Typography } from '../../components/ui'
-import { ArrowRightOutlined, FileTextOutlined, RobotOutlined, SettingOutlined, UserOutlined } from '@ant-design/icons'
+import { Alert, Avatar, Button, Card, Drawer, Empty, Input, List, message, Space, Spin, Tag, Typography } from '../../components/ui'
+import { ArrowRightOutlined, FileTextOutlined, RobotOutlined, SettingOutlined, UserOutlined } from '../../components/ui/icons'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { PageHeader } from '../../shared/components/PageHeader'
 import { aiChat, listAIProviders, listDocuments } from '../../api'

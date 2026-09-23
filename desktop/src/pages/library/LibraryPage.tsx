@@ -1,6 +1,5 @@
-import { message } from 'antd'
-import { Button, Col, Empty, Input, List, Modal, Row, Skeleton, Space, Statistic, Tabs, Tag, Typography } from '../../components/ui'
-import { ClockCircleOutlined, DeleteOutlined, DownloadOutlined, FileTextOutlined, FolderOpenOutlined, FolderOutlined, GlobalOutlined, PlusOutlined, StarOutlined } from '@ant-design/icons'
+import { Button, Col, Empty, Input, List, message, Modal, Row, Skeleton, Space, Statistic, Tabs, Tag, Typography } from '../../components/ui'
+import { ClockCircleOutlined, DeleteOutlined, DownloadOutlined, FileTextOutlined, FolderOpenOutlined, FolderOutlined, GlobalOutlined, PlusOutlined, StarOutlined } from '../../components/ui/icons'
 import { useEffect, useState } from 'react'
 import { PageHeader } from '../../shared/components/PageHeader'
 import { DocumentCard } from '../../features/documents/DocumentCard'

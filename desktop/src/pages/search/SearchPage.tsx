@@ -1,5 +1,5 @@
 import { Empty, Input, List, Segmented, Select, Space, Statistic, Tag, Typography } from '../../components/ui'
-import { FileSearchOutlined, RightOutlined, SearchOutlined } from '@ant-design/icons'
+import { FileSearchOutlined, RightOutlined, SearchOutlined } from '../../components/ui/icons'
 import { Fragment, useEffect, useMemo, useState } from 'react'
 import { PageHeader } from '../../shared/components/PageHeader'
 import { DocumentDetailDrawer } from '../../features/documents/DocumentDetailDrawer'
