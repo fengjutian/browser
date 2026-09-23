@@ -3,7 +3,7 @@ import { AutoComplete, Badge, Button, Card, Dropdown, Input, Modal, Popover, Seg
 import { ArrowDownOutlined, ArrowLeftOutlined, ArrowRightOutlined, ArrowUpOutlined, AudioMutedOutlined, BookOutlined, CheckCircleOutlined, CloseCircleOutlined, CloseOutlined, CopyOutlined, DownloadOutlined, FullscreenOutlined, GlobalOutlined, LoadingOutlined, MoreOutlined, PlusOutlined, PrinterOutlined, ReloadOutlined, SafetyCertificateOutlined, SaveOutlined, SearchOutlined, SoundOutlined, StarOutlined, ThunderboltOutlined, TranslationOutlined, WarningOutlined } from '@ant-design/icons'
 import { Sparkles as RobotOutlined } from 'lucide-react'
 import type { BrowserTab, BrowserTabError } from '../../types'
-import { addBrowserHistory, findDocumentByUrl, getBrowserShortcutsEnabled, getDocument, getSession, listBrowserHistory, saveDocument, setSession, toggleStarred } from '../../api'
+import { addBrowserHistory, deleteClosedTab, findDocumentByUrl, getBrowserShortcutsEnabled, getBrowserWorkspace, getDocument, listBrowserHistory, listClosedTabs, listSitePermissions, saveBrowserWorkspace, saveClosedTab, saveDocument, setSession, toggleStarred } from '../../api'
 import { captureNativePage, closeNativeTab, ensureNativeTab, findInNativeTab, hasNativeTab, hideNativeTab, isNativeBrowserAvailable, navigateHistory, onNativeNewTab, openNativeTab, printNativeTab, readNativeState, reloadNativeTab, resizeNativeTab, showNativeTab, stopNativeTab, zoomNativeTab } from '../../services/nativeBrowser'
 import { extractArticle } from '../../features/reader/extractArticle'
 import type { ReaderArticle } from '../../features/reader/types'
@@ -35,6 +35,7 @@ import { CertificateErrorBar } from '../../features/browser/CertificateErrorBar'
 import { useCertificatePrompt } from '../../features/browser/useCertificatePrompt'
 import { TabSearchPalette } from '../../features/browser/TabSearchPalette'
 import { isPrivateTab, makePrivateTab, stripPrivateTabs, resetPrivateSessionPermissions } from '../../features/browser/privateTabs'
+import { writeSitePermissions } from '../../features/browser/sitePermissions'
 import { forceAllDenyFor } from '../../features/browser/usePermissionPrompt'
 import { LockOutlined } from '@ant-design/icons'
 import { readRecoverySnapshot, restoreFromSnapshot, writeSnapshot, type SessionSnapshot } from '../../features/browser/sessionStore'
@@ -49,7 +50,6 @@ import { cleanTrackingParameters, isTrackingCleanerEnabled, TRACKING_CLEANER_EVE
 
 const SESSION_KEY = 'browser.tabs'
 const SESSION_DEBOUNCE_MS = 500
-const CLOSED_KEY = 'browser.closed'
 const TAB_GROUP_PALETTE = ['#a7dfbd', '#9bc6e8', '#dfc0a7', '#c8a7df', '#dfb5b5', '#bce0c6']
 const tabGroupColor = (id: string | null | undefined): string => {
   if (!id) return 'transparent'
@@ -102,20 +102,6 @@ function parsePersistedSession(raw: string | null): PersistedSession | null {
 
 function getSessionLegacy(key: string): string | null {
   try { return localStorage.getItem(key) } catch { return null }
-}
-
-function parseClosedTabs(raw: string | null): ClosedTab[] {
-  if (!raw) return []
-  try {
-    const value = JSON.parse(raw) as unknown
-    if (!Array.isArray(value)) return []
-    return value.filter((item): item is ClosedTab => (
-      !!item && typeof item === 'object'
-      && typeof (item as ClosedTab).url === 'string'
-      && typeof (item as ClosedTab).id === 'string'
-      && typeof (item as ClosedTab).closedAt === 'number'
-    ))
-  } catch { return [] }
 }
 
 function classifyNavigationError(error: unknown): BrowserTabError {
@@ -232,12 +218,15 @@ export function BrowserPage({ visible = true, onSearchKnowledge }: { visible?: b
     let cancelled = false
     void Promise.all([
       listBrowserHistory(),
-      getSession(CLOSED_KEY),
+      listClosedTabs(),
       getSessionLockState(),
-    ]).then(([storedHistory, closedRaw, lockState]) => {
+      getBrowserWorkspace(),
+      listSitePermissions(),
+    ]).then(([storedHistory, storedClosedTabs, lockState, workspace, permissions]) => {
       if (cancelled) return
+      if (permissions.length > 0) writeSitePermissions(permissions)
       setHistory(storedHistory)
-      setClosedTabs(parseClosedTabs(closedRaw))
+      setClosedTabs(storedClosedTabs)
       const crash = lockState?.crashed ?? false
       const snapshot = readRecoverySnapshot()
       const restored = snapshot ? restoreFromSnapshot(snapshot.snapshot) : null
@@ -250,7 +239,7 @@ export function BrowserPage({ visible = true, onSearchKnowledge }: { visible?: b
         setRecoveredZoom(restored.zoomLevels)
         return
       }
-      const parsed = parsePersistedSession(getSessionLegacy(SESSION_KEY))
+      const parsed = workspace ?? parsePersistedSession(getSessionLegacy(SESSION_KEY))
       if (parsed) {
         setTabs(parsed.tabs)
         setActiveTabId(parsed.activeTabId)
@@ -259,7 +248,7 @@ export function BrowserPage({ visible = true, onSearchKnowledge }: { visible?: b
         if (activeTab?.url) lastHistoryUrl.current = activeTab.url
       }
       setHistory(storedHistory)
-      setClosedTabs(parseClosedTabs(closedRaw))
+      setClosedTabs(storedClosedTabs)
       setHydrated(true)
       if (parsed) {
         void (async () => {
@@ -291,6 +280,7 @@ export function BrowserPage({ visible = true, onSearchKnowledge }: { visible?: b
   useEffect(() => {
     if (!hydrated || recoveryPendingRef.current) return
     void setSession(SESSION_KEY, sessionJson)
+    void saveBrowserWorkspace({ tabs: stripPrivateTabs(tabs), activeTabId })
     const snapshot: SessionSnapshot = {
       schemaVersion: 2,
       savedAt: Date.now(),
@@ -310,12 +300,6 @@ export function BrowserPage({ visible = true, onSearchKnowledge }: { visible?: b
     }
     writeSnapshot(snapshot)
   }, [sessionJson, hydrated])
-
-  const closedJson = useDebouncedValue(JSON.stringify(closedTabs), SESSION_DEBOUNCE_MS)
-  useEffect(() => {
-    if (!hydrated || recoveryPendingRef.current) return
-    void setSession(CLOSED_KEY, closedJson)
-  }, [closedJson, hydrated])
 
   useEffect(() => {
     if (!hydrated || !active.url || active.url === lastHistoryUrl.current) return
@@ -962,6 +946,7 @@ export function BrowserPage({ visible = true, onSearchKnowledge }: { visible?: b
     if (closing && closing.url && !wasPrivate) {
       const entry: ClosedTab = { id: closing.id, url: closing.url, title: closing.title, favicon: closing.favicon, closedAt: Date.now() }
       setClosedTabs(current => recordClosedTab(current, entry))
+      void saveClosedTab(entry)
     }
     const closedIndex = tabs.findIndex(tab => tab.id === id)
     const remaining = tabs.filter(tab => tab.id !== id)
@@ -1000,6 +985,7 @@ export function BrowserPage({ visible = true, onSearchKnowledge }: { visible?: b
     if (!result) return
     setClosedTabs(result.remaining)
     const restored = result.popped
+    void deleteClosedTab(restored.id)
     const tab: BrowserTab = {
       id: crypto.randomUUID(),
       url: restored.url,

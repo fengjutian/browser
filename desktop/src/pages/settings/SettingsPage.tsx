@@ -2,7 +2,7 @@ import { Alert, Button, Card, Descriptions, Form, Input, InputNumber, List, Segm
 import { BgColorsOutlined, DeleteOutlined, KeyOutlined, MoonOutlined, SafetyCertificateOutlined, SaveOutlined, SunOutlined, ThunderboltOutlined } from '@ant-design/icons'
 import { useEffect, useState } from 'react'
 import { PageHeader } from '../../shared/components/PageHeader'
-import { clearBrowserHistory, deleteAIProvider, exportBackup, getAIProvider, getBrowserShortcutsEnabled, importBackup, listAIProviders, listBrowserHistory, saveAIProvider, aiTestProvider, setBrowserShortcutsEnabled, type AIProviderInput } from '../../api'
+import { clearBrowserHistory, clearClosedTabs as clearClosedTabsInDb, deleteAIProvider, exportBackup, getAIProvider, getBrowserShortcutsEnabled, importBackup, listAIProviders, listBrowserHistory, replaceSitePermissions, saveAIProvider, aiTestProvider, setBrowserShortcutsEnabled, type AIProviderInput } from '../../api'
 import type { AIProvider, AIProviderType } from '../../types'
 import { normalizeOrigin, readSitePermissions, writeSitePermissions, type SitePermissionKind, type SitePermissionRule } from '../../features/browser/sitePermissions'
 import { readThemePreference, writeThemePreference, type ThemePreference } from '../../features/settings/theme'
@@ -364,6 +364,7 @@ function PrivacySettings() {
     try {
       localStorage.removeItem('browser.closed')
     } catch { /* ignore */ }
+    void clearClosedTabsInDb()
     messageApi.success('已清空最近关闭列表')
   }
 
@@ -371,6 +372,7 @@ function PrivacySettings() {
     try {
       localStorage.removeItem('browser.sitePermissions.v2')
     } catch { /* ignore */ }
+    void replaceSitePermissions([])
     messageApi.success('已重置所有站点权限规则')
   }
 

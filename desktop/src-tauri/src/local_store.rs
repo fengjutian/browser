@@ -136,6 +136,38 @@ const MIGRATIONS: &[(i64, &str)] = &[
         );
         CREATE INDEX idx_browser_history_visited_at ON browser_history(visited_at DESC);",
     ),
+    (
+        11,
+        "CREATE TABLE browser_sessions (
+            id TEXT PRIMARY KEY,
+            active_tab_id TEXT NOT NULL,
+            updated_at INTEGER NOT NULL
+        );
+        CREATE TABLE browser_tabs (
+            id TEXT PRIMARY KEY,
+            session_id TEXT NOT NULL,
+            position INTEGER NOT NULL,
+            payload TEXT NOT NULL,
+            updated_at INTEGER NOT NULL,
+            FOREIGN KEY(session_id) REFERENCES browser_sessions(id) ON DELETE CASCADE
+        );
+        CREATE INDEX idx_browser_tabs_session_position ON browser_tabs(session_id, position);
+        CREATE TABLE closed_tabs (
+            id TEXT PRIMARY KEY,
+            url TEXT NOT NULL,
+            title TEXT NOT NULL,
+            favicon TEXT,
+            closed_at INTEGER NOT NULL
+        );
+        CREATE INDEX idx_closed_tabs_closed_at ON closed_tabs(closed_at DESC);
+        CREATE TABLE site_permissions (
+            origin TEXT NOT NULL,
+            permission_kind TEXT NOT NULL,
+            decision TEXT NOT NULL CHECK(decision IN ('allow','deny','ask')),
+            updated_at INTEGER NOT NULL,
+            PRIMARY KEY(origin, permission_kind)
+        );",
+    ),
 ];
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -169,6 +201,31 @@ pub struct LocalHistoryEntry {
     url: String,
     title: String,
     visited_at: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LocalBrowserWorkspace {
+    tabs: Vec<serde_json::Value>,
+    active_tab_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LocalClosedTab {
+    id: String,
+    url: String,
+    title: String,
+    favicon: Option<String>,
+    closed_at: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LocalSitePermission {
+    origin: String,
+    permission_kind: String,
+    decision: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -260,6 +317,9 @@ pub(crate) fn run_migrations(database: &mut Connection) -> Result<(), String> {
         if *version == 10 {
             migrate_legacy_history(&transaction)?;
         }
+        if *version == 11 {
+            migrate_legacy_browser_state(&transaction)?;
+        }
         transaction
             .execute(
                 "INSERT INTO schema_version(version, applied_at) VALUES(?, ?)",
@@ -306,6 +366,27 @@ fn validate_history_entry(entry: &LocalHistoryEntry) -> Result<(), String> {
     let parsed = url::Url::parse(&entry.url).map_err(|error| format!("invalid history url: {error}"))?;
     if !matches!(parsed.scheme(), "http" | "https") {
         return Err("history url must use http or https".into());
+    }
+    Ok(())
+}
+
+fn migrate_legacy_browser_state(database: &Connection) -> Result<(), String> {
+    if let Ok(raw) = database.query_row("SELECT value FROM local_session WHERE key='browser.tabs'", [], |row| row.get::<_, String>(0)) {
+        if let Ok(workspace) = serde_json::from_str::<LocalBrowserWorkspace>(&raw) {
+            database.execute("INSERT OR REPLACE INTO browser_sessions(id,active_tab_id,updated_at) VALUES('main',?,?)", params![workspace.active_tab_id, unix_seconds()]).map_err(|error| error.to_string())?;
+            for (position, tab) in workspace.tabs.into_iter().enumerate() {
+                if let Some(id) = tab.get("id").and_then(|value| value.as_str()) {
+                    database.execute("INSERT OR REPLACE INTO browser_tabs(id,session_id,position,payload,updated_at) VALUES(?,'main',?,?,?)", params![id, position as i64, tab.to_string(), unix_seconds()]).map_err(|error| error.to_string())?;
+                }
+            }
+        }
+    }
+    if let Ok(raw) = database.query_row("SELECT value FROM local_session WHERE key='browser.closed'", [], |row| row.get::<_, String>(0)) {
+        if let Ok(tabs) = serde_json::from_str::<Vec<LocalClosedTab>>(&raw) {
+            for tab in tabs.into_iter().take(20) {
+                database.execute("INSERT OR REPLACE INTO closed_tabs(id,url,title,favicon,closed_at) VALUES(?,?,?,?,?)", params![tab.id, tab.url, tab.title, tab.favicon, tab.closed_at]).map_err(|error| error.to_string())?;
+            }
+        }
     }
     Ok(())
 }
@@ -1038,6 +1119,87 @@ pub fn local_clear_history(app: tauri::AppHandle, since: Option<i64>) -> Result<
     Ok(deleted as i64)
 }
 
+#[tauri::command]
+pub fn local_get_browser_workspace(app: tauri::AppHandle) -> Result<Option<LocalBrowserWorkspace>, String> {
+    let database = connection(&app)?;
+    let active = match database.query_row("SELECT active_tab_id FROM browser_sessions WHERE id='main'", [], |row| row.get::<_, String>(0)) {
+        Ok(value) => value,
+        Err(rusqlite::Error::QueryReturnedNoRows) => return Ok(None),
+        Err(error) => return Err(error.to_string()),
+    };
+    let mut statement = database.prepare("SELECT payload FROM browser_tabs WHERE session_id='main' ORDER BY position")
+        .map_err(|error| error.to_string())?;
+    let tabs = statement.query_map([], |row| row.get::<_, String>(0)).map_err(|error| error.to_string())?
+        .filter_map(|raw| raw.ok().and_then(|value| serde_json::from_str(&value).ok()))
+        .collect();
+    Ok(Some(LocalBrowserWorkspace { tabs, active_tab_id: active }))
+}
+
+#[tauri::command]
+pub fn local_save_browser_workspace(app: tauri::AppHandle, workspace: LocalBrowserWorkspace) -> Result<(), String> {
+    if workspace.tabs.is_empty() || workspace.tabs.len() > 500 { return Err("invalid browser workspace".into()); }
+    let mut database = connection(&app)?;
+    let transaction = database.transaction().map_err(|error| error.to_string())?;
+    transaction.execute("INSERT INTO browser_sessions(id,active_tab_id,updated_at) VALUES('main',?,?) ON CONFLICT(id) DO UPDATE SET active_tab_id=excluded.active_tab_id,updated_at=excluded.updated_at", params![workspace.active_tab_id, unix_seconds()]).map_err(|error| error.to_string())?;
+    transaction.execute("DELETE FROM browser_tabs WHERE session_id='main'", []).map_err(|error| error.to_string())?;
+    for (position, tab) in workspace.tabs.into_iter().enumerate() {
+        let id = tab.get("id").and_then(|value| value.as_str()).ok_or("tab id is required")?;
+        if id.len() > 128 { return Err("invalid tab id".into()); }
+        let payload = serde_json::to_string(&tab).map_err(|error| error.to_string())?;
+        transaction.execute("INSERT INTO browser_tabs(id,session_id,position,payload,updated_at) VALUES(?,'main',?,?,?)", params![id, position as i64, payload, unix_seconds()]).map_err(|error| error.to_string())?;
+    }
+    transaction.commit().map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub fn local_list_closed_tabs(app: tauri::AppHandle) -> Result<Vec<LocalClosedTab>, String> {
+    let database = connection(&app)?;
+    let mut statement = database.prepare("SELECT id,url,title,favicon,closed_at FROM closed_tabs ORDER BY closed_at DESC LIMIT 20").map_err(|error| error.to_string())?;
+    statement.query_map([], |row| Ok(LocalClosedTab { id: row.get(0)?, url: row.get(1)?, title: row.get(2)?, favicon: row.get(3)?, closed_at: row.get(4)? })).map_err(|error| error.to_string())?.collect::<Result<Vec<_>, _>>().map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub fn local_save_closed_tab(app: tauri::AppHandle, tab: LocalClosedTab) -> Result<(), String> {
+    validate_history_entry(&LocalHistoryEntry { url: tab.url.clone(), title: tab.title.clone(), visited_at: tab.closed_at })?;
+    let database = connection(&app)?;
+    database.execute("INSERT OR REPLACE INTO closed_tabs(id,url,title,favicon,closed_at) VALUES(?,?,?,?,?)", params![tab.id, tab.url, tab.title, tab.favicon, tab.closed_at]).map_err(|error| error.to_string())?;
+    database.execute("DELETE FROM closed_tabs WHERE id NOT IN (SELECT id FROM closed_tabs ORDER BY closed_at DESC LIMIT 20)", []).map_err(|error| error.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+pub fn local_delete_closed_tab(app: tauri::AppHandle, id: String) -> Result<(), String> {
+    connection(&app)?.execute("DELETE FROM closed_tabs WHERE id=?", params![id]).map_err(|error| error.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+pub fn local_clear_closed_tabs(app: tauri::AppHandle) -> Result<(), String> {
+    connection(&app)?.execute("DELETE FROM closed_tabs", []).map_err(|error| error.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+pub fn local_list_site_permissions(app: tauri::AppHandle) -> Result<Vec<LocalSitePermission>, String> {
+    let database = connection(&app)?;
+    let mut statement = database.prepare("SELECT origin,permission_kind,decision FROM site_permissions ORDER BY origin,permission_kind").map_err(|error| error.to_string())?;
+    statement.query_map([], |row| Ok(LocalSitePermission { origin: row.get(0)?, permission_kind: row.get(1)?, decision: row.get(2)? })).map_err(|error| error.to_string())?.collect::<Result<Vec<_>, _>>().map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub fn local_replace_site_permissions(app: tauri::AppHandle, permissions: Vec<LocalSitePermission>) -> Result<(), String> {
+    let mut database = connection(&app)?;
+    let transaction = database.transaction().map_err(|error| error.to_string())?;
+    transaction.execute("DELETE FROM site_permissions", []).map_err(|error| error.to_string())?;
+    for permission in permissions {
+        if !matches!(permission.permission_kind.as_str(), "camera" | "microphone" | "location" | "notifications" | "clipboard") || !matches!(permission.decision.as_str(), "allow" | "deny" | "ask") { return Err("invalid site permission".into()); }
+        let parsed = url::Url::parse(&permission.origin).map_err(|error| error.to_string())?;
+        if !matches!(parsed.scheme(), "http" | "https") || parsed.origin().ascii_serialization() != permission.origin { return Err("invalid permission origin".into()); }
+        transaction.execute("INSERT INTO site_permissions(origin,permission_kind,decision,updated_at) VALUES(?,?,?,?)", params![permission.origin, permission.permission_kind, permission.decision, unix_seconds()]).map_err(|error| error.to_string())?;
+    }
+    transaction.commit().map_err(|error| error.to_string())
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct LocalBackup {
@@ -1177,7 +1339,7 @@ mod tests {
             .unwrap()
             .collect::<Result<Vec<_>, _>>()
             .unwrap();
-        assert_eq!(versions, vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
+        assert_eq!(versions, vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]);
     }
 
     #[test]
@@ -1209,7 +1371,7 @@ mod tests {
             .unwrap()
             .collect::<Result<Vec<_>, _>>()
             .unwrap();
-        assert_eq!(versions, vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
+        assert_eq!(versions, vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]);
     }
 
     #[test]
@@ -1225,7 +1387,7 @@ mod tests {
             .unwrap()
             .collect::<Result<Vec<_>, _>>()
             .unwrap();
-        assert_eq!(versions, vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
+        assert_eq!(versions, vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]);
     }
 
     #[test]

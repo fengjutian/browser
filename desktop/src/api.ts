@@ -1,6 +1,9 @@
 import { invoke } from '@tauri-apps/api/core'
 import type { AIProvider, AIProviderType, ChatRequest, ChatResponse, Document, ProviderTestResult, Task } from './types'
 import type { HistoryEntry } from './features/history/dedupeHistory'
+import type { ClosedTab } from './features/browser/closedTabs'
+import type { SitePermissionRule } from './features/browser/sitePermissions'
+import type { BrowserTab } from './types'
 
 const isTauri = () => '__TAURI_INTERNALS__' in window
 
@@ -230,6 +233,49 @@ export async function clearBrowserHistory(since?: number): Promise<number> {
     return entries.length - remaining.length
   }
   return invoke<number>('local_clear_history', { since: since ?? null })
+}
+
+export async function getBrowserWorkspace(): Promise<{ tabs: BrowserTab[]; activeTabId: string } | null> {
+  if (!isTauri()) return null
+  return invoke('local_get_browser_workspace')
+}
+
+export async function saveBrowserWorkspace(workspace: { tabs: BrowserTab[]; activeTabId: string }): Promise<void> {
+  if (isTauri()) await invoke('local_save_browser_workspace', { workspace })
+}
+
+export async function listClosedTabs(): Promise<ClosedTab[]> {
+  return isTauri() ? invoke('local_list_closed_tabs') : []
+}
+
+export async function saveClosedTab(tab: ClosedTab): Promise<void> {
+  if (isTauri()) await invoke('local_save_closed_tab', { tab })
+}
+
+export async function deleteClosedTab(id: string): Promise<void> {
+  if (isTauri()) await invoke('local_delete_closed_tab', { id })
+}
+
+export async function clearClosedTabs(): Promise<void> {
+  if (isTauri()) await invoke('local_clear_closed_tabs')
+}
+
+export async function listSitePermissions(): Promise<SitePermissionRule[]> {
+  if (!isTauri()) return []
+  const rows = await invoke<{ origin: string; permissionKind: keyof Omit<SitePermissionRule, 'origin'>; decision: 'allow' | 'deny' | 'ask' }[]>('local_list_site_permissions')
+  const grouped = new Map<string, SitePermissionRule>()
+  for (const row of rows) {
+    const rule = grouped.get(row.origin) ?? { origin: row.origin, camera: 'ask', microphone: 'ask', location: 'ask', notifications: 'ask', clipboard: 'ask' }
+    rule[row.permissionKind] = row.decision
+    grouped.set(row.origin, rule)
+  }
+  return [...grouped.values()]
+}
+
+export async function replaceSitePermissions(rules: SitePermissionRule[]): Promise<void> {
+  if (!isTauri()) return
+  const permissions = rules.flatMap(rule => (['camera', 'microphone', 'location', 'notifications', 'clipboard'] as const).map(permissionKind => ({ origin: rule.origin, permissionKind, decision: rule[permissionKind] })))
+  await invoke('local_replace_site_permissions', { permissions })
 }
 
 export const BROWSER_SHORTCUTS_STORAGE_KEY = 'arcadia-browser-shortcuts-enabled'

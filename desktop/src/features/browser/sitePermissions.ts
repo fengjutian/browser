@@ -15,6 +15,8 @@
  * silently. `deny` is the policy when the host is hidden or in private mode.
  */
 
+import { replaceSitePermissions } from '../../api'
+
 export const SITE_PERMISSIONS_KEY = 'browser.sitePermissions.v2'
 
 export type SitePermissionKind =
@@ -103,6 +105,7 @@ export function readSitePermissions(): SitePermissionRule[] {
 
 export function writeSitePermissions(rules: SitePermissionRule[]) {
   localStorage.setItem(SITE_PERMISSIONS_KEY, JSON.stringify(rules))
+  void replaceSitePermissions(rules).catch(() => undefined)
 }
 
 export function normalizeOrigin(value: string): string | null {
