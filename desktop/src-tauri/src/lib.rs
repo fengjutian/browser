@@ -504,7 +504,7 @@ async fn browser_create(
                         .file_name()
                         .and_then(|n| n.to_str())
                         .map(|s| s.to_owned())
-                        .unwrap_or_else(|| url_str.clone());
+                        .unwrap_or_else(|| "download".to_string());
                     tauri::async_runtime::spawn(async move {
                         handle_download_started(app, label, url_str, dest_str, file_name).await;
                     });

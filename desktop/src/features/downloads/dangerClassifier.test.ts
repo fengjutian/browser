@@ -38,6 +38,18 @@ describe('classifyDownload', () => {
     expect(classifyDownload({ fileName: 'no-ext', mimeType: 'application/javascript' })).toBe('script')
     expect(classifyDownload({ fileName: 'no-ext', mimeType: 'application/x-msdownload' })).toBe('executable')
     expect(classifyDownload({ fileName: 'no-ext', mimeType: 'application/pdf' })).toBe('document')
+    expect(classifyDownload({ fileName: 'no-ext', mimeType: 'application/vnd.android.package-archive' })).toBe('archive')
+    expect(classifyDownload({ fileName: 'no-ext', mimeType: 'application/java-archive' })).toBe('archive')
+  })
+
+  it('detects scripts by shebang magic', () => {
+    const shebang = new TextEncoder().encode('#!/bin/bash\necho hi\n')
+    expect(classifyDownload({ fileName: 'unknown', head: shebang })).toBe('script')
+  })
+
+  it('detects bzip2 and xz archives by magic bytes', () => {
+    expect(classifyDownload({ fileName: 'unknown', head: new Uint8Array([0x42, 0x5a, 0x68]) })).toBe('archive')
+    expect(classifyDownload({ fileName: 'unknown', head: new Uint8Array([0xfd, 0x37, 0x7a, 0x58, 0x5a, 0x00]) })).toBe('archive')
   })
 
   it('returns "other" only when filename and mime are both missing', () => {

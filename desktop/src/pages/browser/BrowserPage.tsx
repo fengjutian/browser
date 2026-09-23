@@ -31,6 +31,8 @@ import { classifyShellOpenUrl, describeScheme } from '../../features/browser/ext
 import { redactUrl } from '../../features/browser/logRedaction'
 import { usePermissionPrompt } from '../../features/browser/usePermissionPrompt'
 import { PermissionPromptBar } from '../../features/browser/PermissionPromptBar'
+import { CertificateErrorBar } from '../../features/browser/CertificateErrorBar'
+import { useCertificatePrompt } from '../../features/browser/useCertificatePrompt'
 import { isPrivateTab, makePrivateTab, stripPrivateTabs, resetPrivateSessionPermissions } from '../../features/browser/privateTabs'
 import { forceAllDenyFor } from '../../features/browser/usePermissionPrompt'
 import { LockOutlined } from '@ant-design/icons'
@@ -161,6 +163,7 @@ export function BrowserPage({ visible = true, onSearchKnowledge }: { visible?: b
     },
   })
   const permissionPrompt = usePermissionPrompt()
+  const certificatePrompt = useCertificatePrompt()
   const [readerArticle, setReaderArticle] = useState<ReaderArticle | null>(null)
   const [hydrated, setHydrated] = useState(false)
   const [history, setHistory] = useState<HistoryEntry[]>([])
@@ -186,6 +189,9 @@ export function BrowserPage({ visible = true, onSearchKnowledge }: { visible?: b
   const zoomLevelsRef = useRef(zoomLevels)
   const downloadsRef = useRef(downloads)
   const visibleRef = useRef(visible)
+  // Do not let the default blank tab overwrite a crash snapshot while the
+  // recovery dialog is waiting for the user's decision.
+  const recoveryPendingRef = useRef(false)
   const lastActiveAtRef = useRef(new Map<string, number>([['new', Date.now()]]))
   const lastHistoryUrl = useRef<string>('')
   const shortcutsEnabledRef = useRef(getBrowserShortcutsEnabled())
@@ -235,12 +241,12 @@ export function BrowserPage({ visible = true, onSearchKnowledge }: { visible?: b
       const snapshot = readLatestSnapshot()
       const restored = snapshot ? restoreFromSnapshot(snapshot.snapshot) : null
       if (crash && restored && restored.tabs.length > 0) {
+        recoveryPendingRef.current = true
         setLockState(lockState)
         setRecoveredTabs(restored.tabs)
         setRecoveredActiveId(restored.activeTabId)
         setRecoveredScroll(restored.scrollPositions)
         setRecoveredZoom(restored.zoomLevels)
-        setHydrated(true)
         return
       }
       const parsed = parsePersistedSession(getSessionLegacy(SESSION_KEY))
@@ -282,7 +288,7 @@ export function BrowserPage({ visible = true, onSearchKnowledge }: { visible?: b
 
   const sessionJson = useDebouncedValue(JSON.stringify({ tabs: stripPrivateTabs(tabs), activeTabId }), SESSION_DEBOUNCE_MS)
   useEffect(() => {
-    if (!hydrated) return
+    if (!hydrated || recoveryPendingRef.current) return
     void setSession(SESSION_KEY, sessionJson)
     const snapshot: SessionSnapshot = {
       schemaVersion: 2,
@@ -306,13 +312,13 @@ export function BrowserPage({ visible = true, onSearchKnowledge }: { visible?: b
 
   const historyJson = useDebouncedValue(JSON.stringify(history), SESSION_DEBOUNCE_MS)
   useEffect(() => {
-    if (!hydrated) return
+    if (!hydrated || recoveryPendingRef.current) return
     void setSession(HISTORY_KEY, historyJson)
   }, [historyJson, hydrated])
 
   const closedJson = useDebouncedValue(JSON.stringify(closedTabs), SESSION_DEBOUNCE_MS)
   useEffect(() => {
-    if (!hydrated) return
+    if (!hydrated || recoveryPendingRef.current) return
     void setSession(CLOSED_KEY, closedJson)
   }, [closedJson, hydrated])
 
@@ -692,6 +698,10 @@ export function BrowserPage({ visible = true, onSearchKnowledge }: { visible?: b
 
   async function handleRecovery(choice: RecoveryChoice) {
     await dropSessionLock()
+    recoveryPendingRef.current = false
+    // Hydration completes only after a decision, so the first persisted
+    // snapshot contains the chosen tabs (or the intentional blank session).
+    setHydrated(true)
     if (choice === 'discard') {
       setLockState(null)
       setRecoveredTabs([])
@@ -1103,6 +1113,7 @@ export function BrowserPage({ visible = true, onSearchKnowledge }: { visible?: b
     <div className="browser-toolbar"><Space><Button type="text" aria-label="后退" title="后退 (Alt+←)" icon={<ArrowLeftOutlined/>} disabled={!nativeMode || !active.canGoBack} onClick={() => void navigateHistory(active.id,-1)}/><Button type="text" aria-label="前进" title="前进 (Alt+→)" icon={<ArrowRightOutlined/>} disabled={!nativeMode || !active.canGoForward} onClick={() => void navigateHistory(active.id,1)}/><Button type="text" aria-label={active.loading?'停止加载':'重新加载'} title={active.loading?'停止加载 (Esc)':'重新加载 (F5)'} icon={active.loading?<CloseOutlined/>:<ReloadOutlined/>} disabled={!nativeMode} onClick={() => void (active.loading ? stopNativeTab(active.id) : reloadNativeTab(active.id))}/><Button type="text" icon={<BookOutlined/>} onClick={() => void openReader()}>阅读模式</Button></Space><form onSubmit={event => { event.preventDefault(); void navigate(address) }}><AutoComplete value={address} options={addressSuggestions} onChange={setAddress} onSelect={value=>void navigate(value)}><Input ref={addressRef} prefix={<SafetyCertificateOutlined/>} suffix={<button type="button" className={`browser-star${starredDocId ? ' is-active' : ''}`} disabled={!active.url} aria-label={starredDocId ? '取消收藏' : '收藏当前页'} title={starredDocId ? '取消收藏' : '收藏当前页'} onClick={event => { event.preventDefault(); event.stopPropagation(); void toggleStarCurrent() }}><StarOutlined/></button>} onFocus={event=>event.currentTarget.select()} placeholder="搜索或输入网址"/></AutoComplete></form><Tag icon={<SafetyCertificateOutlined/>} color="green">43</Tag><Button type={aiOpen?'primary':'text'} ghost={aiOpen} icon={<RobotOutlined/>} onClick={()=>setAiOpen(value=>!value)}/><Popover trigger="click" placement="bottomRight" content={downloadPanel}><Badge size="small" count={downloads.filter(item=>item.status==='downloading').length}><Button type="text" aria-label="下载" icon={<DownloadOutlined/>}/></Badge></Popover><Popover trigger="click" placement="bottomRight" content={resourcePanel}><Button type="text" aria-label="资源面板" icon={<ThunderboltOutlined/>} title={`${resourceStats.liveTabs} 个 WebView / ${resourceStats.totalTabs} 标签`}/></Popover><Dropdown menu={{items:browserMenu}} trigger={['click']}><Button type="text" aria-label="浏览器菜单" icon={<MoreOutlined/>}/></Dropdown></div>
     {findOpen&&<div className="browser-find"><Input autoFocus allowClear prefix={<SearchOutlined/>} value={findQuery} status={findStatus==='missing'?'error':undefined} placeholder="在页面中查找" onChange={event=>{setFindQuery(event.target.value);setFindStatus('idle')}} onPressEnter={event=>void runFind(event.shiftKey)}/><Typography.Text type={findStatus==='missing'?'danger':'secondary'}>{findStatus==='missing'?'未找到':findStatus==='found'?'已定位':''}</Typography.Text><Button type="text" aria-label="上一个匹配项" icon={<ArrowUpOutlined/>} onClick={()=>void runFind(true)}/><Button type="text" aria-label="下一个匹配项" icon={<ArrowDownOutlined/>} onClick={()=>void runFind(false)}/><Button type="text" aria-label="关闭查找" icon={<CloseOutlined/>} onClick={closeFind}/></div>}
     <PermissionPromptBar prompt={permissionPrompt} />
+    {certificatePrompt.prompt && <CertificateErrorBar payload={certificatePrompt.prompt} onRespond={allow => void certificatePrompt.respond(allow)} />}
     <RecoveryPanel
       open={lockState !== null}
       state={lockState}

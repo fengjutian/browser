@@ -44,7 +44,8 @@ const ARCHIVE_MIME_TYPES = new Set([
   'application/zip', 'application/x-zip-compressed', 'application/x-7z-compressed',
   'application/x-rar-compressed', 'application/x-tar', 'application/gzip',
   'application/x-gzip', 'application/x-bzip2', 'application/x-xz',
-  'application/x-iso9660-image',
+  'application/x-iso9660-image', 'application/vnd.android.package-archive',
+  'application/x-apple-diskimage', 'application/java-archive',
 ])
 
 const DOCUMENT_MIME_TYPES = new Set([
@@ -68,7 +69,7 @@ function extensionOf(filename: string | undefined): string {
 }
 
 function detectByMagic(head: Uint8Array | undefined): 'executable' | 'script' | 'archive' | 'document' | null {
-  if (!head || head.length < 4) return null
+  if (!head || head.length < 3) return null
   // ZIP / PKG / OOXML: PK\x03\x04
   if (head[0] === 0x50 && head[1] === 0x4b && head[2] === 0x03 && head[3] === 0x04) return 'archive'
   // RAR: Rar!\x1a\x07
@@ -77,6 +78,10 @@ function detectByMagic(head: Uint8Array | undefined): 'executable' | 'script' | 
   if (head[0] === 0x37 && head[1] === 0x7a && head[2] === 0xbc && head[3] === 0xaf) return 'archive'
   // gzip: 1f 8b
   if (head[0] === 0x1f && head[1] === 0x8b) return 'archive'
+  // bzip2: BZ (42 5a)
+  if (head[0] === 0x42 && head[1] === 0x5a && head[2] === 0x68) return 'archive'
+  // xz: fd 37 7a 58 5a 00
+  if (head.length >= 6 && head[0] === 0xfd && head[1] === 0x37 && head[2] === 0x7a && head[3] === 0x58 && head[4] === 0x5a && head[5] === 0x00) return 'archive'
   // PE / MZ executable: MZ (4D 5A)
   if (head[0] === 0x4d && head[1] === 0x5a) return 'executable'
   // ELF executable: 7f 45 4c 46
@@ -84,8 +89,11 @@ function detectByMagic(head: Uint8Array | undefined): 'executable' | 'script' | 
   // Mach-O: feedface / feedfacf / cefaedfe / cffaedfe
   if (head[0] === 0xfe && head[1] === 0xed && head[2] === 0xfa && (head[3] === 0xce || head[3] === 0xcf)) return 'executable'
   if (head[0] === 0xce && head[1] === 0xfa && head[2] === 0xed && head[3] === 0xfe) return 'executable'
+  // Android APK / JAR: same as ZIP, already handled above.
   // PDF: %PDF
   if (head[0] === 0x25 && head[1] === 0x50 && head[2] === 0x44 && head[3] === 0x46) return 'document'
+  // Scripts / text: shebang
+  if (head[0] === 0x23 && head[1] === 0x21) return 'script'
   return null
 }
 

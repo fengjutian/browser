@@ -156,6 +156,36 @@ export async function onPermissionRequest(handler: (request: PermissionRequest) 
 }
 
 /**
+ * Certificate error payload emitted by the Rust certificate guard. The
+ * payload intentionally matches the Rust `CertificateErrorPayload` struct so
+ * consumers can rely on stable field names.
+ */
+export interface CertificateErrorPayload {
+  requestId: string
+  url: string
+  message: string
+  repeated: boolean
+}
+
+const CERTIFICATE_ERROR_EVENT = 'browser://certificate-error'
+const CERTIFICATE_ERROR_CLEARED_EVENT = 'browser://certificate-error-cleared'
+
+export async function onCertificateError(handler: (payload: CertificateErrorPayload) => void): Promise<UnlistenFn> {
+  if (!isTauri()) return () => undefined
+  return listen<CertificateErrorPayload>(CERTIFICATE_ERROR_EVENT, event => handler(event.payload))
+}
+
+export async function onCertificateErrorCleared(handler: (requestId: string) => void): Promise<UnlistenFn> {
+  if (!isTauri()) return () => undefined
+  return listen<string>(CERTIFICATE_ERROR_CLEARED_EVENT, event => handler(event.payload))
+}
+
+export async function respondCertificateRequest(requestId: string, allow: boolean): Promise<void> {
+  if (!isTauri()) return
+  await invoke('browser_certificate_respond', { requestId, allow })
+}
+
+/**
  * Forward of `browser_capabilities` from the Rust side. Re-exposed so consumers
  * can stay on the `services/nativeBrowser.ts` import surface.
  */

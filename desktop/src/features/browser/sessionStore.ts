@@ -96,8 +96,9 @@ export function readLatestSnapshot(): SessionParseResult | null {
 }
 
 /**
- * Persist the snapshot to the *older* slot first, then promote. This way
- * if the page reloads mid-write, the previous-good slot survives.
+ * Persist the snapshot to the older slot only. On the next save that slot is
+ * the newest, so the other slot is selected. Alternating the slots keeps one
+ * previous-good snapshot available if a write or process exit is interrupted.
  */
 export function writeSnapshot(snapshot: SessionSnapshot, options: { rotatedAt?: number } = {}): void {
   if (typeof localStorage === 'undefined') return
@@ -120,14 +121,8 @@ export function writeSnapshot(snapshot: SessionSnapshot, options: { rotatedAt?: 
   const raw = JSON.stringify(sanitised)
   const probe = readLatestSnapshot()
   const olderKey = probe?.source === 'v1' ? SESSION_KEY_V2 : SESSION_KEY_V1
-  const newerKey = probe?.source === 'v1' ? SESSION_KEY_V1 : SESSION_KEY_V2
-  // Write the older slot first; flip on next call.
+  // Write only the older slot; writing both would erase the fallback copy.
   try { localStorage.setItem(olderKey, raw) } catch { /* storage full / quota */ }
-  // The new pointer is set after a microtask so callers debouncing many
-  // writes still benefit from the safety window.
-  queueMicrotask(() => {
-    try { localStorage.setItem(newerKey, raw) } catch { /* storage full / quota */ }
-  })
 }
 
 /**

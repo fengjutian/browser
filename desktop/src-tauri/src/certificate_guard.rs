@@ -78,6 +78,33 @@ pub fn guard_attached<R: Runtime>(app: &AppHandle<R>, window_label: &str) -> boo
     app.get_webview_window(window_label).is_some()
 }
 
+/// Frontend-facing command: the user acknowledged a certificate error. We log
+/// the choice and notify the rest of the UI so the banner disappears. When a
+/// real `ServerCertificateErrorDetected` binding exists, this command will
+/// also resolve the outstanding deferral via a shared request-id registry.
+#[tauri::command]
+pub fn browser_certificate_respond<R: Runtime>(
+    app: AppHandle<R>,
+    request_id: String,
+    allow: bool,
+) -> Result<(), String> {
+    if request_id.is_empty() {
+        return Err("request_id is required".into());
+    }
+    let choice = if allow { "allow-once" } else { "deny" };
+    let event = CertificateErrorPayload {
+        request_id: request_id.clone(),
+        url: String::new(),
+        message: format!("user-chosen: {choice}"),
+        repeated: false,
+    };
+    // Re-use the same emit so any UI subscribers see a single canonical shape;
+    // the actual "clear" event lets the banner component hide itself.
+    let _ = emit_certificate_error(&app, event);
+    let _ = emit_certificate_error_cleared(&app, &request_id);
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
