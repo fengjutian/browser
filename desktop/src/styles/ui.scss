@@ -46,8 +46,30 @@
   &__actions { display: flex; margin: 0; padding: 0; border-top: 1px solid #edf0ee; list-style: none; > li { flex: 1; padding: 10px; text-align: center; &:not(:last-child) { border-right: 1px solid #edf0ee; } } }
 }
 
+.ui-input { display: inline-flex; align-items: center; gap: 7px; width: 100%; min-height: 32px; padding: 4px 11px; border: 1px solid #d4dbd6; border-radius: 7px; background: #fff; transition: border-color .15s, box-shadow .15s;
+  &:focus-within { border-color: #1675d1; box-shadow: 0 0 0 2px rgba(22,117,209,.12); }
+  &.is-error { border-color: #d9363e; }
+  &.is-disabled { background: #f3f5f3; opacity: .65; cursor: not-allowed; }
+  &--small { min-height: 24px; padding: 1px 7px; font-size: 12px; }
+  &--large { min-height: 40px; padding: 7px 12px; font-size: 16px; }
+  &__control { flex: 1; min-width: 0; width: 100%; padding: 0 !important; border: 0 !important; outline: 0; background: transparent !important; color: inherit; font: inherit; box-shadow: none !important; }
+  &__prefix, &__suffix { display: inline-flex; align-items: center; flex: none; color: #66726b; }
+  &__clear, &__password-toggle { padding: 0; border: 0; background: none; color: #7d8881; cursor: pointer; font: inherit; }
+  &__password-toggle { font-size: 12px; }
+}
+.ui-textarea { width: 100%; min-height: 64px; padding: 8px 11px; border: 1px solid #d4dbd6; border-radius: 7px; background: #fff; color: inherit; font: inherit; resize: vertical; &:focus { border-color: #1675d1; outline: 0; box-shadow: 0 0 0 2px rgba(22,117,209,.12); } }
+
+.ui-switch { position: relative; display: inline-flex; align-items: center; width: 44px; min-width: 44px; height: 24px; padding: 2px; border: 0; border-radius: 999px; background: #aeb5b0; cursor: pointer; transition: background-color .18s;
+  &.is-checked { background: #1675d1; }
+  &:disabled { opacity: .45; cursor: not-allowed; }
+  &__handle { display: block; width: 20px; height: 20px; border-radius: 50%; background: #fff; box-shadow: 0 1px 3px rgba(0,0,0,.24); transition: transform .18s; }
+  &.is-checked &__handle { transform: translateX(20px); }
+  &__label { position: absolute; inset-inline: 7px; overflow: hidden; color: #fff; font-size: 10px; }
+}
+
 [data-theme='dark'] {
   .ui-button { border-color: #46534c; background: #252e29; color: #e1e9e4; &--primary { border-color: #65a77d; background: #3d7752; } &--text, &--link, &.is-ghost { background: transparent; } }
   .ui-tag { border-color: #46534c; background: #28322c; color: #cbd6cf; }
   .ui-card { border-color: #39473f; background: #202823; &__head, &__actions { border-color: #39473f; } }
+  .ui-input, .ui-textarea { border-color: #46534c; background: #202823; color: #e1e9e4; }
 }

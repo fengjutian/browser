@@ -1,6 +1,6 @@
 import { MouseEvent, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
-import { AutoComplete, Badge, Dropdown, Input, Modal, Popover, Segmented, Select, Tabs, Tooltip, Typography, message, type InputRef, type MenuProps } from 'antd'
-import { Button, Card, Space, Tag } from '../../components/ui'
+import { AutoComplete, Badge, Dropdown, Modal, Popover, Segmented, Select, Tooltip, Typography, message, type MenuProps } from 'antd'
+import { Button, Card, Input, Space, Tabs, Tag, type InputRef } from '../../components/ui'
 import { ArrowDownOutlined, ArrowLeftOutlined, ArrowRightOutlined, ArrowUpOutlined, AudioMutedOutlined, BookOutlined, CheckCircleOutlined, CloseCircleOutlined, CloseOutlined, CopyOutlined, DownloadOutlined, FullscreenOutlined, GlobalOutlined, LoadingOutlined, MoreOutlined, PlusOutlined, PrinterOutlined, ReloadOutlined, SafetyCertificateOutlined, SaveOutlined, SearchOutlined, SoundOutlined, StarFilled, StarOutlined, ThunderboltOutlined, TranslationOutlined, WarningOutlined } from '@ant-design/icons'
 import { Sparkles as RobotOutlined } from 'lucide-react'
 import type { BrowserTab, BrowserTabError } from '../../types'

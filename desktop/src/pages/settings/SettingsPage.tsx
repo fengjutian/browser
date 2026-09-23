@@ -1,5 +1,5 @@
-import { Alert, Descriptions, Form, Input, InputNumber, List, Segmented, Select, Switch, Tabs, Typography, message } from 'antd'
-import { Button, Card, Space, Tag } from '../../components/ui'
+import { Alert, Descriptions, Form, InputNumber, List, Segmented, Select, Typography, message } from 'antd'
+import { Button, Card, Input, Space, Switch, Tabs, Tag } from '../../components/ui'
 import { BgColorsOutlined, DeleteOutlined, KeyOutlined, MoonOutlined, SafetyCertificateOutlined, SaveOutlined, SunOutlined, ThunderboltOutlined } from '@ant-design/icons'
 import { useEffect, useState } from 'react'
 import { PageHeader } from '../../shared/components/PageHeader'
@@ -14,6 +14,7 @@ import { DEFAULT_ADVANCED_SETTINGS, readAdvancedSettings, writeAdvancedSettings,
 import { isTrackingCleanerEnabled, setTrackingCleanerEnabled } from '../../features/plugins/trackingCleaner'
 import { isAdBlockerEnabled, setAdBlockerEnabled } from '../../features/plugins/adBlocker'
 import { setNativeAdBlocking } from '../../services/nativeBrowser'
+import { PrivacyExportPanel } from '../../features/privacy/PrivacyExportPanel'
 import { getBrowserCapabilities, type BrowserCapabilities } from '../../services/browserCapabilities'
 
 const PROVIDER_OPTIONS: { label: string; value: AIProviderType }[] = [
@@ -466,6 +467,11 @@ function PrivacySettings() {
     </Space>
   </div>
 
+  const exportContent = <div className="privacy-section">
+    <Typography.Paragraph type="secondary">把历史 / 收藏 / 关闭的标签 / 下载记录 / 站点权限打包成 AES-GCM 加密 JSON。导入会按 URL 合并，不覆盖现有条目。</Typography.Paragraph>
+    <PrivacyExportPanel />
+  </div>
+
   const exitContent = <div className="privacy-section">
     <Typography.Paragraph type="secondary">控制应用正常退出时是否自动清理本地浏览痕迹。</Typography.Paragraph>
     <Space align="start">
@@ -478,6 +484,7 @@ function PrivacySettings() {
     { key: 'private', label: '私密浏览', children: privateContent },
     { key: 'history', label: `浏览历史 ${historyEntries.length}`, children: historyContent },
     { key: 'cleanup', label: '数据清理', children: cleanupContent },
+    { key: 'export', label: '导入/导出', children: exportContent },
     { key: 'exit', label: '退出时', children: exitContent },
   ]}/></Card></>
 }
