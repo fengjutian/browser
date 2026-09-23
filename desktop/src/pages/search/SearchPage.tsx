@@ -1,4 +1,5 @@
-import { Empty, Input, List, Segmented, Select, Space, Statistic, Tag, Typography } from 'antd'
+import { Empty, Input, List, Segmented, Select, Statistic, Typography } from 'antd'
+import { Space, Tag } from '../../components/ui'
 import { FileSearchOutlined, RightOutlined, SearchOutlined } from '@ant-design/icons'
 import { Fragment, useEffect, useMemo, useState } from 'react'
 import { PageHeader } from '../../shared/components/PageHeader'

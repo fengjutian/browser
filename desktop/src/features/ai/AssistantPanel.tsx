@@ -1,4 +1,5 @@
-import { Alert, Button, Card, Empty, Input, Segmented, Select, Space, Spin, Tag, Typography, message } from 'antd'
+import { Alert, Empty, Input, Segmented, Select, Spin, Typography, message } from 'antd'
+import { Button, Card, Space, Tag } from '../../components/ui'
 import { ArrowRightOutlined, BookOutlined, CloseOutlined, CopyOutlined, GlobalOutlined, RobotOutlined, SaveOutlined, ThunderboltOutlined, TranslationOutlined } from '@ant-design/icons'
 import { useEffect, useMemo, useState } from 'react'
 import { aiChat, findDocumentByUrl, getSession, listAIProviders, setSession, updateDocument } from '../../api'

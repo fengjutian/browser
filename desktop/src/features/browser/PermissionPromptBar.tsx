@@ -1,4 +1,5 @@
-import { Button, Space, Typography } from 'antd'
+import { Typography } from 'antd'
+import { Button, Space } from '../../components/ui'
 import { CheckCircleOutlined, CloseCircleOutlined, SafetyCertificateOutlined } from '@ant-design/icons'
 import type { UsePermissionPromptResult } from './usePermissionPrompt'
 import { describePrompt } from './usePermissionPrompt'

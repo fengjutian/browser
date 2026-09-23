@@ -1,4 +1,5 @@
-import { Button, Col, Empty, Input, List, Modal, Row, Skeleton, Space, Statistic, Tabs, Tag, Typography, message } from 'antd'
+import { Col, Empty, Input, List, Modal, Row, Skeleton, Statistic, Tabs, Typography, message } from 'antd'
+import { Button, Space, Tag } from '../../components/ui'
 import { ClockCircleOutlined, DeleteOutlined, DownloadOutlined, FileTextOutlined, FolderOpenOutlined, FolderOutlined, GlobalOutlined, PlusOutlined, StarOutlined } from '@ant-design/icons'
 import { useEffect, useState } from 'react'
 import { PageHeader } from '../../shared/components/PageHeader'

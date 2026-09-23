@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import { Button, Input, List, Modal, Tag, Tooltip, Typography } from 'antd'
+import { Input, List, Modal, Tooltip, Typography } from 'antd'
+import { Button, Tag } from '../../components/ui'
 import { DeleteOutlined, StarFilled } from '@ant-design/icons'
 import type { BookmarkRecord } from '../../services/bookmarks'
 import { searchBookmarks, type BookmarkSearchResult } from './bookmarkSearchIndex'

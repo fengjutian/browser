@@ -1,0 +1,53 @@
+.ui-button {
+  display: inline-flex; align-items: center; justify-content: center; gap: 7px;
+  min-height: 32px; padding: 4px 15px; border: 1px solid #d4dbd6; border-radius: 7px;
+  background: #fff; color: #252c28; font: inherit; line-height: 1.4; cursor: pointer;
+  transition: color .15s, border-color .15s, background-color .15s, box-shadow .15s;
+  &:hover:not(:disabled) { border-color: #4c9167; color: #287348; }
+  &:focus-visible { outline: 2px solid rgba(22, 117, 209, .35); outline-offset: 1px; }
+  &:disabled, &[aria-disabled='true'] { opacity: .45; cursor: not-allowed; pointer-events: none; }
+  &--primary { border-color: #1675d1; background: #1675d1; color: #fff; &:hover:not(:disabled) { border-color: #0f64b6; background: #0f64b6; color: #fff; } }
+  &--text, &--link { border-color: transparent; background: transparent; }
+  &--link { color: #1675d1; }
+  &--small { min-height: 24px; padding: 1px 8px; font-size: 12px; }
+  &--large { min-height: 40px; padding: 7px 18px; }
+  &--circle { width: 32px; padding: 0; border-radius: 50%; &.ui-button--large { width: 40px; } }
+  &--round { border-radius: 999px; }
+  &.is-block { width: 100%; }
+  &.is-danger { border-color: #ff4d4f; color: #cf3134; &.ui-button--primary { background: #cf3134; color: #fff; } }
+  &.is-ghost { background: transparent; }
+  &__icon, &__spinner { display: inline-grid; place-items: center; flex: none; }
+  &__spinner { width: 14px; height: 14px; border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; animation: ui-spin .7s linear infinite; }
+  &__label:empty { display: none; }
+}
+@keyframes ui-spin { to { transform: rotate(360deg); } }
+
+.ui-tag { display: inline-flex; align-items: center; gap: 4px; max-width: 100%; margin-inline-end: 8px; padding: 1px 7px; border: 1px solid #d8ded9; border-radius: 5px; background: #f5f7f5; color: #46504a; font-size: 12px; line-height: 20px; white-space: nowrap;
+  &--green, &--success { border-color: #a8d8b7; background: #edf8f0; color: #277344; }
+  &--blue, &--geekblue { border-color: #acd0f4; background: #edf5fd; color: #1767b4; }
+  &--gold, &--orange { border-color: #ead096; background: #fff8e7; color: #9b6710; }
+  &--red, &--error { border-color: #f0b1b2; background: #fff1f0; color: #bd2d30; }
+  &--custom { border-color: color-mix(in srgb, var(--ui-tag-color) 45%, white); color: var(--ui-tag-color); }
+  &__icon { display: inline-grid; }
+  &__close { padding: 0; border: 0; background: none; color: inherit; cursor: pointer; font-size: 14px; }
+}
+
+.ui-space { display: inline-flex; min-width: 0; &--horizontal { flex-direction: row; } &--vertical { flex-direction: column; } &.is-wrap { flex-wrap: wrap; } &__item { min-width: 0; } }
+.ui-space-compact { display: inline-flex; align-items: stretch; &.is-block { display: flex; width: 100%; } > * { border-radius: 0 !important; } > :first-child { border-radius: 7px 0 0 7px !important; } > :last-child { border-radius: 0 7px 7px 0 !important; } }
+
+.ui-card { border: 1px solid #d8ded9; border-radius: 12px; background: #fff; overflow: hidden;
+  &.is-hoverable { cursor: pointer; transition: transform .15s, border-color .15s, box-shadow .15s; &:hover { border-color: #a7dfbd; box-shadow: 0 8px 22px rgba(30,64,45,.09); transform: translateY(-1px); } }
+  &__head { min-height: 52px; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 0 18px; border-bottom: 1px solid #edf0ee; }
+  &__title { min-width: 0; font-weight: 600; }
+  &__body { padding: 18px; }
+  &--small &__head { min-height: 40px; padding-inline: 12px; }
+  &--small &__body { padding: 12px; }
+  &__cover > * { width: 100%; }
+  &__actions { display: flex; margin: 0; padding: 0; border-top: 1px solid #edf0ee; list-style: none; > li { flex: 1; padding: 10px; text-align: center; &:not(:last-child) { border-right: 1px solid #edf0ee; } } }
+}
+
+[data-theme='dark'] {
+  .ui-button { border-color: #46534c; background: #252e29; color: #e1e9e4; &--primary { border-color: #65a77d; background: #3d7752; } &--text, &--link, &.is-ghost { background: transparent; } }
+  .ui-tag { border-color: #46534c; background: #28322c; color: #cbd6cf; }
+  .ui-card { border-color: #39473f; background: #202823; &__head, &__actions { border-color: #39473f; } }
+}
