@@ -105,46 +105,42 @@ pub fn toggle_fullscreen(app: AppHandle) -> Result<bool, String> {
 /// `tauri-plugin-dialog` is wired in, and fall back to manual entry
 /// otherwise.
 #[tauri::command]
-pub fn pick_files(_app: AppHandle, options: FilePickOptions) -> Result<FilePickResult, String> {
+pub fn pick_files(app: AppHandle, options: FilePickOptions) -> Result<FilePickResult, String> {
     use tauri_plugin_dialog::DialogExt;
-    let app_handle = _app.clone();
     let multiple = options.multiple.unwrap_or(false);
     let directory = options.directory.unwrap_or(false);
     let title = options.title.clone();
-    let filters = options.filters.clone();
 
     let (tx, rx) = std::sync::mpsc::channel();
-    let mut builder = _app
-        .dialog()
-        .clone()
-        .file();
+    let mut builder = app.dialog().file();
     if let Some(title) = title {
         builder = builder.set_title(title);
     }
-    if directory {
-        builder = builder.pick_folder(move |path| {
-            let _ = tx.send(path.map(|p| vec![p.to_string_lossy().into_owned()]));
+    fn file_path_to_string(path: tauri_plugin_dialog::FilePath) -> String {
+    use tauri_plugin_dialog::FilePath;
+    match path {
+        FilePath::Path(buf) => buf.to_string_lossy().into_owned(),
+        FilePath::Url(url) => url.to_string(),
+    }
+}
+
+if directory {
+        builder.pick_folder(move |path| {
+            let _ = tx.send(path.map(|p| vec![file_path_to_string(p)]));
         });
     } else if multiple {
-        builder = builder.pick_files(move |paths| {
-            let _ = tx.send(Some(
-                paths
-                    .into_iter()
-                    .map(|p| p.to_string_lossy().into_owned())
-                    .collect(),
-            ));
+        builder.pick_files(move |paths| {
+            let collected: Vec<String> = match paths {
+                Some(list) => list.into_iter().map(file_path_to_string).collect(),
+                None => Vec::new(),
+            };
+            let _ = tx.send(Some(collected));
         });
     } else {
-        builder = builder.pick_file(move |path| {
-            let _ = tx.send(path.map(|p| vec![p.to_string_lossy().into_owned()]));
+        builder.pick_file(move |path| {
+            let _ = tx.send(path.map(|p| vec![file_path_to_string(p)]));
         });
     }
-    drop(builder);
-    drop(app_handle);
-    drop(filters);
-
-    let result = std::sync::mpsc::RecvTimeoutError::Disconnected;
-    let _ = result; // silence unused
 
     let paths = rx
         .recv_timeout(std::time::Duration::from_secs(300))
