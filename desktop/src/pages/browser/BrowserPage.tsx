@@ -9,7 +9,7 @@ import { extractArticle } from '../../features/reader/extractArticle'
 import type { ReaderArticle } from '../../features/reader/types'
 import { classifySaveError } from '../../features/documents/saveClassifier'
 import { useDebouncedValue } from '../../shared/hooks/useDebouncedValue'
-import { dedupeHistory, parseHistory, type HistoryEntry } from '../../features/history/dedupeHistory'
+import { dedupeHistory, HISTORY_CHANGE_EVENT, parseHistory, type HistoryEntry } from '../../features/history/dedupeHistory'
 import { reorderTabs } from '../../features/browser/reorderTabs'
 import { interpretShortcut } from '../../features/browser/shortcuts'
 import { popClosedTab, recordClosedTab, type ClosedTab } from '../../features/browser/closedTabs'
@@ -297,6 +297,11 @@ export function BrowserPage({ visible = true, onSearchKnowledge }: { visible?: b
   useEffect(() => { tabsRef.current = tabs }, [tabs])
   useEffect(() => { closedTabsRef.current = closedTabs }, [closedTabs])
   useEffect(() => { historyRef.current = history }, [history])
+  useEffect(() => {
+    const syncHistory = (event: Event) => setHistory((event as CustomEvent<HistoryEntry[]>).detail)
+    window.addEventListener(HISTORY_CHANGE_EVENT, syncHistory)
+    return () => window.removeEventListener(HISTORY_CHANGE_EVENT, syncHistory)
+  }, [])
   useEffect(() => { zoomLevelsRef.current = zoomLevels }, [zoomLevels])
   useEffect(() => { visibleRef.current = visible }, [visible])
 

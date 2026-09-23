@@ -19,7 +19,7 @@ export function AppRouter() {
     settings: <SettingsPage />,
   }
   return <AppLayout view={view} onViewChange={setView}><Suspense fallback={<div className="route-loading"><Spin size="large"/></div>}>
-    <div className={`route-view${view === 'browser' ? '' : ' is-hidden'}`}><BrowserPage visible={view === 'browser'} onSearchKnowledge={query => { setKnowledgeQuery(query); setView('search') }}/></div>
-    {view !== 'browser' && <div className="route-view">{pages[view]}</div>}
+    <div className={`route-view${view === 'browser' ? '' : ' is-hidden'}`} data-view="browser"><BrowserPage visible={view === 'browser'} onSearchKnowledge={query => { setKnowledgeQuery(query); setView('search') }}/></div>
+    {view !== 'browser' && <div key={view} className="route-view" data-view={view}>{pages[view]}</div>}
   </Suspense></AppLayout>
 }

@@ -205,6 +205,35 @@
   max-width: 760px;
 }
 
+.privacy-history-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 22px;
+  padding-bottom: 8px;
+}
+
+.privacy-history-list {
+  max-height: 360px;
+  overflow: auto;
+  padding: 0 12px;
+  border: 1px solid var(--accent-border);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, .55);
+
+  .ant-list-item { padding-block: 11px; }
+  .ant-list-item-meta-title { margin-bottom: 3px !important; }
+  .ant-list-item-meta-description { display: flex; align-items: center; gap: 14px; min-width: 0; }
+}
+
+.privacy-history-url {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--accent);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 body[data-theme='green'] {
   .app-content { background: #f5f7f4; }
 }
@@ -336,10 +365,68 @@ body[data-theme='dark'] {
 .route-view:not(.is-hidden) {
   min-height: 100%;
   height: auto;
+  animation: route-enter .32s cubic-bezier(.22, 1, .36, 1) both;
 }
 
 .route-view > .browser-page {
   height: 100vh;
+}
+
+// Route motion stays short and low-amplitude so navigation feels responsive
+// while still making the change of context legible.
+@keyframes route-enter {
+  from { opacity: 0; transform: translateY(7px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes route-fade {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.route-view[data-view='browser']:not(.is-hidden) {
+  animation-name: route-fade;
+  animation-duration: .2s;
+}
+
+@keyframes route-content-enter {
+  from { opacity: 0; transform: translateY(5px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.route-view:not(.is-hidden) > .page {
+  > .page-header {
+    animation: route-content-enter .36s .035s cubic-bezier(.22, 1, .36, 1) both;
+  }
+
+  > :not(.page-header) {
+    animation: route-content-enter .4s .075s cubic-bezier(.22, 1, .36, 1) both;
+  }
+}
+
+.app-content,
+.app-sider.ant-layout-sider {
+  transition: background-color .24s ease, border-color .24s ease, color .24s ease;
+}
+
+.rail-button .nav-glyph {
+  transition: transform .2s cubic-bezier(.22, 1, .36, 1), background-color .16s ease, color .16s ease, box-shadow .2s ease;
+}
+
+.rail-button:hover .nav-glyph { transform: translateY(-1px); }
+.rail-button.is-active .nav-glyph { transform: scale(1.03); }
+
+@media (prefers-reduced-motion: reduce) {
+  .route-view:not(.is-hidden),
+  .route-view:not(.is-hidden) > .page > * {
+    animation: none !important;
+  }
+
+  .app-content,
+  .app-sider.ant-layout-sider,
+  .rail-button .nav-glyph {
+    transition-duration: .01ms !important;
+  }
 }
 
 html,

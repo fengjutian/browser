@@ -2,12 +2,13 @@ import { Alert, Button, Card, Form, Input, InputNumber, List, Segmented, Select,
 import { BgColorsOutlined, DeleteOutlined, KeyOutlined, MoonOutlined, SafetyCertificateOutlined, SaveOutlined, SunOutlined, ThunderboltOutlined } from '@ant-design/icons'
 import { useEffect, useState } from 'react'
 import { PageHeader } from '../../shared/components/PageHeader'
-import { deleteAIProvider, exportBackup, getAIProvider, getBrowserShortcutsEnabled, importBackup, listAIProviders, saveAIProvider, aiTestProvider, setBrowserShortcutsEnabled, type AIProviderInput } from '../../api'
+import { deleteAIProvider, exportBackup, getAIProvider, getBrowserShortcutsEnabled, getSession, importBackup, listAIProviders, saveAIProvider, aiTestProvider, setBrowserShortcutsEnabled, setSession, type AIProviderInput } from '../../api'
 import type { AIProvider, AIProviderType } from '../../types'
 import { normalizeOrigin, readSitePermissions, writeSitePermissions, type SitePermissionKind, type SitePermissionRule } from '../../features/browser/sitePermissions'
 import { readThemePreference, writeThemePreference, type ThemePreference } from '../../features/settings/theme'
 import { readSearchEngineConfig, resolveActiveSearchTemplate, SEARCH_ENGINE_PRESETS, writeSearchEngineConfig } from '../../features/browser/searchEngine'
 import { isSearchTemplateValid } from '../../features/browser/navigation'
+import { HISTORY_CHANGE_EVENT, parseHistory, type HistoryEntry } from '../../features/history/dedupeHistory'
 
 const PROVIDER_OPTIONS: { label: string; value: AIProviderType }[] = [
   { label: 'OpenAI 兼容（API Key）', value: 'openai-compatible' },
@@ -321,19 +322,29 @@ const PERMISSION_LABELS: Record<SitePermissionKind, string> = {
 
 function PrivacySettings() {
   const [messageApi, contextHolder] = message.useMessage()
-  const [historyScope, setHistoryScope] = useState<'hour' | 'day' | 'week' | 'all'>('day')
+  const [historyEntries, setHistoryEntries] = useState<HistoryEntry[]>([])
   const [cleanupOnExit, setCleanupOnExit] = useState<boolean>(() => readCleanupOnExitPreference())
 
-  function clearHistory(scope: 'hour' | 'day' | 'week' | 'all') {
-    const all = readHistoryEntries()
+  useEffect(() => {
+    let active = true
+    void getSession('browser.history').then(raw => {
+      if (active) setHistoryEntries(parseHistory(raw ?? localStorage.getItem('browser.history')))
+    })
+    return () => { active = false }
+  }, [])
+
+  async function clearHistory(scope: 'hour' | 'day' | 'week' | 'all') {
+    const all = historyEntries
     if (scope === 'all') {
-      writeHistoryEntries([])
+      await writeHistoryEntries([])
+      setHistoryEntries([])
       messageApi.success(`已清理全部 ${all.length} 条浏览记录`)
       return
     }
     const cutoff = cutoffForScope(scope)
     const next = all.filter(item => item.visitedAt < cutoff)
-    writeHistoryEntries(next)
+    await writeHistoryEntries(next)
+    setHistoryEntries(next)
     messageApi.success(`已清理 ${all.length - next.length} 条浏览记录`)
   }
 
@@ -369,11 +380,13 @@ function PrivacySettings() {
     <Typography.Title level={5} style={{ marginTop: 24 }}>浏览历史</Typography.Title>
     <Typography.Paragraph type="secondary">按时间范围清理浏览历史（只删数据，不会删除已保存到知识库的文档）。</Typography.Paragraph>
     <Space wrap>
-      <Button onClick={() => clearHistory('hour')}>最近 1 小时</Button>
-      <Button onClick={() => clearHistory('day')}>最近 24 小时</Button>
-      <Button onClick={() => clearHistory('week')}>最近 7 天</Button>
-      <Button danger onClick={() => { localStorage.removeItem('browser.history'); messageApi.success('已清空全部历史') }}>清空全部</Button>
+      <Button onClick={() => void clearHistory('hour')}>最近 1 小时</Button>
+      <Button onClick={() => void clearHistory('day')}>最近 24 小时</Button>
+      <Button onClick={() => void clearHistory('week')}>最近 7 天</Button>
+      <Button danger onClick={() => void clearHistory('all')}>清空全部</Button>
     </Space>
+    <div className="privacy-history-head"><Typography.Text strong>全部记录</Typography.Text><Typography.Text type="secondary">{historyEntries.length} 条</Typography.Text></div>
+    <List className="privacy-history-list" size="small" dataSource={historyEntries} locale={{ emptyText: '暂无浏览历史' }} renderItem={item => <List.Item key={`${item.url}-${item.visitedAt}`}><List.Item.Meta title={item.title || item.url} description={<><Typography.Text type="secondary">{new Date(item.visitedAt).toLocaleString()}</Typography.Text><Typography.Text className="privacy-history-url" copyable={{ text: item.url }}>{item.url}</Typography.Text></>}/></List.Item>}/>
     <Typography.Title level={5} style={{ marginTop: 24 }}>其他清理</Typography.Title>
     <Space wrap>
       <Button onClick={clearClosedTabs}>清空最近关闭</Button>
@@ -404,29 +417,12 @@ function writeCleanupOnExitPreference(value: boolean): void {
   } catch { /* ignore */ }
 }
 
-function readHistoryEntries(): { url: string; title: string; visitedAt: number }[] {
-  try {
-    const raw = localStorage.getItem('browser.history')
-    if (!raw) return []
-    const value = JSON.parse(raw)
-    if (!Array.isArray(value)) return []
-    return value
-      .filter((entry: unknown) => !!entry && typeof entry === 'object')
-      .map((entry: any) => ({
-        url: typeof entry.url === 'string' ? entry.url : '',
-        title: typeof entry.title === 'string' ? entry.title : '',
-        visitedAt: typeof entry.visitedAt === 'number' ? entry.visitedAt : 0,
-      }))
-      .filter((entry: { url: string }) => entry.url.length > 0)
-  } catch {
-    return []
-  }
-}
-
-function writeHistoryEntries(entries: { url: string; title: string; visitedAt: number }[]): void {
+async function writeHistoryEntries(entries: HistoryEntry[]): Promise<void> {
   try {
     localStorage.setItem('browser.history', JSON.stringify(entries))
   } catch { /* ignore */ }
+  await setSession('browser.history', JSON.stringify(entries))
+  window.dispatchEvent(new CustomEvent<HistoryEntry[]>(HISTORY_CHANGE_EVENT, { detail: entries }))
 }
 
 function cutoffForScope(scope: 'hour' | 'day' | 'week'): number {

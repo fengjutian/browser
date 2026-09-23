@@ -28,10 +28,10 @@ describe('dedupeHistory', () => {
     expect(result[0].url).toBe('https://new/')
   })
 
-  it('uses default limit of 50 when omitted', () => {
-    const seed = Array.from({ length: 49 }, (_, i) => entry(`https://x/${i}/`))
+  it('keeps the complete list when a limit is omitted', () => {
+    const seed = Array.from({ length: 80 }, (_, i) => entry(`https://x/${i}/`))
     const result = dedupeHistory(seed, entry('https://new/'))
-    expect(result).toHaveLength(50)
+    expect(result).toHaveLength(81)
   })
 })
 
@@ -57,8 +57,8 @@ describe('parseHistory', () => {
     expect(parseHistory(raw)).toEqual([{ url: 'https://a/', title: 'A', visitedAt: 1 }])
   })
 
-  it('caps parsed list at the default limit', () => {
+  it('parses the complete stored history', () => {
     const seed = Array.from({ length: 80 }, (_, i) => entry(`https://x/${i}/`))
-    expect(parseHistory(JSON.stringify(seed))).toHaveLength(50)
+    expect(parseHistory(JSON.stringify(seed))).toHaveLength(80)
   })
 })
