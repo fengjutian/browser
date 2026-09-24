@@ -1,6 +1,7 @@
 import { Readability } from '@mozilla/readability'
 import TurndownService from 'turndown'
 import type { PageSnapshot, ReaderArticle } from './types'
+import { countTextUnits } from '../../shared/textCount'
 
 const turndown = new TurndownService({ headingStyle: 'atx', codeBlockStyle: 'fenced', bulletListMarker: '-' })
 turndown.addRule('removeScripts', { filter: ['script', 'style', 'noscript'], replacement: () => '' })
@@ -27,5 +28,5 @@ export function extractArticle(snapshot: PageSnapshot): ReaderArticle {
     }
   })
   const contentHtml = content.body.innerHTML
-  return { title: article.title?.trim() ?? '', byline: article.byline?.trim() ?? '', excerpt: article.excerpt?.trim() ?? '', siteName: article.siteName?.trim() ?? '', language: article.lang?.trim() ?? '', contentHtml, markdown: turndown.turndown(contentHtml), textContent, wordCount: textContent.split(/\s+/u).filter(Boolean).length }
+  return { title: article.title?.trim() ?? '', byline: article.byline?.trim() ?? '', excerpt: article.excerpt?.trim() ?? '', siteName: article.siteName?.trim() ?? '', language: article.lang?.trim() ?? '', contentHtml, markdown: turndown.turndown(contentHtml), textContent, wordCount: countTextUnits(textContent) }
 }

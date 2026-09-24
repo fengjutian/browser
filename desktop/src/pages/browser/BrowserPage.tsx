@@ -1682,7 +1682,7 @@ export function BrowserPage({ visible = true, onSearchKnowledge }: { visible?: b
       const article = extractArticle(await captureNativePage(active.id))
       await hideNativeTab(active.id)
       setReaderArticle(article)
-      messageApi.open({ key, type: 'success', content: `已提取 ${article.wordCount} 字` })
+      messageApi.open({ key, type: 'success', content: `已提取 ${article.wordCount} 字词` })
     } catch { messageApi.open({ key, type: 'error', content: '无法识别该页面正文' }) }
   }
 
@@ -1974,7 +1974,7 @@ function BrowserErrorView({tab, onRetry, onNewTab, onCopy}:{tab:BrowserTab;onRet
     </Space>
   </div>
 }
-function ReaderArticleView({article}:{article:ReaderArticle}){return <article className="reader-document"><Typography.Text className="eyebrow">READER MODE · {article.wordCount} WORDS</Typography.Text><Typography.Title>{article.title}</Typography.Title>{article.byline&&<Typography.Text type="secondary">{article.byline}</Typography.Text>}<div className="reader-document__body" dangerouslySetInnerHTML={{__html:article.contentHtml}}/></article>}
+function ReaderArticleView({article}:{article:ReaderArticle}){return <article className="reader-document"><Typography.Text className="eyebrow">阅读模式 · {article.wordCount.toLocaleString()} 字词</Typography.Text><Typography.Title>{article.title}</Typography.Title>{article.byline&&<Typography.Text type="secondary">{article.byline}</Typography.Text>}<div className="reader-document__body" dangerouslySetInnerHTML={{__html:article.contentHtml}}/></article>}
 
 function faviconCandidates(favicon: string | undefined, pageUrl: string): string[] {
   const candidates: string[] = []

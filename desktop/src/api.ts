@@ -3,6 +3,7 @@ import type { AIProvider, AIProviderType, ChatRequest, ChatResponse, Document, P
 import type { HistoryEntry } from './features/history/dedupeHistory'
 import type { ClosedTab } from './features/browser/closedTabs'
 import type { SitePermissionRule } from './features/browser/sitePermissions'
+import { countTextUnits } from './shared/textCount'
 import type { BrowserTab, ReadingActivity } from './types'
 
 const isTauri = () => '__TAURI_INTERNALS__' in window
@@ -362,5 +363,5 @@ export async function importBackup(backup: Backup): Promise<ImportSummary> {
 function createDocument(input: { title: string; url: string; markdown: string; tags: string[] }): Document {
   let source = ''
   try { source = new URL(input.url).hostname } catch { /* keep source empty */ }
-  return { id: `local-${crypto.randomUUID()}`, ...input, source, wordCount: input.markdown.trim() ? input.markdown.trim().split(/\s+/u).length : 0, status: 'READY', autoTags: [], createdAt: new Date().toISOString(), starred: false }
+  return { id: `local-${crypto.randomUUID()}`, ...input, source, wordCount: countTextUnits(input.markdown), status: 'READY', autoTags: [], createdAt: new Date().toISOString(), starred: false }
 }
