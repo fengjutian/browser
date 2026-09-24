@@ -164,7 +164,7 @@ fn browser_capabilities() -> BrowserCapabilities {
         download_cancel: true,           // return false from on_download Requested
         native_permission_events: false, // Tauri 2 stable does not surface PermissionRequested
         native_context_menu: false,      // wry has no context-menu integration in stable
-        clear_site_data: false,          // wry does not expose WebView2 profile; webview2-com needed
+        clear_site_data: cfg!(target_os = "windows"),
         certificate_error_interceptor: cfg!(target_os = "windows"),
         webview_backend: Some(webview_backend_label()),
         tauri_runtime_version: Some(env!("CARGO_PKG_VERSION")),
@@ -735,12 +735,52 @@ async fn browser_edit_action(app: tauri::AppHandle, label: String, action: Strin
         .map_err(|error| error.to_string())
 }
 
+#[cfg(target_os = "windows")]
+fn clear_webview_profile_data(view: &tauri::Webview) -> Result<(), String> {
+    use std::sync::mpsc;
+    use webview2_com::ClearBrowsingDataCompletedHandler;
+    use webview2_com::Microsoft::Web::WebView2::Win32::{
+        COREWEBVIEW2_BROWSING_DATA_KINDS_CACHE_STORAGE,
+        COREWEBVIEW2_BROWSING_DATA_KINDS_COOKIES,
+        COREWEBVIEW2_BROWSING_DATA_KINDS_DISK_CACHE,
+        COREWEBVIEW2_BROWSING_DATA_KINDS_SERVICE_WORKERS,
+        ICoreWebView2Profile2, ICoreWebView2_13,
+    };
+    use windows::core::Interface;
+
+    let (sender, receiver) = mpsc::sync_channel(1);
+    view.with_webview(move |platform| {
+        let result = (|| {
+            let core = unsafe { platform.controller().CoreWebView2() }.map_err(|error| error.to_string())?;
+            let core13 = core.cast::<ICoreWebView2_13>().map_err(|error| error.to_string())?;
+            let profile = unsafe { core13.Profile() }.map_err(|error| error.to_string())?;
+            let profile2 = profile.cast::<ICoreWebView2Profile2>().map_err(|error| error.to_string())?;
+            let kinds = COREWEBVIEW2_BROWSING_DATA_KINDS_COOKIES
+                | COREWEBVIEW2_BROWSING_DATA_KINDS_DISK_CACHE
+                | COREWEBVIEW2_BROWSING_DATA_KINDS_CACHE_STORAGE
+                | COREWEBVIEW2_BROWSING_DATA_KINDS_SERVICE_WORKERS;
+            let (callback_sender, callback_receiver) = mpsc::channel();
+            let callback = ClearBrowsingDataCompletedHandler::create(Box::new(move |status| {
+                let _ = callback_sender.send(status.map_err(|error| error.to_string()));
+                Ok(())
+            }));
+            unsafe { profile2.ClearBrowsingData(kinds, &callback) }.map_err(|error| error.to_string())?;
+            webview2_com::wait_with_pump(callback_receiver).map_err(|error| error.to_string())?
+        })();
+        let _ = sender.send(result);
+    }).map_err(|error| error.to_string())?;
+    receiver.recv_timeout(Duration::from_secs(30)).map_err(|_| "清理 Cookie 与磁盘缓存超时".to_string())?
+}
+
 #[tauri::command]
 async fn browser_clear_page_data(app: tauri::AppHandle, label: String) -> Result<(), String> {
     validate_browser_label(&label)?;
-    app.get_webview(&label)
-        .ok_or_else(|| "browser tab webview not found".to_string())?
-        .eval("(()=>{try{localStorage.clear()}catch{}try{sessionStorage.clear()}catch{}try{document.cookie.split(';').forEach(c=>{const n=c.split('=')[0].trim();document.cookie=n+'=;expires=Thu, 01 Jan 1970 00:00:00 GMT;path=/'})}catch{}try{caches.keys().then(keys=>Promise.all(keys.map(k=>caches.delete(k))))}catch{}try{indexedDB.databases?.().then(dbs=>dbs.forEach(db=>db.name&&indexedDB.deleteDatabase(db.name)))}catch{}})()")
+    let view = app.get_webview(&label).ok_or_else(|| "browser tab webview not found".to_string())?;
+    #[cfg(target_os = "windows")]
+    clear_webview_profile_data(&view)?;
+    // Clear origin-bound DOM databases as well. The native profile call above
+    // removes HTTP-only cookies and disk/cache storage that JavaScript cannot see.
+    view.eval("(()=>{try{localStorage.clear()}catch{}try{sessionStorage.clear()}catch{}try{caches.keys().then(keys=>Promise.all(keys.map(k=>caches.delete(k))))}catch{}try{indexedDB.databases?.().then(dbs=>dbs.forEach(db=>db.name&&indexedDB.deleteDatabase(db.name)))}catch{}})()")
         .map_err(|error| error.to_string())
 }
 
@@ -1532,7 +1572,7 @@ mod tests {
         assert!(caps.download_cancel, "Requested handler returning false cancels");
         assert!(!caps.native_permission_events, "PermissionRequested not in Tauri 2 stable");
         assert!(!caps.native_context_menu, "wry has no context menu integration");
-        assert!(!caps.clear_site_data, "WebView2 profile API not in wry");
+        assert_eq!(caps.clear_site_data, cfg!(target_os = "windows"));
         assert_eq!(caps.certificate_error_interceptor, cfg!(target_os = "windows"));
         assert!(caps.webview_backend.is_some(), "backend label must be set on every target");
         assert!(caps.tauri_runtime_version.is_some(), "tauri runtime version must be set");

@@ -1818,7 +1818,7 @@ export function BrowserPage({ visible = true, onSearchKnowledge }: { visible?: b
     />
     <Modal
       open={clearSiteDataOpen}
-      title="清除此网站数据"
+      title="彻底清除 Cookie 与缓存"
       okText="清除并重新加载"
       cancelText="取消"
       okButtonProps={{ danger: true }}
@@ -1828,12 +1828,12 @@ export function BrowserPage({ visible = true, onSearchKnowledge }: { visible?: b
           await clearNativePageData(active.id)
           setClearSiteDataOpen(false)
           await reloadNativeTab(active.id)
-          messageApi.success('已清除当前网页可访问的站点数据')
+          messageApi.success('已清除 HTTP-only Cookie、磁盘缓存和当前网页存储')
         } catch (error) { messageApi.error(`清除失败：${String(error)}`) }
       }}
     >
-      <Typography.Paragraph>将清除当前网站的普通 Cookie、本地存储、会话存储、Cache Storage 和 IndexedDB，然后重新加载页面。</Typography.Paragraph>
-      <Typography.Paragraph type="secondary">受 WebView2 接口限制，HTTP-only Cookie 和浏览器磁盘缓存可能仍需通过系统浏览器设置清理。</Typography.Paragraph>
+      <Typography.Paragraph>将清除 WebView2 Profile 中的全部 Cookie（包括 HTTP-only Cookie）、磁盘缓存、Cache Storage 与 Service Worker，并清除当前网页的本地存储、会话存储和 IndexedDB。</Typography.Paragraph>
+      <Typography.Paragraph type="secondary">Cookie 与磁盘缓存由同一浏览器 Profile 共享，因此其他已打开网站可能需要重新登录或重新加载。</Typography.Paragraph>
     </Modal>
     <Modal
       open={sourceView !== null}
