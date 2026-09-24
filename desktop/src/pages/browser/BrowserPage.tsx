@@ -4,7 +4,7 @@ import { ArrowDownOutlined, ArrowLeftOutlined, ArrowRightOutlined, ArrowUpOutlin
 import { Sparkles as RobotOutlined } from 'lucide-react'
 import type { BrowserTab, BrowserTabError } from '../../types'
 import { addBrowserHistory, deleteClosedTab, findDocumentByUrl, getBrowserShortcutsEnabled, getBrowserWorkspace, getDocument, listBrowserHistory, listClosedTabs, listSitePermissions, purgeReadingSnapshots, recordReadingActivity, saveBrowserWorkspace, saveClosedTab, saveDocument, saveReadingSnapshot, setSession, toggleStarred } from '../../api'
-import { captureNativePage, clearNativePageData, closeNativeTab, editNativePage, ensureNativeTab, findInNativeTab, hasNativeTab, hideNativeTab, isNativeBrowserAvailable, navigateHistory, onNativeAdBlockUpdate, onNativeAudioState, onNativeNewTab, onNativeToolbarMenuAction, openNativeTab, printNativeTab, readNativeState, reloadNativeTab, resizeNativeTab, setNativeMuted, setNativeToolbarMenu, setNativeToolbarPanel, showNativeTab, stopNativeTab, zoomNativeTab } from '../../services/nativeBrowser'
+import { captureNativePage, clearNativePageData, closeNativeTab, editNativePage, ensureNativeTab, findInNativeTab, hasNativeTab, hideNativeTab, isNativeBrowserAvailable, navigateHistory, onNativeAdBlockUpdate, onNativeAudioState, onNativeNewTab, onNativeToolbarMenuAction, openNativeDevtools, openNativeTab, printNativeTab, readNativeState, reloadNativeTab, resizeNativeTab, setNativeMuted, setNativeToolbarMenu, setNativeToolbarPanel, showNativeTab, stopNativeTab, zoomNativeTab } from '../../services/nativeBrowser'
 import { extractArticle } from '../../features/reader/extractArticle'
 import type { ReaderArticle } from '../../features/reader/types'
 import { classifySaveError } from '../../features/documents/saveClassifier'
@@ -800,6 +800,7 @@ export function BrowserPage({ visible = true, onSearchKnowledge }: { visible?: b
       case 'toggle-notes': setNotesOpen(value => !value); break
       case 'save-workspace': void saveAsWorkspace(); break
       case 'print': void printNativeTab(active.id); break
+      case 'devtools': void openNativeDevtools(active.id); break
       case 'translate-page':
         void openReader().then(() => { setAiTranslationSource(''); setAiInitialMode('translate'); setAiOpen(true) })
         break
@@ -867,6 +868,7 @@ export function BrowserPage({ visible = true, onSearchKnowledge }: { visible?: b
     { key: 'save-workspace', label: '保存当前标签为工作区', extra: 'Ctrl+Shift+W', icon: <SaveOutlined/>, disabled: tabs.length === 0, onClick: () => runBrowserMenuAction('save-workspace') },
     { key: 'translate-page', label: '翻译当前网页', icon: <TranslationOutlined/>, disabled: !active.url, onClick: () => runBrowserMenuAction('translate-page') },
     { key: 'print', label: '打印 / 保存为 PDF', icon: <PrinterOutlined/>, extra: 'Ctrl+P', disabled: !nativeMode, onClick: () => runBrowserMenuAction('print') },
+    { key: 'devtools', label: '开发者工具', extra: 'F12', disabled: !nativeMode, onClick: () => runBrowserMenuAction('devtools') },
     { key: 'clear-site-data', label: '清除此网站数据', disabled: !active.url || !nativeMode, onClick: () => runBrowserMenuAction('clear-site-data') },
     { type: 'divider' },
     { key: 'new-private', label: '新建私密窗口', icon: <LockOutlined/>, extra: 'Shift+Ctrl+N', onClick: () => runBrowserMenuAction('new-private') },

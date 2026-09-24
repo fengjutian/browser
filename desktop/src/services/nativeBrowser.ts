@@ -92,6 +92,7 @@ export async function clearNativePageData(tabId: string): Promise<void> { const 
 export async function findInNativeTab(tabId: string, query: string, backwards = false): Promise<boolean> { const label=labels.get(tabId);return label ? invoke<boolean>('browser_find',{label,query,backwards}) : false }
 export async function zoomNativeTab(tabId: string, scale: number): Promise<void> { const label=labels.get(tabId);if(label)await invoke('browser_zoom',{label,scale}) }
 export async function printNativeTab(tabId: string): Promise<void> { const label=labels.get(tabId);if(label)await invoke('browser_print',{label}) }
+export async function openNativeDevtools(tabId: string): Promise<void> { const label=labels.get(tabId);if(label)await invoke('browser_open_devtools',{label}) }
 export async function navigateHistory(tabId: string, delta: -1|1): Promise<void> { const label=labels.get(tabId);if(label)await invoke('browser_history',{label,delta}) }
 export async function readNativeState(tabId: string): Promise<NativeBrowserState | null> { const label=labels.get(tabId);return label ? invoke<NativeBrowserState>('browser_state',{label}) : null }
 export async function restoreNativeScroll(tabId: string, x: number, y: number): Promise<void> { const label=labels.get(tabId);if(label)await invoke('browser_restore_scroll',{label,x,y}) }
