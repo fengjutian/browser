@@ -24,6 +24,7 @@ export type ContextMenuAction =
   | 'select-all'
   | 'search-selection'
   | 'ask-ai'
+  | 'translate-selection'
   | 'add-to-notes'
   | 'open-link-current'
   | 'open-link-new'
@@ -110,6 +111,7 @@ function buildSelectionSections(request: ContextMenuRequest, cap: ContextMenuCap
         { action: 'search-selection', label: '用搜索引擎搜索所选内容', enabled: ALWAYS_ENABLED },
         { action: 'add-to-notes', label: '加入笔记', enabled: hasSelection, disabledReason: hasSelection ? undefined : '请先选中文本' },
         { action: 'ask-ai', label: '向 AI 提问', enabled: cap.canAskAi, disabledReason: cap.canAskAi ? undefined : 'AI 功能尚未配置' },
+        { action: 'translate-selection', label: '翻译选中内容', enabled: cap.canAskAi && hasSelection, disabledReason: cap.canAskAi ? undefined : 'AI 功能尚未配置' },
       ],
     },
   ]

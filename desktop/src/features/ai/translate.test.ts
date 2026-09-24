@@ -1,7 +1,11 @@
 import { describe, expect, it } from 'vitest'
-import { TRANSLATION_VIEW_LABEL, buildTranslatePrompt, splitForTranslation, translationKey } from './translate'
+import { TRANSLATION_VIEW_LABEL, buildTranslatePrompt, detectTranslationTarget, splitForTranslation, translationKey } from './translate'
 
 describe('translate helpers', () => {
+  it('chooses the opposite default language from the detected source', () => {
+    expect(detectTranslationTarget('This is an English paragraph.')).toBe('zh-CN')
+    expect(detectTranslationTarget('这是一段中文内容，用于自动检测。')).toBe('en')
+  })
   it('chunks long articles at paragraph boundaries', () => {
     const long = Array.from({ length: 600 }, (_, index) => `Paragraph ${index} ${'lorem ipsum '.repeat(40)}`).join('\n\n')
     const chunks = splitForTranslation(long)

@@ -10,6 +10,13 @@ const SYSTEM_PROMPT = [
 
 export type TranslationView = 'translation-only' | 'bilingual'
 
+export function detectTranslationTarget(text: string): 'zh-CN' | 'en' {
+  const letters = text.match(/[\p{L}]/gu) ?? []
+  if (!letters.length) return 'zh-CN'
+  const chinese = text.match(/[\u3400-\u9fff]/g)?.length ?? 0
+  return chinese / letters.length >= 0.3 ? 'en' : 'zh-CN'
+}
+
 export interface TranslateInput {
   markdown: string
   targetLanguage: string

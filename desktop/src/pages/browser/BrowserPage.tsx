@@ -158,6 +158,8 @@ export function BrowserPage({ visible = true, onSearchKnowledge }: { visible?: b
   const [address, setAddress] = useState('')
   const [aiOpen, setAiOpen] = useState(false)
   const [aiInitialQuestion, setAiInitialQuestion] = useState('')
+  const [aiInitialMode, setAiInitialMode] = useState<'summarize'|'ask'|'translate'|undefined>()
+  const [aiTranslationSource, setAiTranslationSource] = useState('')
   const [findOpen, setFindOpen] = useState(false)
   const [pendingShellOpen, setPendingShellOpen] = useState<string | null>(null)
   const [tabSearchOpen, setTabSearchOpen] = useState(false)
@@ -782,6 +784,9 @@ export function BrowserPage({ visible = true, onSearchKnowledge }: { visible?: b
       case 'toggle-notes': setNotesOpen(value => !value); break
       case 'save-workspace': void saveAsWorkspace(); break
       case 'print': void printNativeTab(active.id); break
+      case 'translate-page':
+        void openReader().then(() => { setAiTranslationSource(''); setAiInitialMode('translate'); setAiOpen(true) })
+        break
       case 'new-private': openNewTab(undefined, { private: true }); break
       case 'fullscreen': void handleToggleFullscreen(); break
       case 'zoom-out': changeZoom(active.id, -0.1); break
@@ -844,7 +849,8 @@ export function BrowserPage({ visible = true, onSearchKnowledge }: { visible?: b
     { key: 'bulk-summary', label: '多链接 AI 摘要', extra: 'Ctrl+Shift+S', onClick: () => runBrowserMenuAction('bulk-summary') },
     { key: 'toggle-notes', label: '网页笔记面板', extra: 'Ctrl+Shift+N', onClick: () => runBrowserMenuAction('toggle-notes') },
     { key: 'save-workspace', label: '保存当前标签为工作区', extra: 'Ctrl+Shift+W', icon: <SaveOutlined/>, disabled: tabs.length === 0, onClick: () => runBrowserMenuAction('save-workspace') },
-    { key: 'print', label: '打印', icon: <PrinterOutlined/>, extra: 'Ctrl+P', disabled: !nativeMode, onClick: () => runBrowserMenuAction('print') },
+    { key: 'translate-page', label: '翻译当前网页', icon: <TranslationOutlined/>, disabled: !active.url, onClick: () => runBrowserMenuAction('translate-page') },
+    { key: 'print', label: '打印 / 保存为 PDF', icon: <PrinterOutlined/>, extra: 'Ctrl+P', disabled: !nativeMode, onClick: () => runBrowserMenuAction('print') },
     { key: 'clear-site-data', label: '清除此网站数据', disabled: !active.url || !nativeMode, onClick: () => runBrowserMenuAction('clear-site-data') },
     { type: 'divider' },
     { key: 'new-private', label: '新建私密窗口', icon: <LockOutlined/>, extra: 'Shift+Ctrl+N', onClick: () => runBrowserMenuAction('new-private') },
@@ -1199,6 +1205,14 @@ export function BrowserPage({ visible = true, onSearchKnowledge }: { visible?: b
       case 'ask-ai':
         await openReader()
         setAiInitialQuestion(request.selectionText ? `请解释这段内容：\n\n${request.selectionText}` : '')
+        setAiInitialMode('ask')
+        setAiTranslationSource('')
+        setAiOpen(true)
+        return
+      case 'translate-selection':
+        setAiInitialQuestion('')
+        setAiTranslationSource(request.selectionText || '')
+        setAiInitialMode('translate')
         setAiOpen(true)
         return
       case 'open-link-current': if (request.linkUrl) void navigate(request.linkUrl); return
@@ -1739,7 +1753,7 @@ export function BrowserPage({ visible = true, onSearchKnowledge }: { visible?: b
             ? <div className="web-surface__loading"><LoadingOutlined spin/></div>
             : active.url
               ? <BrowserErrorView tab={{...active, error:{kind:'web-mode-required',message:'当前网页需要在 Tauri 桌面应用中打开。'}}} onRetry={retryActive} onNewTab={openNewTab} onCopy={copyUrl}/>
-              : <NewTab address={address} setAddress={setAddress} navigate={navigate} openNewTab={openNewTab} onSearchKnowledge={onSearchKnowledge}/>}</div>{aiOpen&&<AssistantPanel close={()=>setAiOpen(false)} saveToLibrary={save} currentUrl={active.url} currentTabId={active.id} readerArticle={readerArticle} initialQuestion={aiInitialQuestion}/>}</div>
+              : <NewTab address={address} setAddress={setAddress} navigate={navigate} openNewTab={openNewTab} onSearchKnowledge={onSearchKnowledge}/>}</div>{aiOpen&&<AssistantPanel close={()=>setAiOpen(false)} saveToLibrary={save} currentUrl={active.url} currentTabId={active.id} readerArticle={readerArticle} initialQuestion={aiInitialQuestion} initialMode={aiInitialMode} translationSource={aiTranslationSource}/>}</div>
     <ContextMenu
       surfaceRef={surfaceRef}
       capabilities={{

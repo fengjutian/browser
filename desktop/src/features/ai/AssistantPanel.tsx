@@ -6,7 +6,7 @@ import type { AIProvider } from '../../types'
 import type { ReaderArticle } from '../reader/types'
 import { buildAskPrompt, numberPassages, parseAnswer, passageById } from './ask'
 import { buildSummaryPrompt, summaryKindLabel, type SummaryKind } from './summarize'
-import { TRANSLATION_VIEW_LABEL, buildTranslatePrompt, translationKey, type TranslationView } from './translate'
+import { TRANSLATION_VIEW_LABEL, buildTranslatePrompt, detectTranslationTarget, translationKey, type TranslationView } from './translate'
 
 type PanelMode = 'summarize' | 'ask' | 'translate'
 
@@ -17,6 +17,8 @@ interface AssistantPanelProps {
   currentTabId: string
   readerArticle: ReaderArticle | null
   initialQuestion?: string
+  initialMode?: PanelMode
+  translationSource?: string
 }
 
 const TRANSLATION_LANGUAGES = [
@@ -30,7 +32,7 @@ const TRANSLATION_LANGUAGES = [
 
 interface TranslationCacheEntry { key: string; content: string }
 
-export function AssistantPanel({ close, saveToLibrary, currentUrl, currentTabId, readerArticle, initialQuestion = '' }: AssistantPanelProps) {
+export function AssistantPanel({ close, saveToLibrary, currentUrl, currentTabId, readerArticle, initialQuestion = '', initialMode, translationSource = '' }: AssistantPanelProps) {
   const [messageApi, contextHolder] = message.useMessage()
   const [mode, setMode] = useState<PanelMode>('summarize')
   const [providers, setProviders] = useState<AIProvider[]>([])
@@ -66,6 +68,14 @@ export function AssistantPanel({ close, saveToLibrary, currentUrl, currentTabId,
   }, [initialQuestion])
 
   useEffect(() => {
+    if (initialMode) setMode(initialMode)
+    if (initialMode === 'translate') {
+      const source = translationSource.trim() || readerArticle?.markdown || ''
+      setTargetLanguage(detectTranslationTarget(source))
+    }
+  }, [initialMode, translationSource, readerArticle?.markdown])
+
+  useEffect(() => {
     void getSession('ai.translations').then(raw => {
       if (!raw) { setCache([]); return }
       try {
@@ -79,7 +89,7 @@ export function AssistantPanel({ close, saveToLibrary, currentUrl, currentTabId,
 
   async function generateSummary() {
     if (!providerId) { setError('请先在「设置 → AI Provider」中配置一个 Provider。'); return }
-    const markdown = readerArticle?.markdown?.trim()
+    const markdown = (translationSource || readerArticle?.markdown || '').trim()
     if (!markdown) { setError('请先打开「阅读模式」提取页面正文。'); return }
     setBusy(true); setError(null); setSummary('')
     try {
@@ -147,6 +157,7 @@ export function AssistantPanel({ close, saveToLibrary, currentUrl, currentTabId,
   const currentProvider = providers.find(item => item.id === providerId)
   const noProvider = providers.length === 0
   const noArticle = !readerArticle?.markdown?.trim()
+  const noTranslationSource = !(translationSource || readerArticle?.markdown || '').trim()
 
   return <>{contextHolder}<aside className="ai-panel">
     <div className="panel-title"><Space><span className="ai-mark"><RobotOutlined/></span><b>AI Assistant</b></Space><Button type="text" icon={<CloseOutlined/>} onClick={close}/></div>
@@ -233,7 +244,7 @@ export function AssistantPanel({ close, saveToLibrary, currentUrl, currentTabId,
           ]}/>
         </Space>
         <Space orientation="vertical" className="panel-actions" style={{width:'100%'}}>
-          <Button block type="primary" icon={<TranslationOutlined/>} onClick={() => void translateArticle()} loading={busy} disabled={noProvider || noArticle}>翻译当前页面</Button>
+          <Button block type="primary" icon={<TranslationOutlined/>} onClick={() => void translateArticle()} loading={busy} disabled={noProvider || noTranslationSource}>翻译{translationSource ? '选中内容' : '当前页面'}</Button>
           <Button block icon={<CopyOutlined/>} onClick={() => void copyText(translation)} disabled={!translation}>复制译文</Button>
         </Space>
         <Card className="ai-result" size="small">

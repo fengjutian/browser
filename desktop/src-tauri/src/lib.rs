@@ -845,7 +845,7 @@ fn browser_toolbar_menu(app: tauri::AppHandle, label: String, open: bool, zoom_p
           const items = [
             ['find','在页面中查找'],['tab-search','搜索标签页'],['history-search','浏览历史记录'],
             ['bookmark-add','收藏当前页'],['bookmarks','打开收藏夹'],['bulk-summary','多链接 AI 摘要'],
-            ['toggle-notes','网页笔记面板'],['save-workspace','保存当前标签为工作区'],['print','打印'],['clear-site-data','清除此网站数据'],
+            ['toggle-notes','网页笔记面板'],['save-workspace','保存当前标签为工作区'],['translate-page','翻译当前网页'],['print','打印 / 保存为 PDF'],['clear-site-data','清除此网站数据'],
             null,['new-private','新建私密窗口'],['fullscreen','进入全屏'],null
           ];
           const style = document.createElement('style');
