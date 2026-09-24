@@ -610,7 +610,9 @@ fn password_manager_script(label: &str, private_mode: bool) -> String {
         const username=inputs.find(input=>input.autocomplete==='username'||input.type==='email'||input.name?.toLowerCase().includes('user'));
         if(password&&username?.value)window.__TAURI_INTERNALS__.invoke('browser_password_candidate',{{label,origin:location.origin,username:username.value,password:password.value}}).catch(()=>undefined);
       }},true);
-      if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',fill,{{once:true}});else fill();
+      let fillTimer=0;const scheduleFill=()=>{{clearTimeout(fillTimer);fillTimer=setTimeout(fill,250)}};
+      new MutationObserver(scheduleFill).observe(document.documentElement,{{subtree:true,childList:true}});
+      if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',scheduleFill,{{once:true}});else scheduleFill();
     }})()"#)
 }
 
