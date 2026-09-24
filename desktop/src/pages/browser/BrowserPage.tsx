@@ -1,10 +1,10 @@
-import { MouseEvent, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
-import { AutoComplete, Badge, Button, Dropdown, Input, message, Modal, Popover, Segmented, Select, Space, Tabs, Tag, Tooltip, Typography, UI_MODAL_OVERLAY_EVENT, type InputRef, type MenuProps } from '../../components/ui'
-import { ArrowDownOutlined, ArrowLeftOutlined, ArrowRightOutlined, ArrowUpOutlined, AudioMutedOutlined, BookOutlined, CheckCircleOutlined, CloseCircleOutlined, CloseOutlined, CopyOutlined, DownloadOutlined, FullscreenOutlined, GlobalOutlined, LoadingOutlined, MoreOutlined, PlusOutlined, PrinterOutlined, ReloadOutlined, SafetyCertificateOutlined, SaveOutlined, SearchOutlined, SoundOutlined, StarFilled, StarOutlined, ThunderboltOutlined, TranslationOutlined, WarningOutlined } from '../../components/ui/icons'
+import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
+import { AutoComplete, Badge, Button, Dropdown, Input, message, Modal, Popover, Space, Tabs, Tag, Tooltip, Typography, UI_MODAL_OVERLAY_EVENT, type InputRef, type MenuProps } from '../../components/ui'
+import { ArrowDownOutlined, ArrowLeftOutlined, ArrowRightOutlined, ArrowUpOutlined, AudioMutedOutlined, BookOutlined, CheckCircleOutlined, CloseCircleOutlined, CloseOutlined, CopyOutlined, DownloadOutlined, FullscreenOutlined, LoadingOutlined, MoreOutlined, PlusOutlined, PrinterOutlined, ReloadOutlined, SafetyCertificateOutlined, SaveOutlined, SearchOutlined, SoundOutlined, StarFilled, StarOutlined, ThunderboltOutlined, TranslationOutlined, WarningOutlined } from '../../components/ui/icons'
 import { Sparkles as RobotOutlined } from 'lucide-react'
-import type { BrowserTab, BrowserTabError } from '../../types'
+import type { BrowserTab } from '../../types'
 import { addBrowserHistory, deleteClosedTab, findDocumentByUrl, getBrowserShortcutsEnabled, getBrowserWorkspace, getDocument, listBrowserHistory, listClosedTabs, listSitePermissions, purgeReadingSnapshots, recordReadingActivity, saveBrowserWorkspace, saveClosedTab, saveDocument, saveReadingSnapshot, setSession, toggleStarred } from '../../api'
-import { captureNativePage, captureNativeScreenshot, clearNativePageData, closeNativeTab, diagnoseNativeNavigation, editNativePage, ensureNativeTab, findInNativeTab, generateBrowserPassword, hasNativeTab, hideNativeTab, isNativeBrowserAvailable, navigateHistory, onNativeAdBlockUpdate, onNativeAudioState, onNativeNewTab, onNativeToolbarMenuAction, onPasswordCandidate, openNativeDevtools, openNativeTab, printNativeTab, readNativeState, reloadNativeTab, resizeNativeTab, saveBrowserPassword, setNativeMuted, setNativeToolbarMenu, setNativeToolbarPanel, showNativeTab, stopNativeTab, zoomNativeTab, type PasswordCandidate } from '../../services/nativeBrowser'
+import { captureNativePage, captureNativeScreenshot, clearNativePageData, closeNativeTab, editNativePage, ensureNativeTab, findInNativeTab, generateBrowserPassword, hasNativeTab, hideNativeTab, isNativeBrowserAvailable, navigateHistory, onNativeAdBlockUpdate, onNativeAudioState, onNativeNewTab, onNativeToolbarMenuAction, onPasswordCandidate, openNativeDevtools, openNativeTab, printNativeTab, readNativeState, reloadNativeTab, resizeNativeTab, saveBrowserPassword, setNativeMuted, setNativeToolbarMenu, setNativeToolbarPanel, showNativeTab, stopNativeTab, zoomNativeTab, type PasswordCandidate } from '../../services/nativeBrowser'
 import { extractArticle } from '../../features/reader/extractArticle'
 import type { ReaderArticle } from '../../features/reader/types'
 import { classifySaveError } from '../../features/documents/saveClassifier'
@@ -19,7 +19,7 @@ import { formatBytes as formatProcessBytes } from '../../services/processMemory'
 import { interpretShortcut, readShortcutOverrides } from '../../features/browser/shortcuts'
 import { popClosedTab, recordClosedTab, type ClosedTab } from '../../features/browser/closedTabs'
 import { AssistantPanel } from '../../features/ai/AssistantPanel'
-import { classifyNavigationInput, renderSearchTemplate, resolveNavigationInput } from '../../features/browser/navigation'
+import { resolveNavigationInput } from '../../features/browser/navigation'
 import { useDownloads } from '../../features/downloads/useDownloads'
 import { useDownloadQueue } from '../../features/downloads/useDownloadQueue'
 import { saveWorkspace, snapshotTabsToPayload, getWorkspace, type WorkspaceRecord } from '../../services/workspaces'
@@ -56,12 +56,19 @@ import { readRecoverySnapshot, restoreFromSnapshot, writeSnapshot, type SessionS
 import { RecoveryPanel, type RecoveryChoice } from '../../features/browser/RecoveryPanel'
 import { dropSessionLock, getSessionLockState, type SessionLockState } from '../../services/session'
 import { toggleFullscreen as toggleWindowFullscreen } from '../../services/webviewCompat'
-import { buildSuggestions, trimSuggestions, type SuggestionItem } from '../../features/browser/suggestionProvider'
-import { readSearchEngineConfig, resolveActiveSearchTemplate, SEARCH_ENGINE_PRESETS } from '../../features/browser/searchEngine'
+import { buildSuggestions, trimSuggestions } from '../../features/browser/suggestionProvider'
+import { readSearchEngineConfig, resolveActiveSearchTemplate } from '../../features/browser/searchEngine'
 import { evaluateUrlSafety, highestLevel, type SafetyIssue, type SafetyLevel } from '../../features/browser/urlSafety'
 import { ADVANCED_SETTINGS_EVENT, readAdvancedSettings, type AdvancedSettings } from '../../features/settings/advanced'
 import { cleanTrackingParameters, isTrackingCleanerEnabled, TRACKING_CLEANER_EVENT } from '../../features/plugins/trackingCleaner'
 import { AD_BLOCKER_EVENT, isAdBlockerEnabled } from '../../features/plugins/adBlocker'
+import { newTab, tabGroupColor } from '../../features/browser/browserUtils'
+import { classifyNavigationError, diagnoseNavigationError, safeFileName } from '../../features/browser/navigationErrors'
+import { renderSuggestion } from '../../features/browser/suggestionRenderer'
+import { BrowserErrorView } from '../../features/browser/BrowserErrorView'
+import { NewTab } from '../../features/browser/NewTabPage'
+import { ReaderArticleView } from '../../features/reader/ReaderArticleView'
+import { TabFavicon } from '../../features/browser/TabFavicon'
 
 const SESSION_KEY = 'browser.tabs'
 const SESSION_DEBOUNCE_MS = 500
@@ -71,39 +78,6 @@ type ToolbarOverlay = 'downloads' | 'bookmarks' | 'resources' | 'menu' | 'tab-me
 // Windows. Keep enough room for toolbar popovers instead of hiding the whole
 // page (which made opening the browser menu look like a blank-page failure).
 const TOOLBAR_OVERLAY_INSET: Partial<Record<ToolbarOverlay, number>> = {}
-const TAB_GROUP_PALETTE = ['#a7dfbd', '#9bc6e8', '#dfc0a7', '#c8a7df', '#dfb5b5', '#bce0c6']
-const tabGroupColor = (id: string | null | undefined): string => {
-  if (!id) return 'transparent'
-  let hash = 0
-  for (let i = 0; i < id.length; i += 1) hash = (hash * 31 + id.charCodeAt(i)) >>> 0
-  return TAB_GROUP_PALETTE[hash % TAB_GROUP_PALETTE.length]
-}
-
-interface QuickSite {
-  name: string
-  url: string
-  initial: string
-  color: string
-}
-
-const QUICK_SITES: QuickSite[] = [
-  { name: 'GitHub', url: 'https://github.com', initial: 'G', color: '#1f2328' },
-  { name: '掘金', url: 'https://juejin.cn', initial: 'J', color: '#1e80ff' },
-  { name: 'MDN', url: 'https://developer.mozilla.org', initial: 'M', color: '#1d2421' },
-  { name: 'ChatGPT', url: 'https://chat.openai.com', initial: 'C', color: '#10a37f' },
-  { name: '知乎', url: 'https://www.zhihu.com', initial: '知', color: '#0084ff' },
-  { name: 'Bilibili', url: 'https://www.bilibili.com', initial: 'B', color: '#fb7299' },
-  { name: 'arXiv', url: 'https://arxiv.org', initial: 'a', color: '#b31b1b' },
-  { name: 'Google Scholar', url: 'https://scholar.google.com', initial: 'S', color: '#4285f4' },
-  { name: 'Hacker News', url: 'https://news.ycombinator.com', initial: 'H', color: '#ff6600' },
-  { name: 'Wikipedia', url: 'https://www.wikipedia.org', initial: 'W', color: '#1d2421' },
-  { name: '百度', url: 'https://www.baidu.com', initial: '百', color: '#2932e1' },
-  { name: '微博', url: 'https://weibo.com', initial: '微', color: '#e6162d' },
-  { name: '小红书', url: 'https://www.xiaohongshu.com', initial: '红', color: '#ff2442' },
-  { name: '淘宝', url: 'https://www.taobao.com', initial: '淘', color: '#ff5000' },
-]
-
-const newTab = (id: string = crypto.randomUUID()): BrowserTab => ({ id, url: '', title: '新标签页', loading: false, active: true, pinned: false })
 
 interface PersistedSession {
   tabs: BrowserTab[]
@@ -123,49 +97,6 @@ function parsePersistedSession(raw: string | null): PersistedSession | null {
 
 function getSessionLegacy(key: string): string | null {
   try { return localStorage.getItem(key) } catch { return null }
-}
-
-function classifyNavigationError(error: unknown): BrowserTabError {
-  const message = String(error)
-  const protocolMatch = /^(external|blocked|unknown)-protocol:([a-z]+)/i.exec(message)
-  if (protocolMatch) {
-    const scheme = protocolMatch[2]
-    return { kind: 'unsupported-protocol', message: `不支持的协议：${scheme}://（应用仅打开 http/https 链接）` }
-  }
-  return { kind: 'load-failed', message }
-}
-
-function safeFileName(value: string): string {
-  return value.replace(/[<>:"/\\|?*\u0000-\u001f]/g, '_').replace(/[. ]+$/g, '').slice(0, 100) || '网页'
-}
-
-async function diagnoseNavigationError(url: string, error: unknown): Promise<BrowserTabError> {
-  const basic = classifyNavigationError(error)
-  if (basic.kind === 'unsupported-protocol') return basic
-  if (typeof navigator !== 'undefined' && navigator.onLine === false) return { kind:'offline', message:'设备当前处于离线状态，请检查网络连接。' }
-  try {
-    const result = await diagnoseNativeNavigation(url)
-    if (result.kind === 'reachable') return basic
-    return { kind: result.kind, message: result.message, httpStatus: result.httpStatus } as BrowserTabError
-  } catch { return basic }
-}
-
-const SOURCE_LABELS: Record<SuggestionItem['source'], string> = {
-  'open-tab': '已打开',
-  history: '历史',
-  bookmark: '书签',
-  search: '搜索',
-}
-
-function renderSuggestion(item: SuggestionItem) {
-  const sourceLabel = SOURCE_LABELS[item.source]
-  return (
-    <div className="address-suggestion">
-      <b>{item.title || item.url}</b>
-      <small>{item.url}</small>
-      <span className={`address-suggestion__source address-suggestion__source--${item.source}`}>{sourceLabel}</span>
-    </div>
-  )
 }
 
 export function BrowserPage({ visible = true, onSearchKnowledge }: { visible?: boolean; onSearchKnowledge?: (query: string) => void }) {
@@ -1917,78 +1848,4 @@ export function BrowserPage({ visible = true, onSearchKnowledge }: { visible?: b
   </div>
 }
 
-type SearchMode = 'web' | 'knowledge'
 
-function NewTab({address,setAddress,navigate,openNewTab,onSearchKnowledge}:{address:string;setAddress:(value:string)=>void;navigate:(input:string)=>Promise<void>;openNewTab:(url?:string)=>void;onSearchKnowledge?: (query:string)=>void}) {
-  const configuredEngine = readSearchEngineConfig().presetId
-  const initialEngine = SEARCH_ENGINE_PRESETS.some(engine => engine.id === configuredEngine) ? configuredEngine : 'google'
-  const [mode, setMode] = useState<SearchMode>('web')
-  const [engines, setEngines] = useState<string[]>([initialEngine])
-  const presets = SEARCH_ENGINE_PRESETS.map(item => ({ label: item.label, value: item.id }))
-  const placeholder = mode === 'knowledge' ? '搜索本地知识库' : '搜索网页或输入 URL'
-
-  function templateFor(id:string) { return SEARCH_ENGINE_PRESETS.find(item => item.id === id)?.template ?? SEARCH_ENGINE_PRESETS[0].template }
-  function submit() {
-    const query = address.trim()
-    if (!query) return
-    if (mode === 'knowledge') { onSearchKnowledge?.(query); return }
-    if (classifyNavigationInput(query) !== 'search') { void navigate(query); return }
-    const selected = engines.length ? engines : [initialEngine]
-    const urls = selected.map(id => renderSearchTemplate(templateFor(id), query))
-    void navigate(urls[0])
-    urls.slice(1).forEach(url => openNewTab(url))
-  }
-
-  return <div className="new-tab"><div className="new-tab__hero"><Typography.Title>今天想探索什么？</Typography.Title><Typography.Paragraph>在网页与个人知识之间，选择最合适的探索方式。</Typography.Paragraph></div><div className="new-tab-search"><Segmented<SearchMode> block value={mode} onChange={setMode} options={[{label:'网页搜索',value:'web'},{label:'本地知识库',value:'knowledge'}]}/><form onSubmit={event=>{event.preventDefault();submit()}}><Input size="large" autoFocus prefix={<SearchOutlined/>} value={address} onChange={event=>setAddress(event.target.value)} placeholder={placeholder} suffix={<Button type="primary" htmlType="submit">{mode === 'knowledge' ? '查询' : '搜索'}</Button>}/></form>{mode === 'web' && <div className="search-engine-picker"><span>搜索引擎</span><Select mode="multiple" maxTagCount="responsive" value={engines} onChange={setEngines} options={presets} placeholder="选择一个或多个搜索引擎"/></div>}{mode === 'knowledge' && <div className="new-tab-search__hint">仅查询保存在本机的网页、笔记和标签，不会发送到外部搜索引擎。</div>}</div><div className="quick-sites"><div className="quick-sites__label">常用网站</div><div className="quick-sites__grid">{QUICK_SITES.map(site => <button key={site.url} type="button" className="quick-site" title={site.name} aria-label={`打开 ${site.name}`} onClick={(event:MouseEvent<HTMLButtonElement>)=>{event.currentTarget.blur();void navigate(site.url)}}><span className="quick-site__mark" style={{background:site.color}}>{site.initial}</span><span className="quick-site__name">{site.name}</span></button>)}</div></div></div>
-}
-
-function BrowserErrorView({tab, onRetry, onNewTab, onCopy}:{tab:BrowserTab;onRetry:()=>void;onNewTab:()=>void;onCopy:()=>void}) {
-  const error = tab.error
-  const kind = error?.kind ?? 'load-failed'
-  const message = error?.message ?? '未知错误'
-  const title = kind === 'web-mode-required'
-    ? '请在 Tauri 桌面应用中打开网页'
-    : kind === 'unsupported-protocol'
-      ? '应用不支持该协议'
-      : kind === 'offline' ? '设备当前离线'
-      : kind === 'dns' ? '找不到网站地址'
-      : kind === 'timeout' ? '连接超时'
-      : kind === 'tls' ? '无法建立安全连接'
-      : kind === 'connection-refused' ? '服务器拒绝连接'
-      : kind === 'http-client' || kind === 'http-server' ? `服务器返回错误${error?.httpStatus ? `（${error.httpStatus}）` : ''}`
-      : '无法加载该网页'
-  const eyebrow = kind === 'web-mode-required'
-    ? '需要桌面应用'
-    : kind === 'unsupported-protocol'
-      ? '协议被拦截'
-      : '加载失败'
-  return <div className="browser-error">
-    <Typography.Text className="eyebrow">{eyebrow}</Typography.Text>
-    <Typography.Title level={3}>{title}</Typography.Title>
-    <Typography.Paragraph type="secondary">{message}</Typography.Paragraph>
-    {tab.url && <Typography.Text code className="browser-error__url">{tab.url}</Typography.Text>}
-    <Space wrap>
-      {!['web-mode-required','unsupported-protocol'].includes(kind) && <Button type="primary" icon={<ReloadOutlined/>} onClick={onRetry}>重试</Button>}
-      <Button icon={<PlusOutlined/>} onClick={onNewTab}>返回新标签页</Button>
-      {tab.url && <Button icon={<CopyOutlined/>} onClick={onCopy}>复制 URL</Button>}
-    </Space>
-  </div>
-}
-function ReaderArticleView({article}:{article:ReaderArticle}){return <article className="reader-document"><Typography.Text className="eyebrow">阅读模式 · {article.wordCount.toLocaleString()} 字词</Typography.Text><Typography.Title>{article.title}</Typography.Title>{article.byline&&<Typography.Text type="secondary">{article.byline}</Typography.Text>}<div className="reader-document__body" dangerouslySetInnerHTML={{__html:article.contentHtml}}/></article>}
-
-function faviconCandidates(favicon: string | undefined, pageUrl: string): string[] {
-  const candidates: string[] = []
-  if (favicon && (/^https:\/\//i.test(favicon) || /^data:image\//i.test(favicon))) candidates.push(favicon)
-  try {
-    const page = new URL(pageUrl)
-    if (page.protocol === 'https:') candidates.push(`${page.origin}/favicon.ico`)
-  } catch { /* invalid/new-tab URL */ }
-  return [...new Set(candidates)]
-}
-
-function TabFavicon({ favicon, pageUrl }: { favicon?: string; pageUrl: string }) {
-  const candidates = faviconCandidates(favicon, pageUrl)
-  const [index, setIndex] = useState(0)
-  if (!candidates[index]) return <GlobalOutlined aria-label="默认网站图标"/>
-  return <img src={candidates[index]} alt="" referrerPolicy="no-referrer" onError={() => setIndex(current => current + 1)}/>
-}

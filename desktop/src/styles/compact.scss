@@ -1483,19 +1483,30 @@ body[data-theme='dark'] .window-controls > .window-controls__close:hover { backg
     border: 1px solid transparent !important;
     border-radius: 8px !important;
     background: transparent !important;
+    color: #59645e;
+    opacity: .84;
     transition: background-color .14s, border-color .14s, box-shadow .14s;
 
     &::after { display: none; }
 
     &:not(.ant-tabs-tab-active):hover {
       background: rgba(255, 255, 255, .52) !important;
+      color: #26322b;
+      opacity: 1;
     }
 
     &.ant-tabs-tab-active {
       z-index: 1;
-      border-color: rgba(91,108,98,.18) !important;
-      background: rgba(255,255,255,.9) !important;
-      box-shadow: 0 1px 3px rgba(34,49,40,.1);
+      border-color: rgba(22,119,255,.28) !important;
+      background: #fff !important;
+      color: #1677ff;
+      opacity: 1;
+      box-shadow: inset 0 -2px 0 #1677ff, 0 2px 6px rgba(34,49,40,.12);
+
+      .ant-tabs-tab-btn {
+        color: #1677ff !important;
+        font-weight: 600;
+      }
     }
 
     &.browser-tab--pinned {
@@ -1528,6 +1539,10 @@ body[data-theme='dark'] .window-controls > .window-controls__close:hover { backg
 
     &.browser-tab--grouped {
       box-shadow: inset 0 3px 0 var(--tab-group-color);
+
+      &.ant-tabs-tab-active {
+        box-shadow: inset 0 3px 0 var(--tab-group-color), inset 0 -2px 0 #1677ff, 0 2px 6px rgba(34,49,40,.12);
+      }
     }
   }
 
