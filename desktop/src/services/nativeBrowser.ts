@@ -8,6 +8,7 @@ import { isAdBlockerEnabled } from '../features/plugins/adBlocker'
 export interface BrowserBounds { x: number; y: number; width: number; height: number }
 export interface NativeBrowserState { url: string; title: string; favicon?: string; loading: boolean; scrollX: number; scrollY: number; scrollDepth?: number; canGoBack: boolean; canGoForward: boolean }
 export interface NativePageSnapshot { url: string; html: string }
+export interface NetworkDiagnosis { kind:'reachable'|'offline'|'dns'|'timeout'|'tls'|'connection-refused'|'network'|'http-client'|'http-server'; message:string; httpStatus?:number }
 interface NativeToolbarMenuEvent { version: number; tabLabel: string; action: string }
 export interface NativeToolbarMenuAction { tabId: string; action: string; value?: string }
 interface NativeAudioStateEvent { version: number; tabLabel: string; audible: boolean; muted: boolean }
@@ -95,6 +96,7 @@ export async function printNativeTab(tabId: string): Promise<void> { const label
 export async function openNativeDevtools(tabId: string): Promise<void> { const label=labels.get(tabId);if(label)await invoke('browser_open_devtools',{label}) }
 export async function navigateHistory(tabId: string, delta: -1|1): Promise<void> { const label=labels.get(tabId);if(label)await invoke('browser_history',{label,delta}) }
 export async function readNativeState(tabId: string): Promise<NativeBrowserState | null> { const label=labels.get(tabId);return label ? invoke<NativeBrowserState>('browser_state',{label}) : null }
+export async function diagnoseNativeNavigation(url:string): Promise<NetworkDiagnosis> { return invoke<NetworkDiagnosis>('browser_diagnose_url',{url}) }
 export async function restoreNativeScroll(tabId: string, x: number, y: number): Promise<void> { const label=labels.get(tabId);if(label)await invoke('browser_restore_scroll',{label,x,y}) }
 export async function setNativeToolbarMenu(tabId: string, open: boolean, zoomPercent = 100): Promise<void> { const label=labels.get(tabId);if(label)await invoke('browser_toolbar_menu',{label,open,zoomPercent}) }
 export async function setNativeToolbarPanel(tabId: string, open: boolean, kind: 'downloads' | 'bookmarks' | 'resources', payload: unknown): Promise<void> { const label=labels.get(tabId);if(label)await invoke('browser_toolbar_panel',{label,open,kind,payload:JSON.stringify(payload)}) }

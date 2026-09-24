@@ -4,7 +4,7 @@ import { ArrowDownOutlined, ArrowLeftOutlined, ArrowRightOutlined, ArrowUpOutlin
 import { Sparkles as RobotOutlined } from 'lucide-react'
 import type { BrowserTab, BrowserTabError } from '../../types'
 import { addBrowserHistory, deleteClosedTab, findDocumentByUrl, getBrowserShortcutsEnabled, getBrowserWorkspace, getDocument, listBrowserHistory, listClosedTabs, listSitePermissions, purgeReadingSnapshots, recordReadingActivity, saveBrowserWorkspace, saveClosedTab, saveDocument, saveReadingSnapshot, setSession, toggleStarred } from '../../api'
-import { captureNativePage, clearNativePageData, closeNativeTab, editNativePage, ensureNativeTab, findInNativeTab, hasNativeTab, hideNativeTab, isNativeBrowserAvailable, navigateHistory, onNativeAdBlockUpdate, onNativeAudioState, onNativeNewTab, onNativeToolbarMenuAction, openNativeDevtools, openNativeTab, printNativeTab, readNativeState, reloadNativeTab, resizeNativeTab, setNativeMuted, setNativeToolbarMenu, setNativeToolbarPanel, showNativeTab, stopNativeTab, zoomNativeTab } from '../../services/nativeBrowser'
+import { captureNativePage, clearNativePageData, closeNativeTab, diagnoseNativeNavigation, editNativePage, ensureNativeTab, findInNativeTab, hasNativeTab, hideNativeTab, isNativeBrowserAvailable, navigateHistory, onNativeAdBlockUpdate, onNativeAudioState, onNativeNewTab, onNativeToolbarMenuAction, openNativeDevtools, openNativeTab, printNativeTab, readNativeState, reloadNativeTab, resizeNativeTab, setNativeMuted, setNativeToolbarMenu, setNativeToolbarPanel, showNativeTab, stopNativeTab, zoomNativeTab } from '../../services/nativeBrowser'
 import { extractArticle } from '../../features/reader/extractArticle'
 import type { ReaderArticle } from '../../features/reader/types'
 import { classifySaveError } from '../../features/documents/saveClassifier'
@@ -132,6 +132,17 @@ function classifyNavigationError(error: unknown): BrowserTabError {
     return { kind: 'unsupported-protocol', message: `不支持的协议：${scheme}://（应用仅打开 http/https 链接）` }
   }
   return { kind: 'load-failed', message }
+}
+
+async function diagnoseNavigationError(url: string, error: unknown): Promise<BrowserTabError> {
+  const basic = classifyNavigationError(error)
+  if (basic.kind === 'unsupported-protocol') return basic
+  if (typeof navigator !== 'undefined' && navigator.onLine === false) return { kind:'offline', message:'设备当前处于离线状态，请检查网络连接。' }
+  try {
+    const result = await diagnoseNativeNavigation(url)
+    if (result.kind === 'reachable') return basic
+    return { kind: result.kind, message: result.message, httpStatus: result.httpStatus } as BrowserTabError
+  } catch { return basic }
 }
 
 const SOURCE_LABELS: Record<SuggestionItem['source'], string> = {
@@ -700,7 +711,8 @@ export function BrowserPage({ visible = true, onSearchKnowledge }: { visible?: b
       setTabs(current => current.map(tab => tab.id === tabId ? { ...tab, error: undefined } : tab))
       await enforceLiveTabLimit(tabId)
     } catch (error) {
-      setTabs(current => current.map(tab => tab.id === tabId ? { ...tab, loading: false, error: classifyNavigationError(error) } : tab))
+      const diagnosed = await diagnoseNavigationError(url, error)
+      setTabs(current => current.map(tab => tab.id === tabId ? { ...tab, loading: false, error: diagnosed } : tab))
     }
   }
 
@@ -1868,6 +1880,12 @@ function BrowserErrorView({tab, onRetry, onNewTab, onCopy}:{tab:BrowserTab;onRet
     ? '请在 Tauri 桌面应用中打开网页'
     : kind === 'unsupported-protocol'
       ? '应用不支持该协议'
+      : kind === 'offline' ? '设备当前离线'
+      : kind === 'dns' ? '找不到网站地址'
+      : kind === 'timeout' ? '连接超时'
+      : kind === 'tls' ? '无法建立安全连接'
+      : kind === 'connection-refused' ? '服务器拒绝连接'
+      : kind === 'http-client' || kind === 'http-server' ? `服务器返回错误${error?.httpStatus ? `（${error.httpStatus}）` : ''}`
       : '无法加载该网页'
   const eyebrow = kind === 'web-mode-required'
     ? '需要桌面应用'
@@ -1880,7 +1898,7 @@ function BrowserErrorView({tab, onRetry, onNewTab, onCopy}:{tab:BrowserTab;onRet
     <Typography.Paragraph type="secondary">{message}</Typography.Paragraph>
     {tab.url && <Typography.Text code className="browser-error__url">{tab.url}</Typography.Text>}
     <Space wrap>
-      {kind === 'load-failed' && <Button type="primary" icon={<ReloadOutlined/>} onClick={onRetry}>重试</Button>}
+      {!['web-mode-required','unsupported-protocol'].includes(kind) && <Button type="primary" icon={<ReloadOutlined/>} onClick={onRetry}>重试</Button>}
       <Button icon={<PlusOutlined/>} onClick={onNewTab}>返回新标签页</Button>
       {tab.url && <Button icon={<CopyOutlined/>} onClick={onCopy}>复制 URL</Button>}
     </Space>

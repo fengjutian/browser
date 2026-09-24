@@ -567,6 +567,7 @@ const STREAMING_KIND_STARTED: &str = "started";
 const STREAMING_KIND_PROGRESS: &str = "progress";
 const STREAMING_KIND_FINISHED: &str = "finished";
 const STREAMING_KIND_FAILED: &str = "failed";
+const STREAMING_KIND_BLOCKED: &str = "blocked";
 const STREAMING_KIND_CANCELLED: &str = "cancelled";
 const STREAMING_KIND_PAUSED: &str = "paused";
 
@@ -1053,6 +1054,23 @@ fn finalize_success(
         }
     };
     let metadata = std::fs::metadata(&final_path).map(|m| m.len() as i64).unwrap_or(0);
+    if let Err(scan_error) = scan_download_file(&final_path) {
+        let _ = update_progress(&database, DownloadProgressInput {
+            id: id.to_string(), received_bytes: metadata, total_bytes: Some(metadata),
+            status: DownloadStatus::Blocked, error_message: Some(scan_error.clone()),
+        });
+        let _ = database.execute("UPDATE downloads SET target_path=? WHERE id=?", rusqlite::params![final_path.to_string_lossy(), id]);
+        app.state::<DownloadManager>().forget(id);
+        emit_progress(app, DownloadProgressPayload {
+            version: STREAMING_PAYLOAD_VERSION, kind: STREAMING_KIND_BLOCKED.into(), id: id.to_string(),
+            tab_label: tab_label.to_string(), url: url.to_string(), file_name: file_name.to_string(),
+            target_path: Some(final_path.to_string_lossy().into_owned()), mime_type: None,
+            received_bytes: metadata, total_bytes: Some(metadata), progress_known: true,
+            status: "blocked".into(), danger_type: danger.as_str().into(), error_message: Some(scan_error),
+            private: false, source_origin,
+        });
+        return;
+    }
     let _ = update_progress(
         &database,
         DownloadProgressInput {
@@ -1089,6 +1107,28 @@ fn finalize_success(
             source_origin,
         },
     );
+}
+
+#[cfg(target_os = "windows")]
+pub(crate) fn scan_download_file(path: &Path) -> Result<(), String> {
+    let program_files = std::env::var_os("ProgramFiles")
+        .ok_or_else(|| "Windows Defender 扫描不可用：ProgramFiles 未设置".to_string())?;
+    let scanner = PathBuf::from(program_files).join("Windows Defender").join("MpCmdRun.exe");
+    if !scanner.is_file() { return Err("Windows Defender 扫描程序不可用".into()); }
+    let output = std::process::Command::new(scanner)
+        .args(["-Scan", "-ScanType", "3", "-File"])
+        .arg(path)
+        .output()
+        .map_err(|error| format!("无法启动 Windows Defender：{error}"))?;
+    if output.status.success() { Ok(()) } else {
+        let detail = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        Err(if detail.is_empty() { "Windows Defender 检测到威胁或扫描失败".into() } else { format!("Windows Defender：{detail}") })
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+pub(crate) fn scan_download_file(_path: &Path) -> Result<(), String> {
+    Err("当前平台未配置下载病毒扫描器".into())
 }
 
 fn finish_failure(

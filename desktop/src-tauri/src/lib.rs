@@ -419,6 +419,46 @@ struct BrowserState {
     can_go_forward: bool,
 }
 
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct NetworkDiagnosis { kind: String, message: String, http_status: Option<u16> }
+
+#[tauri::command]
+async fn browser_diagnose_url(url: String) -> Result<NetworkDiagnosis, String> {
+    let parsed = external_url(&url)?;
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(12))
+        .redirect(reqwest::redirect::Policy::limited(5))
+        .build().map_err(|error| error.to_string())?;
+    match client.get(parsed).send().await {
+        Ok(response) => {
+            let status = response.status();
+            Ok(NetworkDiagnosis {
+                kind: if status.is_server_error() { "http-server" } else if status.is_client_error() { "http-client" } else { "reachable" }.into(),
+                message: format!("服务器返回 HTTP {}", status.as_u16()),
+                http_status: Some(status.as_u16()),
+            })
+        }
+        Err(error) => {
+            let detail = error.to_string().to_lowercase();
+            let (kind, message) = if error.is_timeout() {
+                ("timeout", "连接服务器超时")
+            } else if detail.contains("dns") || detail.contains("name or service") || detail.contains("failed to lookup") {
+                ("dns", "无法解析网站域名，请检查 DNS 设置")
+            } else if detail.contains("certificate") || detail.contains("tls") || detail.contains("ssl") {
+                ("tls", "TLS/证书验证失败")
+            } else if detail.contains("refused") {
+                ("connection-refused", "服务器拒绝连接")
+            } else if error.is_connect() {
+                ("network", "无法连接到服务器")
+            } else {
+                ("network", "网络请求失败")
+            };
+            Ok(NetworkDiagnosis { kind: kind.into(), message: message.into(), http_status: None })
+        }
+    }
+}
+
 #[derive(Default)]
 struct NavStacks {
     stacks: Mutex<HashMap<String, NavStack>>,
@@ -1037,7 +1077,12 @@ async fn handle_download_finished(
         None => return, // finished without a Requested; rare but harmless
     };
     index.forget(&url);
-    let status = if success {
+    let scan_error = if success {
+        final_path.as_ref().and_then(|path| downloads::scan_download_file(std::path::Path::new(path)).err())
+    } else { None };
+    let status = if scan_error.is_some() {
+        downloads::DownloadStatus::Blocked
+    } else if success {
         downloads::DownloadStatus::Completed
     } else {
         downloads::DownloadStatus::Failed
@@ -1055,7 +1100,7 @@ async fn handle_download_finished(
             received_bytes: -1, // unknown on Finished events
             total_bytes: None,
             status,
-            error_message: if success { None } else { Some("download failed".into()) },
+            error_message: scan_error.clone().or_else(|| if success { None } else { Some("download failed".into()) }),
         };
         if let Err(error) = downloads::update_progress(&database, progress_input) {
             eprintln!("downloads: update_progress failed: {error}");
@@ -1073,7 +1118,7 @@ async fn handle_download_finished(
     let origin = source_origin_from_url(&url);
     let progress = DownloadProgress {
         version: EVENT_PAYLOAD_VERSION,
-        kind: if success { DOWNLOAD_EVENT_KIND_FINISHED.into() } else { DOWNLOAD_EVENT_KIND_FAILED.into() },
+        kind: if scan_error.is_some() { "blocked".into() } else if success { DOWNLOAD_EVENT_KIND_FINISHED.into() } else { DOWNLOAD_EVENT_KIND_FAILED.into() },
         id,
         tab_label,
         url,
@@ -1083,9 +1128,9 @@ async fn handle_download_finished(
         received_bytes: 0,
         total_bytes: None,
         progress_known: false,
-        status: if success { "completed".into() } else { "failed".into() },
+        status: if scan_error.is_some() { "blocked".into() } else if success { "completed".into() } else { "failed".into() },
         danger_type: "none".into(),
-        error_message: if success { None } else { Some("download failed".into()) },
+        error_message: scan_error.or_else(|| if success { None } else { Some("download failed".into()) }),
         private,
         source_origin: origin,
     };
@@ -1245,6 +1290,7 @@ pub fn run() {
             browser_open_devtools,
             browser_history,
             browser_state,
+            browser_diagnose_url,
             browser_restore_scroll,
             browser_toolbar_menu,
             browser_toolbar_panel,

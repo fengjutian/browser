@@ -1,7 +1,7 @@
 export type View = 'browser'|'library'|'search'|'ai'|'settings'
 export interface BrowserTab { id:string; url:string; title:string; favicon?:string; loading:boolean; active:boolean; pinned:boolean; private?:boolean; muted?:boolean; audible?:boolean; crashed?:boolean; groupId?:string; suspended?:boolean; scrollX?:number; scrollY?:number; scrollDepth?:number; canGoBack?: boolean; canGoForward?: boolean; error?: BrowserTabError }
 export interface ReadingActivity { url:string; title:string; firstVisitedAt:number; lastVisitedAt:number; activeSeconds:number; maxScrollDepth:number; visitCount:number; excerpt?:string; markdown?:string; capturedAt?:number }
-export type BrowserTabError = { kind: 'load-failed' | 'web-mode-required' | 'unsupported-protocol'; message: string }
+export type BrowserTabError = { kind: 'load-failed' | 'web-mode-required' | 'unsupported-protocol' | 'offline' | 'dns' | 'timeout' | 'tls' | 'connection-refused' | 'network' | 'http-client' | 'http-server'; message: string; httpStatus?:number }
 export interface Document { id:string; title:string; url:string; source?:string; author?:string; summary?:string; markdown?:string; wordCount:number; status:'PENDING'|'PROCESSING'|'READY'|'FAILED'|'ARCHIVED'; tags:string[]; autoTags?:string[]; createdAt:string; starred:boolean }
 export type TaskStatus = 'PENDING' | 'PROCESSING' | 'COMPLETED' | 'FAILED'
 export interface Task { id:string; kind:string; documentId?:string; payload:string; status:TaskStatus; attempts:number; maxAttempts:number; availableAt:string; startedAt?:string; finishedAt?:string; lastError?:string }
