@@ -10,9 +10,7 @@ export interface CertificateErrorBarProps {
 /**
  * Persistent banner that sits at the top of the browser surface while a
  * certificate failure blocks the underlying webview from loading. The user can
- * dismiss the banner (which records their deny choice with the host) or
- * pretend-allow — the latter is a no-op today because we don't yet bind to
- * WebView2's actual deferral API.
+ * dismiss the banner or explicitly allow the intercepted navigation once.
  */
 export function CertificateErrorBar({ payload, onRespond }: CertificateErrorBarProps) {
   return <Alert
@@ -31,7 +29,7 @@ export function CertificateErrorBar({ payload, onRespond }: CertificateErrorBarP
         </Typography.Paragraph>
         <Space>
           <Button type="primary" danger onClick={() => onRespond(false)}>保持拦截</Button>
-          <Button onClick={() => onRespond(true)}>继续访问（仍受 WebView2 默认拒绝）</Button>
+          <Button onClick={() => onRespond(true)}>仅本次继续访问</Button>
         </Space>
       </>}
     closable={false}

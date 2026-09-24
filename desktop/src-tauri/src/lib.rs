@@ -165,7 +165,7 @@ fn browser_capabilities() -> BrowserCapabilities {
         native_permission_events: false, // Tauri 2 stable does not surface PermissionRequested
         native_context_menu: false,      // wry has no context-menu integration in stable
         clear_site_data: false,          // wry does not expose WebView2 profile; webview2-com needed
-        certificate_error_interceptor: false, // needs ICoreWebView2_5 ServerCertificateErrorDetected
+        certificate_error_interceptor: cfg!(target_os = "windows"),
         webview_backend: Some(webview_backend_label()),
         tauri_runtime_version: Some(env!("CARGO_PKG_VERSION")),
     }
@@ -655,10 +655,8 @@ async fn browser_create(
             tauri::LogicalSize::new(bounds.width.max(1.0), bounds.height.max(1.0)),
         )
         .map_err(|error| error.to_string())?;
-    // Hook the certificate-error stub onto the freshly created window. When
-    // webview2-com exposes a stable ICoreWebView2_5 binding, swap the stub
-    // for a real ServerCertificateErrorDetected registration that defers
-    // navigation until the user accepts.
+    // Intercept WebView2 certificate failures and defer the navigation until
+    // the user explicitly rejects it or allows this navigation once.
     certificate_guard::attach_certificate_guard(&app, &label);
     let navs = app.state::<NavStacks>();
     let mut guard = navs.stacks.lock().map_err(|_| "nav stack poisoned".to_string())?;
@@ -1535,7 +1533,7 @@ mod tests {
         assert!(!caps.native_permission_events, "PermissionRequested not in Tauri 2 stable");
         assert!(!caps.native_context_menu, "wry has no context menu integration");
         assert!(!caps.clear_site_data, "WebView2 profile API not in wry");
-        assert!(!caps.certificate_error_interceptor, "needs ICoreWebView2_5 + webview2-com");
+        assert_eq!(caps.certificate_error_interceptor, cfg!(target_os = "windows"));
         assert!(caps.webview_backend.is_some(), "backend label must be set on every target");
         assert!(caps.tauri_runtime_version.is_some(), "tauri runtime version must be set");
     }
