@@ -14,7 +14,10 @@ export function AppRouter() {
   const [knowledgeQuery, setKnowledgeQuery] = useState('')
   const pages = {
     library: <LibraryPage />,
-    search: <SearchPage initialQuery={knowledgeQuery} />,
+    search: <SearchPage initialQuery={knowledgeQuery} onOpenUrl={url => {
+      window.dispatchEvent(new CustomEvent('arcadia-browser-open-url', { detail: { url } }))
+      setView('browser')
+    }} />,
     ai: <AssistantPage onNavigate={setView} />,
     settings: <SettingsPage />,
   }

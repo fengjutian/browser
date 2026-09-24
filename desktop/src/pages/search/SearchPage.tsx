@@ -9,7 +9,7 @@ import { useDebouncedValue } from '../../shared/hooks/useDebouncedValue'
 
 type SortKey = 'recent' | 'oldest' | 'starred'
 
-export function SearchPage({ initialQuery = '' }: { initialQuery?: string }) {
+export function SearchPage({ initialQuery = '', onOpenUrl }: { initialQuery?: string; onOpenUrl?: (url: string) => void }) {
   const [query, setQuery] = useState(initialQuery)
   const debouncedQuery = useDebouncedValue(query, 250)
   const [documents, setDocuments] = useState<Document[]>([])
@@ -44,6 +44,16 @@ export function SearchPage({ initialQuery = '' }: { initialQuery?: string }) {
   }, [debouncedQuery])
 
   const readingByUrl = useMemo(() => new Map(reading.map(item => [item.url, item])), [reading])
+
+  const unsavedReading = useMemo(() => {
+    const savedUrls = new Set(documents.map(item => item.url))
+    const lower = debouncedQuery.toLowerCase()
+    return reading.filter(item => {
+      if (savedUrls.has(item.url) || readingStatus(item) === 'seen') return false
+      if (!lower) return true
+      return item.title.toLowerCase().includes(lower) || item.url.toLowerCase().includes(lower)
+    })
+  }, [documents, reading, debouncedQuery])
 
   const allTags = useMemo(() => {
     const set = new Set<string>()
@@ -94,7 +104,8 @@ export function SearchPage({ initialQuery = '' }: { initialQuery?: string }) {
       <Segmented value={sort} onChange={value => setSort(value as SortKey)} options={[{label:'最新',value:'recent'},{label:'最早',value:'oldest'},{label:'收藏优先',value:'starred'}]}/>
       {durationMs !== null && <Statistic title="耗时" value={durationMs} suffix="ms" valueStyle={{fontSize:14}}/>}
     </Space>
-    <List loading={loading} className="search-results" dataSource={filtered} locale={{ emptyText: <Empty description={emptyText}/> }} renderItem={item => { const activity=readingByUrl.get(item.url); return <List.Item onClick={() => setSelected(item)} className="search-result-clickable" actions={[<RightOutlined key="open"/>]}><List.Item.Meta avatar={<span className="result-icon"><FileSearchOutlined/></span>} title={<Highlight text={item.title} terms={terms}/>} description={<><Space size={4}>{item.tags.map(tag => <Tag className={tagFilter.includes(tag) ? 'search-tag is-active' : 'search-tag'} key={tag}>{tag}</Tag>)}{activity && <Tag color={readingStatus(activity)==='deep'?'green':'blue'}>{readingLabel(activity)}</Tag>}</Space><Typography.Paragraph ellipsis={{ rows: 2, expandable: false }}><Highlight text={extractSummary(item.summary, item.markdown)} terms={terms}/></Typography.Paragraph></>}/></List.Item> }}/>
+    <List loading={loading} className="search-results" dataSource={filtered} locale={{ emptyText: unsavedReading.length ? null : <Empty description={emptyText}/> }} renderItem={item => { const activity=readingByUrl.get(item.url); return <List.Item onClick={() => setSelected(item)} className="search-result-clickable" actions={[<RightOutlined key="open"/>]}><List.Item.Meta avatar={<span className="result-icon"><FileSearchOutlined/></span>} title={<Highlight text={item.title} terms={terms}/>} description={<><Space size={4}>{item.tags.map(tag => <Tag className={tagFilter.includes(tag) ? 'search-tag is-active' : 'search-tag'} key={tag}>{tag}</Tag>)}{activity && <Tag color={readingStatus(activity)==='deep'?'green':'blue'}>{readingLabel(activity)}</Tag>}</Space><Typography.Paragraph ellipsis={{ rows: 2, expandable: false }}><Highlight text={extractSummary(item.summary, item.markdown)} terms={terms}/></Typography.Paragraph></>}/></List.Item> }}/>
+    {unsavedReading.length > 0 && <><Typography.Title level={4}>读过但未保存</Typography.Title><List className="search-results" dataSource={unsavedReading} renderItem={item => <List.Item onClick={() => onOpenUrl?.(item.url)} className="search-result-clickable" actions={[<RightOutlined key="reopen"/>]}><List.Item.Meta avatar={<span className="result-icon"><SearchOutlined/></span>} title={<Highlight text={item.title || item.url} terms={terms}/>} description={<><Space size={4}><Tag color={readingStatus(item)==='deep'?'green':'blue'}>{readingLabel(item)}</Tag><Tag>未保存</Tag></Space><Typography.Paragraph ellipsis={{ rows: 1, expandable: false }}>{item.url}</Typography.Paragraph></>}/></List.Item>}/></>}
     <DocumentDetailDrawer document={selected} onClose={() => setSelected(null)} onDeleted={id => setDocuments(items => items.filter(item => item.id !== id))}/>
   </section>
 }

@@ -157,6 +157,7 @@ export function BrowserPage({ visible = true, onSearchKnowledge }: { visible?: b
   const [activeTabId, setActiveTabId] = useState('new')
   const [address, setAddress] = useState('')
   const [aiOpen, setAiOpen] = useState(false)
+  const [aiInitialQuestion, setAiInitialQuestion] = useState('')
   const [findOpen, setFindOpen] = useState(false)
   const [pendingShellOpen, setPendingShellOpen] = useState<string | null>(null)
   const [tabSearchOpen, setTabSearchOpen] = useState(false)
@@ -403,6 +404,15 @@ export function BrowserPage({ visible = true, onSearchKnowledge }: { visible?: b
   }, [])
   useEffect(() => { zoomLevelsRef.current = zoomLevels }, [zoomLevels])
   useEffect(() => { visibleRef.current = visible }, [visible])
+
+  useEffect(() => {
+    const open = (event: Event) => {
+      const url = (event as CustomEvent<{ url?: string }>).detail?.url
+      if (url && /^https?:\/\//.test(url)) openNewTab(url)
+    }
+    window.addEventListener('arcadia-browser-open-url', open)
+    return () => window.removeEventListener('arcadia-browser-open-url', open)
+  }, [])
 
   useEffect(() => {
     if (!visible || active.private || active.loading || !/^https?:\/\//.test(active.url)) return
@@ -1181,8 +1191,9 @@ export function BrowserPage({ visible = true, onSearchKnowledge }: { visible?: b
         return
       case 'search-selection': if (request.selectionText) void navigate(`https://www.google.com/search?q=${encodeURIComponent(request.selectionText)}`); return
       case 'ask-ai':
+        await openReader()
+        setAiInitialQuestion(request.selectionText ? `请解释这段内容：\n\n${request.selectionText}` : '')
         setAiOpen(true)
-        messageApi.info('AI 提问功能在 Assistant 面板中接入，本批暂未接通')
         return
       case 'open-link-current': if (request.linkUrl) void navigate(request.linkUrl); return
       case 'open-link-new': if (request.linkUrl) openNewTab(request.linkUrl); return
@@ -1722,7 +1733,7 @@ export function BrowserPage({ visible = true, onSearchKnowledge }: { visible?: b
             ? <div className="web-surface__loading"><LoadingOutlined spin/></div>
             : active.url
               ? <BrowserErrorView tab={{...active, error:{kind:'web-mode-required',message:'当前网页需要在 Tauri 桌面应用中打开。'}}} onRetry={retryActive} onNewTab={openNewTab} onCopy={copyUrl}/>
-              : <NewTab address={address} setAddress={setAddress} navigate={navigate} openNewTab={openNewTab} onSearchKnowledge={onSearchKnowledge}/>}</div>{aiOpen&&<AssistantPanel close={()=>setAiOpen(false)} saveToLibrary={save} currentUrl={active.url} currentTabId={active.id} readerArticle={readerArticle}/>}</div>
+              : <NewTab address={address} setAddress={setAddress} navigate={navigate} openNewTab={openNewTab} onSearchKnowledge={onSearchKnowledge}/>}</div>{aiOpen&&<AssistantPanel close={()=>setAiOpen(false)} saveToLibrary={save} currentUrl={active.url} currentTabId={active.id} readerArticle={readerArticle} initialQuestion={aiInitialQuestion}/>}</div>
     <ContextMenu
       surfaceRef={surfaceRef}
       capabilities={{

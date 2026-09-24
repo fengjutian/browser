@@ -16,6 +16,7 @@ interface AssistantPanelProps {
   currentUrl: string
   currentTabId: string
   readerArticle: ReaderArticle | null
+  initialQuestion?: string
 }
 
 const TRANSLATION_LANGUAGES = [
@@ -29,7 +30,7 @@ const TRANSLATION_LANGUAGES = [
 
 interface TranslationCacheEntry { key: string; content: string }
 
-export function AssistantPanel({ close, saveToLibrary, currentUrl, currentTabId, readerArticle }: AssistantPanelProps) {
+export function AssistantPanel({ close, saveToLibrary, currentUrl, currentTabId, readerArticle, initialQuestion = '' }: AssistantPanelProps) {
   const [messageApi, contextHolder] = message.useMessage()
   const [mode, setMode] = useState<PanelMode>('summarize')
   const [providers, setProviders] = useState<AIProvider[]>([])
@@ -57,6 +58,12 @@ export function AssistantPanel({ close, saveToLibrary, currentUrl, currentTabId,
   useEffect(() => {
     setSummary(''); setError(null); setAskAnswer(''); setAskCitations([]); setAskNotFound(false); setQuestion(''); setTranslation('')
   }, [currentUrl, mode])
+
+  useEffect(() => {
+    if (!initialQuestion.trim()) return
+    setMode('ask')
+    setQuestion(initialQuestion.trim())
+  }, [initialQuestion])
 
   useEffect(() => {
     void getSession('ai.translations').then(raw => {
