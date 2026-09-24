@@ -513,6 +513,24 @@ fn validate_browser_label(label: &str) -> Result<(), String> {
     Ok(())
 }
 
+fn audio_monitor_script(label: &str) -> String {
+    format!(r#"(() => {{
+      let muted=false, last='';
+      const media=()=>Array.from(document.querySelectorAll('audio,video'));
+      const emit=()=>{{
+        const audible=!muted&&media().some(node=>!node.paused&&!node.ended&&node.volume>0&&!node.muted);
+        const signature=`${{audible}}:${{muted}}`;
+        if(signature===last)return;last=signature;
+        window.__TAURI_INTERNALS__?.invoke('tauri://emit',{{event:'browser://audio-state',payload:{{version:1,tabLabel:'{label}',audible,muted}}}}).catch(()=>undefined);
+      }};
+      const bind=node=>{{if(!(node instanceof HTMLMediaElement)||node.dataset.arcadiaAudioBound)return;node.dataset.arcadiaAudioBound='1';if(muted)node.muted=true;for(const event of ['play','playing','pause','ended','volumechange','emptied'])node.addEventListener(event,emit)}};
+      const scan=()=>{{media().forEach(bind);emit()}};
+      new MutationObserver(scan).observe(document,{{subtree:true,childList:true}});
+      document.addEventListener('DOMContentLoaded',scan,{{once:true}});scan();
+      window.__arcadiaAudio={{setMuted(value){{muted=!!value;media().forEach(node=>{{node.muted=muted}});emit()}},state(){{return{{muted}}}}}};
+    }})()"#)
+}
+
 #[tauri::command]
 async fn browser_create(
     app: tauri::AppHandle,
@@ -538,6 +556,7 @@ async fn browser_create(
         .incognito(private_mode)
         .initialization_script(permission_guard_script(permissions.as_deref().unwrap_or(&[])))
         .initialization_script(context_menu_script())
+        .initialization_script(audio_monitor_script(&label))
         .initialization_script(ad_blocker_script(&label, ad_block_enabled.unwrap_or(true)))
         .on_new_window(move |url, _features| {
             if matches!(url.scheme(), "http" | "https") {
@@ -609,6 +628,15 @@ async fn browser_set_ad_blocking(app: tauri::AppHandle, label: String, enabled: 
     app.get_webview(&label)
         .ok_or_else(|| "browser tab webview not found".to_string())?
         .eval(format!("window.__arcadiaAdBlocker?.setEnabled({enabled})"))
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+async fn browser_set_muted(app: tauri::AppHandle, label: String, muted: bool) -> Result<(), String> {
+    validate_browser_label(&label)?;
+    app.get_webview(&label)
+        .ok_or_else(|| "browser tab webview not found".to_string())?
+        .eval(format!("window.__arcadiaAudio?.setMuted({muted})"))
         .map_err(|error| error.to_string())
 }
 
@@ -1167,6 +1195,7 @@ pub fn run() {
             validate_navigation,
             browser_create,
             browser_set_ad_blocking,
+            browser_set_muted,
             browser_navigate,
             browser_reload,
             browser_stop,
@@ -1368,5 +1397,14 @@ mod tests {
     #[test]
     fn event_payload_version_is_v2() {
         assert_eq!(EVENT_PAYLOAD_VERSION, 2);
+    }
+
+    #[test]
+    fn audio_monitor_reports_state_and_applies_muting() {
+        let script = audio_monitor_script("browser-tab-123");
+        assert!(script.contains("browser://audio-state"));
+        assert!(script.contains("setMuted"));
+        assert!(script.contains("audio,video"));
+        assert!(script.contains("browser-tab-123"));
     }
 }

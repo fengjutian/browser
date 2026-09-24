@@ -4,7 +4,7 @@ import { ArrowDownOutlined, ArrowLeftOutlined, ArrowRightOutlined, ArrowUpOutlin
 import { Sparkles as RobotOutlined } from 'lucide-react'
 import type { BrowserTab, BrowserTabError } from '../../types'
 import { addBrowserHistory, deleteClosedTab, findDocumentByUrl, getBrowserShortcutsEnabled, getBrowserWorkspace, getDocument, listBrowserHistory, listClosedTabs, listSitePermissions, saveBrowserWorkspace, saveClosedTab, saveDocument, setSession, toggleStarred } from '../../api'
-import { captureNativePage, closeNativeTab, ensureNativeTab, findInNativeTab, hasNativeTab, hideNativeTab, isNativeBrowserAvailable, navigateHistory, onNativeAdBlockUpdate, onNativeNewTab, onNativeToolbarMenuAction, openNativeTab, printNativeTab, readNativeState, reloadNativeTab, resizeNativeTab, setNativeToolbarMenu, setNativeToolbarPanel, showNativeTab, stopNativeTab, zoomNativeTab } from '../../services/nativeBrowser'
+import { captureNativePage, closeNativeTab, ensureNativeTab, findInNativeTab, hasNativeTab, hideNativeTab, isNativeBrowserAvailable, navigateHistory, onNativeAdBlockUpdate, onNativeAudioState, onNativeNewTab, onNativeToolbarMenuAction, openNativeTab, printNativeTab, readNativeState, reloadNativeTab, resizeNativeTab, setNativeMuted, setNativeToolbarMenu, setNativeToolbarPanel, showNativeTab, stopNativeTab, zoomNativeTab } from '../../services/nativeBrowser'
 import { extractArticle } from '../../features/reader/extractArticle'
 import type { ReaderArticle } from '../../features/reader/types'
 import { classifySaveError } from '../../features/documents/saveClassifier'
@@ -485,6 +485,25 @@ export function BrowserPage({ visible = true, onSearchKnowledge }: { visible?: b
     })
     return () => { disposed = true; unlisten?.() }
   }, [])
+
+  useEffect(() => {
+    let disposed = false
+    let unlisten: (() => void) | undefined
+    void onNativeAudioState(state => {
+      if (disposed) return
+      setTabs(current => current.map(tab => tab.id === state.tabId
+        ? { ...tab, audible: state.audible, muted: state.muted }
+        : tab))
+    }).then(stop => {
+      if (disposed) stop()
+      else unlisten = stop
+    })
+    return () => { disposed = true; unlisten?.() }
+  }, [])
+
+  useEffect(() => {
+    if (hasNativeTab(active.id)) void setNativeMuted(active.id, active.muted === true)
+  }, [active.id, active.muted])
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -1251,13 +1270,16 @@ export function BrowserPage({ visible = true, onSearchKnowledge }: { visible?: b
   }
 
   function toggleMuted(id: string) {
-    setTabs(current => current.map(tab => {
-      if (tab.id !== id) return tab
-      const nextMuted = !tab.muted
-      // Marking muted clears any audible hint we previously set on the
-      // client; unmuting just flips the flag back so the speaker reappears.
-      return { ...tab, muted: nextMuted, audible: nextMuted ? false : tab.audible }
-    }))
+    const target = tabsRef.current.find(tab => tab.id === id)
+    if (!target) return
+    const nextMuted = !target.muted
+    setTabs(current => current.map(tab => tab.id === id
+      ? { ...tab, muted: nextMuted, audible: nextMuted ? false : tab.audible }
+      : tab))
+    void setNativeMuted(id, nextMuted).catch(() => {
+      setTabs(current => current.map(tab => tab.id === id ? { ...tab, muted: target.muted } : tab))
+      messageApi.error('无法修改网页音频状态')
+    })
   }
 
   function closeDomain(anchorId: string) {

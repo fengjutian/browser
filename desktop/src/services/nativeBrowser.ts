@@ -10,6 +10,8 @@ export interface NativeBrowserState { url: string; title: string; favicon?: stri
 export interface NativePageSnapshot { url: string; html: string }
 interface NativeToolbarMenuEvent { version: number; tabLabel: string; action: string }
 export interface NativeToolbarMenuAction { tabId: string; action: string; value?: string }
+interface NativeAudioStateEvent { version: number; tabLabel: string; audible: boolean; muted: boolean }
+export interface NativeAudioState { tabId: string; audible: boolean; muted: boolean }
 /**
  * v1: openerLabel + url. Future revisions may add origin, gesture, etc. The
  * `version` field is always present on Rust-emitted events; consumers should
@@ -97,6 +99,7 @@ export async function isNativeTabAlive(tabId: string): Promise<boolean> { const 
 export async function setNativeAdBlocking(enabled: boolean): Promise<void> {
   await Promise.all(Array.from(labels.values(), label => invoke('browser_set_ad_blocking', { label, enabled })))
 }
+export async function setNativeMuted(tabId: string, muted: boolean): Promise<void> { const label=labels.get(tabId);if(label)await invoke('browser_set_muted',{label,muted}) }
 export async function captureNativePage(tabId: string): Promise<NativePageSnapshot> { const label=labels.get(tabId);if(!label)throw new Error('native webview is not available');return invoke<NativePageSnapshot>('browser_snapshot',{label}) }
 export function hasNativeTab(tabId: string): boolean { return labels.has(tabId) }
 export async function onNativeNewTab(handler: (url: string, options: { private: boolean }) => void): Promise<UnlistenFn> {
@@ -112,6 +115,14 @@ export interface AdBlockUpdate { version: number; tabLabel: string; blockedCount
 export async function onNativeAdBlockUpdate(handler: (update: AdBlockUpdate) => void): Promise<UnlistenFn> {
   if (!isTauri()) return () => undefined
   return listen<AdBlockUpdate>('browser://ad-block-update', event => handler(event.payload))
+}
+
+export async function onNativeAudioState(handler: (state: NativeAudioState) => void): Promise<UnlistenFn> {
+  if (!isTauri()) return () => undefined
+  return listen<NativeAudioStateEvent>('browser://audio-state', event => {
+    const tabId = Array.from(labels.entries()).find(([, label]) => label === event.payload.tabLabel)?.[0]
+    if (tabId) handler({ tabId, audible: event.payload.audible, muted: event.payload.muted })
+  })
 }
 
 /**
