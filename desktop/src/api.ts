@@ -3,7 +3,7 @@ import type { AIProvider, AIProviderType, ChatRequest, ChatResponse, Document, P
 import type { HistoryEntry } from './features/history/dedupeHistory'
 import type { ClosedTab } from './features/browser/closedTabs'
 import type { SitePermissionRule } from './features/browser/sitePermissions'
-import type { BrowserTab } from './types'
+import type { BrowserTab, ReadingActivity } from './types'
 
 const isTauri = () => '__TAURI_INTERNALS__' in window
 
@@ -223,6 +223,14 @@ export async function addBrowserHistory(entry: HistoryEntry): Promise<void> {
     return
   }
   await invoke('local_add_history', { entry })
+}
+
+export async function recordReadingActivity(input: { url:string; title:string; activeSeconds:number; scrollDepth:number }): Promise<void> {
+  if (isTauri()) await invoke('local_record_reading_activity', input)
+}
+
+export async function listReadingActivity(): Promise<ReadingActivity[]> {
+  return isTauri() ? invoke<ReadingActivity[]>('local_list_reading_activity') : []
 }
 
 export async function clearBrowserHistory(since?: number): Promise<number> {

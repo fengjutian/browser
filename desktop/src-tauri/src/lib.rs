@@ -412,6 +412,8 @@ struct BrowserState {
     #[serde(default)]
     scroll_y: f64,
     #[serde(default)]
+    scroll_depth: f64,
+    #[serde(default)]
     can_go_back: bool,
     #[serde(default)]
     can_go_forward: bool,
@@ -774,7 +776,7 @@ async fn browser_state(app: tauri::AppHandle, label: String) -> Result<BrowserSt
         .ok_or_else(|| "browser tab webview not found".to_string())?;
     let mut state: BrowserState = eval_json(
         webview,
-        "({url:location.href,title:document.title,favicon:(document.querySelector('link[rel~=icon]')?.href??null),loading:document.readyState!=='complete',scrollX:window.scrollX,scrollY:window.scrollY})",
+        "({url:location.href,title:document.title,favicon:(document.querySelector('link[rel~=icon]')?.href??null),loading:document.readyState!=='complete',scrollX:window.scrollX,scrollY:window.scrollY,scrollDepth:Math.min(1,(window.scrollY+window.innerHeight)/Math.max(document.documentElement.scrollHeight,window.innerHeight))})",
     )
     .await?;
     let navs = app.state::<NavStacks>();
@@ -1252,6 +1254,8 @@ pub fn run() {
             local_store::local_get_session,
             local_store::local_set_session,
             local_store::local_list_history,
+            local_store::local_record_reading_activity,
+            local_store::local_list_reading_activity,
             local_store::local_add_history,
             local_store::local_clear_history,
             local_store::local_get_browser_workspace,

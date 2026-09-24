@@ -3,8 +3,8 @@ import { FileSearchOutlined, RightOutlined, SearchOutlined } from '../../compone
 import { Fragment, useEffect, useMemo, useState } from 'react'
 import { PageHeader } from '../../shared/components/PageHeader'
 import { DocumentDetailDrawer } from '../../features/documents/DocumentDetailDrawer'
-import { listDocuments } from '../../api'
-import type { Document } from '../../types'
+import { listDocuments, listReadingActivity } from '../../api'
+import type { Document, ReadingActivity } from '../../types'
 import { useDebouncedValue } from '../../shared/hooks/useDebouncedValue'
 
 type SortKey = 'recent' | 'oldest' | 'starred'
@@ -13,6 +13,7 @@ export function SearchPage({ initialQuery = '' }: { initialQuery?: string }) {
   const [query, setQuery] = useState(initialQuery)
   const debouncedQuery = useDebouncedValue(query, 250)
   const [documents, setDocuments] = useState<Document[]>([])
+  const [reading, setReading] = useState<ReadingActivity[]>([])
   const [selected, setSelected] = useState<Document | null>(null)
   const [loading, setLoading] = useState(false)
   const [unavailable, setUnavailable] = useState(false)
@@ -20,6 +21,7 @@ export function SearchPage({ initialQuery = '' }: { initialQuery?: string }) {
   const [starredOnly, setStarredOnly] = useState(false)
   const [includeArchived, setIncludeArchived] = useState(false)
   const [sort, setSort] = useState<SortKey>('recent')
+  const [readOnly, setReadOnly] = useState(false)
   const [durationMs, setDurationMs] = useState<number | null>(null)
 
   useEffect(() => { setQuery(initialQuery) }, [initialQuery])
@@ -28,10 +30,11 @@ export function SearchPage({ initialQuery = '' }: { initialQuery?: string }) {
     let current = true
     setLoading(true)
     const startedAt = performance.now()
-    void listDocuments(debouncedQuery)
-      .then(items => {
+    void Promise.all([listDocuments(debouncedQuery), listReadingActivity()])
+      .then(([items, activity]) => {
         if (!current) return
         setDocuments(items)
+        setReading(activity)
         setUnavailable(false)
         setDurationMs(Math.round(performance.now() - startedAt))
       })
@@ -39,6 +42,8 @@ export function SearchPage({ initialQuery = '' }: { initialQuery?: string }) {
       .finally(() => { if (current) setLoading(false) })
     return () => { current = false }
   }, [debouncedQuery])
+
+  const readingByUrl = useMemo(() => new Map(reading.map(item => [item.url, item])), [reading])
 
   const allTags = useMemo(() => {
     const set = new Set<string>()
@@ -51,6 +56,7 @@ export function SearchPage({ initialQuery = '' }: { initialQuery?: string }) {
     return documents
       .filter(doc => {
         if (starredOnly && !doc.starred) return false
+        if (readOnly && readingStatus(readingByUrl.get(doc.url)) === 'seen') return false
         if (!includeArchived && doc.status === 'ARCHIVED') return false
         if (tagFilter.length > 0 && !tagFilter.every(tag => doc.tags.includes(tag))) return false
         if (!lower) return true
@@ -59,9 +65,9 @@ export function SearchPage({ initialQuery = '' }: { initialQuery?: string }) {
       .sort((a, b) => {
         if (sort === 'starred') return Number(b.starred) - Number(a.starred) || b.createdAt.localeCompare(a.createdAt)
         if (sort === 'oldest') return a.createdAt.localeCompare(b.createdAt)
-        return b.createdAt.localeCompare(a.createdAt)
+        return (readingByUrl.get(b.url)?.lastVisitedAt ?? Date.parse(b.createdAt) / 1000) - (readingByUrl.get(a.url)?.lastVisitedAt ?? Date.parse(a.createdAt) / 1000)
       })
-  }, [documents, debouncedQuery, starredOnly, includeArchived, tagFilter, sort])
+  }, [documents, debouncedQuery, starredOnly, includeArchived, tagFilter, sort, readOnly, readingByUrl])
 
   useEffect(() => { /* filtered is consumed directly by the List dataSource */ }, [filtered])
 
@@ -83,13 +89,27 @@ export function SearchPage({ initialQuery = '' }: { initialQuery?: string }) {
         onChange={setTagFilter}
       />
       <Segmented value={starredOnly ? 'starred' : 'all'} onChange={value => setStarredOnly(value === 'starred')} options={[{label:'全部',value:'all'},{label:'仅收藏',value:'starred'}]}/>
+      <Segmented value={readOnly ? 'read' : 'all'} onChange={value => setReadOnly(value === 'read')} options={[{label:'全部内容',value:'all'},{label:'确实读过',value:'read'}]}/>
       <Segmented value={includeArchived ? 'all' : 'active'} onChange={value => setIncludeArchived(value === 'all')} options={[{label:'未归档',value:'active'},{label:'含归档',value:'all'}]}/>
       <Segmented value={sort} onChange={value => setSort(value as SortKey)} options={[{label:'最新',value:'recent'},{label:'最早',value:'oldest'},{label:'收藏优先',value:'starred'}]}/>
       {durationMs !== null && <Statistic title="耗时" value={durationMs} suffix="ms" valueStyle={{fontSize:14}}/>}
     </Space>
-    <List loading={loading} className="search-results" dataSource={filtered} locale={{ emptyText: <Empty description={emptyText}/> }} renderItem={item => <List.Item onClick={() => setSelected(item)} className="search-result-clickable" actions={[<RightOutlined key="open"/>]}><List.Item.Meta avatar={<span className="result-icon"><FileSearchOutlined/></span>} title={<Highlight text={item.title} terms={terms}/>} description={<><Space size={4}>{item.tags.map(tag => <Tag className={tagFilter.includes(tag) ? 'search-tag is-active' : 'search-tag'} key={tag}>{tag}</Tag>)}</Space><Typography.Paragraph ellipsis={{ rows: 2, expandable: false }}><Highlight text={extractSummary(item.summary, item.markdown)} terms={terms}/></Typography.Paragraph></>}/></List.Item>}/>
+    <List loading={loading} className="search-results" dataSource={filtered} locale={{ emptyText: <Empty description={emptyText}/> }} renderItem={item => { const activity=readingByUrl.get(item.url); return <List.Item onClick={() => setSelected(item)} className="search-result-clickable" actions={[<RightOutlined key="open"/>]}><List.Item.Meta avatar={<span className="result-icon"><FileSearchOutlined/></span>} title={<Highlight text={item.title} terms={terms}/>} description={<><Space size={4}>{item.tags.map(tag => <Tag className={tagFilter.includes(tag) ? 'search-tag is-active' : 'search-tag'} key={tag}>{tag}</Tag>)}{activity && <Tag color={readingStatus(activity)==='deep'?'green':'blue'}>{readingLabel(activity)}</Tag>}</Space><Typography.Paragraph ellipsis={{ rows: 2, expandable: false }}><Highlight text={extractSummary(item.summary, item.markdown)} terms={terms}/></Typography.Paragraph></>}/></List.Item> }}/>
     <DocumentDetailDrawer document={selected} onClose={() => setSelected(null)} onDeleted={id => setDocuments(items => items.filter(item => item.id !== id))}/>
   </section>
+}
+
+function readingStatus(activity?: ReadingActivity): 'seen'|'read'|'deep' {
+  if (!activity) return 'seen'
+  if (activity.activeSeconds >= 120 || activity.maxScrollDepth >= .7) return 'deep'
+  if (activity.activeSeconds >= 30 && activity.maxScrollDepth >= .2) return 'read'
+  return 'seen'
+}
+
+function readingLabel(activity: ReadingActivity): string {
+  const status = readingStatus(activity) === 'deep' ? '深度阅读' : readingStatus(activity) === 'read' ? '已阅读' : '浏览过'
+  const duration = activity.activeSeconds >= 60 ? `${Math.floor(activity.activeSeconds / 60)}分${activity.activeSeconds % 60}秒` : `${activity.activeSeconds}秒`
+  return `${status} · ${duration} · 滚动${Math.round(activity.maxScrollDepth * 100)}%`
 }
 
 function Highlight({text, terms}:{text:string;terms:string[]}) {

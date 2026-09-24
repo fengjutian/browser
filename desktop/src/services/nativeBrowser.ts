@@ -6,7 +6,7 @@ import { readSitePermissions } from '../features/browser/sitePermissions'
 import { isAdBlockerEnabled } from '../features/plugins/adBlocker'
 
 export interface BrowserBounds { x: number; y: number; width: number; height: number }
-export interface NativeBrowserState { url: string; title: string; favicon?: string; loading: boolean; scrollX: number; scrollY: number; canGoBack: boolean; canGoForward: boolean }
+export interface NativeBrowserState { url: string; title: string; favicon?: string; loading: boolean; scrollX: number; scrollY: number; scrollDepth?: number; canGoBack: boolean; canGoForward: boolean }
 export interface NativePageSnapshot { url: string; html: string }
 interface NativeToolbarMenuEvent { version: number; tabLabel: string; action: string }
 export interface NativeToolbarMenuAction { tabId: string; action: string; value?: string }

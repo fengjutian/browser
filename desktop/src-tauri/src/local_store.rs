@@ -197,6 +197,19 @@ const MIGRATIONS: &[(i64, &str)] = &[
         );
         CREATE INDEX idx_workspaces_updated_at ON workspaces(updated_at DESC);",
     ),
+    (
+        14,
+        "CREATE TABLE reading_activity (
+            url TEXT PRIMARY KEY,
+            title TEXT NOT NULL,
+            first_visited_at INTEGER NOT NULL,
+            last_visited_at INTEGER NOT NULL,
+            active_seconds INTEGER NOT NULL DEFAULT 0,
+            max_scroll_depth REAL NOT NULL DEFAULT 0,
+            visit_count INTEGER NOT NULL DEFAULT 1
+        );
+        CREATE INDEX idx_reading_activity_last_visited ON reading_activity(last_visited_at DESC);",
+    ),
 ];
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -231,6 +244,18 @@ pub struct LocalHistoryEntry {
     url: String,
     title: String,
     visited_at: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LocalReadingActivity {
+    url: String,
+    title: String,
+    first_visited_at: i64,
+    last_visited_at: i64,
+    active_seconds: i64,
+    max_scroll_depth: f64,
+    visit_count: i64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1153,6 +1178,42 @@ pub fn local_list_history(app: tauri::AppHandle) -> Result<Vec<LocalHistoryEntry
 }
 
 #[tauri::command]
+pub fn local_record_reading_activity(
+    app: tauri::AppHandle,
+    url: String,
+    title: String,
+    active_seconds: i64,
+    scroll_depth: f64,
+) -> Result<(), String> {
+    if url.len() > 8192 || title.len() > 2048 || active_seconds <= 0 || active_seconds > 60 {
+        return Err("invalid reading activity".into());
+    }
+    let now = unix_seconds();
+    connection(&app)?.execute(
+        "INSERT INTO reading_activity(url,title,first_visited_at,last_visited_at,active_seconds,max_scroll_depth,visit_count)
+         VALUES(?1,?2,?3,?3,?4,?5,1)
+         ON CONFLICT(url) DO UPDATE SET title=excluded.title,last_visited_at=excluded.last_visited_at,
+         active_seconds=reading_activity.active_seconds+excluded.active_seconds,
+         max_scroll_depth=MAX(reading_activity.max_scroll_depth,excluded.max_scroll_depth)",
+        params![url, title, now, active_seconds, scroll_depth.clamp(0.0, 1.0)],
+    ).map_err(|error| error.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+pub fn local_list_reading_activity(app: tauri::AppHandle) -> Result<Vec<LocalReadingActivity>, String> {
+    let database = connection(&app)?;
+    let mut statement = database.prepare(
+        "SELECT url,title,first_visited_at,last_visited_at,active_seconds,max_scroll_depth,visit_count FROM reading_activity ORDER BY last_visited_at DESC"
+    ).map_err(|error| error.to_string())?;
+    let rows = statement.query_map([], |row| Ok(LocalReadingActivity {
+        url: row.get(0)?, title: row.get(1)?, first_visited_at: row.get(2)?, last_visited_at: row.get(3)?,
+        active_seconds: row.get(4)?, max_scroll_depth: row.get(5)?, visit_count: row.get(6)?,
+    })).map_err(|error| error.to_string())?;
+    rows.collect::<Result<Vec<_>, _>>().map_err(|error| error.to_string())
+}
+
+#[tauri::command]
 pub fn local_add_history(app: tauri::AppHandle, entry: LocalHistoryEntry) -> Result<(), String> {
     validate_history_entry(&entry)?;
     let database = connection(&app)?;
@@ -1516,7 +1577,7 @@ mod tests {
             .unwrap()
             .collect::<Result<Vec<_>, _>>()
             .unwrap();
-        assert_eq!(versions, vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]);
+        assert_eq!(versions, vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14]);
     }
 
     #[test]
@@ -1548,7 +1609,7 @@ mod tests {
             .unwrap()
             .collect::<Result<Vec<_>, _>>()
             .unwrap();
-        assert_eq!(versions, vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]);
+        assert_eq!(versions, vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14]);
     }
 
     #[test]
@@ -1564,7 +1625,7 @@ mod tests {
             .unwrap()
             .collect::<Result<Vec<_>, _>>()
             .unwrap();
-        assert_eq!(versions, vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]);
+        assert_eq!(versions, vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14]);
     }
 
     #[test]

@@ -33,6 +33,7 @@ export function decideTabSync(inputs: TabSyncInputs): TabSyncDecision {
       loading: state.loading,
       scrollX: Math.round(state.scrollX),
       scrollY: Math.round(state.scrollY),
+      scrollDepth: state.scrollDepth ?? 0,
       canGoBack: state.canGoBack,
       canGoForward: state.canGoForward,
     }
