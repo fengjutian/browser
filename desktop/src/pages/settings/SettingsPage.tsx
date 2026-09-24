@@ -1,5 +1,5 @@
 import { Alert, Button, Card, Descriptions, Form, Input, InputNumber, List, message, Popconfirm, Segmented, Select, Space, Switch, Tabs, Tag, Typography } from '../../components/ui'
-import { BgColorsOutlined, DeleteOutlined, KeyOutlined, MoonOutlined, SafetyCertificateOutlined, SaveOutlined, SunOutlined, ThunderboltOutlined } from '../../components/ui/icons'
+import { BgColorsOutlined, DeleteOutlined, KeyOutlined, MoonOutlined, SafetyCertificateOutlined, SaveOutlined, SearchOutlined, SunOutlined, ThunderboltOutlined } from '../../components/ui/icons'
 import { useEffect, useState } from 'react'
 import { PageHeader } from '../../shared/components/PageHeader'
 import { clearBrowserHistory, clearClosedTabs as clearClosedTabsInDb, clearReadingSnapshots, deleteAIProvider, exportBackup, getAIProvider, getBrowserShortcutsEnabled, getReadingSnapshotStats, importBackup, listAIProviders, listBrowserHistory, purgeReadingSnapshots, replaceSitePermissions, saveAIProvider, aiTestProvider, setBrowserShortcutsEnabled, type AIProviderInput, type ReadingSnapshotStats } from '../../api'
@@ -12,7 +12,7 @@ import { HISTORY_CHANGE_EVENT, type HistoryEntry } from '../../features/history/
 import { DEFAULT_ADVANCED_SETTINGS, readAdvancedSettings, writeAdvancedSettings, type AdvancedSettings } from '../../features/settings/advanced'
 import { isTrackingCleanerEnabled, setTrackingCleanerEnabled } from '../../features/plugins/trackingCleaner'
 import { isAdBlockerEnabled, setAdBlockerEnabled } from '../../features/plugins/adBlocker'
-import { setNativeAdBlocking } from '../../services/nativeBrowser'
+import { deleteBrowserPassword, listBrowserPasswords, setNativeAdBlocking, type SavedCredential } from '../../services/nativeBrowser'
 import { PrivacyExportPanel } from '../../features/privacy/PrivacyExportPanel'
 import { getBrowserCapabilities, type BrowserCapabilities } from '../../services/browserCapabilities'
 import {
@@ -822,11 +822,72 @@ function AdvancedSettingsPanel() {
   </Card>
 }
 
+function PasswordManagerSettings() {
+  const [messageApi, contextHolder] = message.useMessage()
+  const [credentials, setCredentials] = useState<SavedCredential[]>([])
+  const [query, setQuery] = useState('')
+  const [loading, setLoading] = useState(true)
+
+  async function refresh() {
+    setLoading(true)
+    try { setCredentials(await listBrowserPasswords()) }
+    catch (error) { messageApi.error(`读取密码库失败：${String(error)}`) }
+    finally { setLoading(false) }
+  }
+
+  useEffect(() => { void refresh() }, [])
+
+  const normalized = query.trim().toLocaleLowerCase()
+  const visible = normalized
+    ? credentials.filter(item => `${item.origin}\n${item.username}`.toLocaleLowerCase().includes(normalized))
+    : credentials
+
+  async function remove(id: string) {
+    try {
+      if (!await deleteBrowserPassword(id)) throw new Error('凭据不存在或已删除')
+      setCredentials(current => current.filter(item => item.id !== id))
+      messageApi.success('已从系统密码库删除')
+    } catch (error) { messageApi.error(`删除失败：${String(error)}`) }
+  }
+
+  return <>{contextHolder}<Card title={<Space><KeyOutlined/>密码管理器</Space>} className="settings-card password-manager-settings">
+    <Alert type="info" showIcon message="密码由操作系统保护" description="这里只显示网站和用户名。密码正文保存在 Windows 凭据管理器中，不会在设置页面回显或写入 SQLite。"/>
+    <Input
+      allowClear
+      prefix={<SearchOutlined/>}
+      value={query}
+      onChange={event => setQuery(event.target.value)}
+      placeholder="搜索网站或用户名"
+      style={{ margin: '16px 0' }}
+    />
+    <List
+      loading={loading}
+      dataSource={visible}
+      locale={{ emptyText: query ? '没有匹配的已保存密码' : '尚未保存密码' }}
+      renderItem={item => <List.Item actions={[
+        <Popconfirm key="delete" title="删除这条已保存密码？" description="删除后无法恢复，下次登录时可以重新保存。" okText="删除" cancelText="取消" okButtonProps={{danger:true}} onConfirm={() => void remove(item.id)}>
+          <Button type="text" danger icon={<DeleteOutlined/>}>删除</Button>
+        </Popconfirm>,
+      ]}>
+        <List.Item.Meta
+          avatar={<KeyOutlined/>}
+          title={<Typography.Text strong>{item.origin}</Typography.Text>}
+          description={<Space direction="vertical" size={2}>
+            <Typography.Text copyable={{text:item.username}}>{item.username}</Typography.Text>
+            <Typography.Text type="secondary">更新于 {new Date(item.updatedAt * 1000).toLocaleString()}</Typography.Text>
+          </Space>}
+        />
+      </List.Item>}
+    />
+    <Typography.Paragraph type="secondary" style={{marginTop:16}}>共 {credentials.length} 条凭据。新密码会在 HTTPS 登录表单提交后询问是否保存。</Typography.Paragraph>
+  </Card></>
+}
+
 export function SettingsPage() {
-  const items = ['通用','浏览器','隐私','AI Provider','知识库','插件','高级'].map((label, index) => ({
+  const items = ['通用','浏览器','隐私','密码管理器','AI Provider','知识库','插件','高级'].map((label, index) => ({
     key: label,
     label,
-    children: index === 0 ? <GeneralSettings/> : index === 1 ? <BrowserSettings/> : index === 2 ? <PrivacySettings/> : index === 3 ? <AIProviderSettings/> : index === 4 ? <KnowledgeBaseSettings/> : index === 5 ? <PluginSettings/> : <AdvancedSettingsPanel/>,
+    children: index === 0 ? <GeneralSettings/> : index === 1 ? <BrowserSettings/> : index === 2 ? <PrivacySettings/> : index === 3 ? <PasswordManagerSettings/> : index === 4 ? <AIProviderSettings/> : index === 5 ? <KnowledgeBaseSettings/> : index === 6 ? <PluginSettings/> : <AdvancedSettingsPanel/>,
   }))
   return <section className="page"><PageHeader eyebrow="PREFERENCES" title="设置" description="调整浏览器、隐私、AI Provider 与知识库工作流。"/><Tabs tabPosition="left" items={items} defaultActiveKey="通用"/></section>
 }
