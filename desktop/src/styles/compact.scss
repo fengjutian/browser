@@ -1192,6 +1192,7 @@ body[data-theme='dark'] {
   }
   .browser-tabs .ant-tabs-tab {
     color: #b9c4bd;
+    &::after { background: #3d4942; }
     &:not(.ant-tabs-tab-active):hover { background: rgba(255, 255, 255, .06) !important; }
     &.ant-tabs-tab-active {
       border-color: #2a352f !important;
@@ -1204,6 +1205,9 @@ body[data-theme='dark'] {
     }
     &.browser-tab--muted .browser-tab-title > .browser-tab-audio { color: #6f7a73; }
   }
+  .browser-tabs .ui-tabs__close { color: #aeb9b2; }
+  .browser-tabs .ui-tabs__close:hover { background: #334039; color: #f0f4f1; }
+  .browser-tabs .ant-tabs-nav-add:hover { background: rgba(255,255,255,.08) !important; }
 
   // Browser toolbar / bookmark bar buttons rest on a dark page background; make
   // the "active" state legible without relying on antd default light tokens.
@@ -1400,8 +1404,8 @@ body[data-theme='dark'] {
   position: relative;
   align-items: stretch !important;
   gap: 0 !important;
-  height: 40px !important;
-  padding: 0 0 0 10px !important;
+  height: 44px !important;
+  padding: 5px 8px !important;
   border-bottom: 1px solid #d8ded9;
   background: #e7ebe7 !important;
 
@@ -1409,7 +1413,7 @@ body[data-theme='dark'] {
 
   .ant-tabs-nav {
     width: 100%;
-    height: 40px;
+    height: 34px;
     margin: 0 !important;
 
     &::before { border-bottom: 0 !important; }
@@ -1421,29 +1425,34 @@ body[data-theme='dark'] {
   }
 
   .ant-tabs-nav-list {
-    align-items: end;
-    gap: 4px;
+    align-items: center;
+    gap: 3px;
   }
 
   .ant-tabs-tab {
+    position: relative;
     width: clamp(96px, calc((100vw - var(--sider-width, 56px) - 92px) / var(--tab-count, 1)), 220px);
     min-width: 96px !important;
     max-width: 220px !important;
-    height: 40px;
+    height: 34px;
     margin: 0 !important;
-    padding: 0 10px 0 13px !important;
+    padding: 0 8px 0 11px !important;
     border: 1px solid transparent !important;
-    border-bottom: 0 !important;
-    border-radius: 9px 9px 0 0 !important;
+    border-radius: 8px !important;
     background: transparent !important;
-    transition: background-color .15s, border-color .15s;
+    transition: background-color .14s, border-color .14s, box-shadow .14s;
 
-    &:not(.ant-tabs-tab-active):hover { background: rgba(255, 255, 255, .48) !important; }
+    &::after { display: none; }
+
+    &:not(.ant-tabs-tab-active):hover {
+      background: rgba(255, 255, 255, .52) !important;
+    }
 
     &.ant-tabs-tab-active {
       z-index: 1;
-      border-color: #d8ded9 !important;
-      background: #fafbf9 !important;
+      border-color: rgba(91,108,98,.18) !important;
+      background: rgba(255,255,255,.9) !important;
+      box-shadow: 0 1px 3px rgba(34,49,40,.1);
     }
 
     &.browser-tab--pinned {
@@ -1475,7 +1484,7 @@ body[data-theme='dark'] {
     }
 
     &.browser-tab--grouped {
-      box-shadow: none;
+      box-shadow: inset 0 3px 0 var(--tab-group-color);
     }
   }
 
@@ -1490,6 +1499,15 @@ body[data-theme='dark'] {
     width: 100%;
     min-width: 0;
     overflow: hidden;
+    gap: 8px;
+
+    > img {
+      width: 16px;
+      height: 16px;
+      flex: none;
+      border-radius: 3px;
+      object-fit: contain;
+    }
 
     > span:last-child {
       flex: 1 1 auto;
@@ -1500,28 +1518,38 @@ body[data-theme='dark'] {
     }
   }
 
-  .ant-tabs-tab-remove {
+  .ui-tabs__close {
     display: grid;
     place-items: center;
-    width: 22px;
-    height: 22px;
-    margin-left: 5px;
+    flex: none;
+    width: 20px;
+    height: 20px;
+    margin-left: 2px;
+    padding: 0;
     border-radius: 50%;
+    color: #56615b;
+    font-size: 16px;
+    line-height: 1;
+    opacity: 0;
+    transition: opacity .12s, background-color .12s;
 
-    &:hover { background: #e2e7e3; }
+    &:hover { background: #dce2de; color: #1f2923; }
   }
+
+  .ant-tabs-tab:hover .ui-tabs__close,
+  .ant-tabs-tab-active .ui-tabs__close { opacity: 1; }
 
   .ant-tabs-nav-add {
     display: grid;
     place-items: center;
-    align-self: flex-end;
+    align-self: center;
     flex: none;
-    width: 34px;
-    height: 40px;
-    margin: 0 8px 0 2px !important;
+    width: 30px;
+    height: 30px;
+    margin: 0 2px 0 5px !important;
     padding: 0 !important;
     border: 0 !important;
-    border-radius: 0 !important;
+    border-radius: 50% !important;
     background: transparent !important;
     color: #4c9167;
     font-size: 17px;
@@ -1530,11 +1558,11 @@ body[data-theme='dark'] {
 
     .anticon {
       display: block;
-      transform: translateY(4px);
+      transform: none;
     }
 
     &:hover {
-      background: transparent !important;
+      background: rgba(255,255,255,.58) !important;
       color: #1f6f3e;
     }
 
