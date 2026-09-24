@@ -3,6 +3,7 @@ import { Avatar, Badge, Layout, Space, Tooltip, Typography } from '../components
 import { SafetyCertificateOutlined, ThunderboltOutlined } from '../components/ui/icons'
 import { Bot, BookOpen, Globe2, Search, Settings } from 'lucide-react'
 import type { View } from '../types'
+import { getCurrentWindow } from '@tauri-apps/api/window'
 
 const items = [{ key: 'browser', icon: <Globe2/>, label: '浏览器' }, { key: 'library', icon: <BookOpen/>, label: '知识库' }, { key: 'search', icon: <Search/>, label: '搜索' }, { key: 'ai', icon: <Bot/>, label: 'AI Research' }] as const
 
@@ -47,5 +48,17 @@ export function AppLayout({ view, onViewChange, children }: { view: View; onView
     return collapsed ? <Tooltip key={item.key} title={item.label} placement="right" mouseEnterDelay={0.5}>{button}</Tooltip> : <span key={item.key}>{button}</span>
   }
 
-  return <Layout className="app-layout"><Layout.Sider width={siderWidth} collapsedWidth={MIN_SIDER_WIDTH} collapsed={collapsed} trigger={null} className={`app-sider${collapsed ? ' app-sider--collapsed' : ''}`}><div className="brand"><span className="brand__mark"><ThunderboltOutlined /></span><b>Arcadia</b></div><nav className="rail-nav rail-nav--primary" aria-label="主导航">{items.map(navButton)}</nav><div className="sider-spacer"/><div className="privacy-status"><Space><SafetyCertificateOutlined/><b>保护已开启</b></Space><Typography.Text>已拦截 43 个请求</Typography.Text></div><nav className="rail-nav rail-nav--utility" aria-label="辅助导航">{navButton({ key: 'settings', icon: <Settings/>, label: '设置' })}</nav><div className="user-card"><Badge dot color="#65c98b"><Avatar>CF</Avatar></Badge><span><b>Charles</b><small>本地工作区</small></span></div><div className="sider-resizer" role="separator" aria-label="调整左侧栏宽度" aria-orientation="vertical" aria-valuemin={MIN_SIDER_WIDTH} aria-valuemax={MAX_SIDER_WIDTH} aria-valuenow={siderWidth} onPointerDown={startResize}/></Layout.Sider><Layout.Content className="app-content">{children}</Layout.Content></Layout>
+  return <Layout className="app-layout"><WindowChrome/><Layout.Sider width={siderWidth} collapsedWidth={MIN_SIDER_WIDTH} collapsed={collapsed} trigger={null} className={`app-sider${collapsed ? ' app-sider--collapsed' : ''}`}><div className="brand"><span className="brand__mark"><ThunderboltOutlined /></span><b>Arcadia</b></div><nav className="rail-nav rail-nav--primary" aria-label="主导航">{items.map(navButton)}</nav><div className="sider-spacer"/><div className="privacy-status"><Space><SafetyCertificateOutlined/><b>保护已开启</b></Space><Typography.Text>已拦截 43 个请求</Typography.Text></div><nav className="rail-nav rail-nav--utility" aria-label="辅助导航">{navButton({ key: 'settings', icon: <Settings/>, label: '设置' })}</nav><div className="user-card"><Badge dot color="#65c98b"><Avatar>CF</Avatar></Badge><span><b>Charles</b><small>本地工作区</small></span></div><div className="sider-resizer" role="separator" aria-label="调整左侧栏宽度" aria-orientation="vertical" aria-valuemin={MIN_SIDER_WIDTH} aria-valuemax={MAX_SIDER_WIDTH} aria-valuenow={siderWidth} onPointerDown={startResize}/></Layout.Sider><Layout.Content className="app-content">{children}</Layout.Content></Layout>
+}
+
+function WindowChrome() {
+  const window = getCurrentWindow()
+  return <>
+    <div className="window-drag-strip" data-tauri-drag-region onDoubleClick={() => void window.toggleMaximize().catch(() => undefined)}/>
+    <div className="window-controls" aria-label="窗口控制">
+      <button type="button" aria-label="最小化" title="最小化" onClick={() => void window.minimize().catch(() => undefined)}>—</button>
+      <button type="button" aria-label="最大化或还原" title="最大化或还原" onClick={() => void window.toggleMaximize().catch(() => undefined)}>□</button>
+      <button type="button" className="window-controls__close" aria-label="关闭" title="关闭" onClick={() => void window.close().catch(() => undefined)}>×</button>
+    </div>
+  </>
 }
