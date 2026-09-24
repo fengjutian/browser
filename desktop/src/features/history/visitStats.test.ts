@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { buildVisitStats, categoryForHostname, hostnameOf } from './visitStats'
+import { buildVisitStats, buildVisitTrend, categoryForHostname, filterVisitsByRange, hostnameOf } from './visitStats'
 
 describe('visit statistics', () => {
   it('normalizes hostnames and ignores invalid URLs', () => {
@@ -21,5 +21,16 @@ describe('visit statistics', () => {
     expect(categoryForHostname('juejin.cn')).toBe('开发技术')
     expect(categoryForHostname('bilibili.com')).toBe('视频娱乐')
     expect(categoryForHostname('unknown.example')).toBe('其他')
+  })
+  it('filters and buckets visits by time', () => {
+    const now = new Date(2026, 8, 24, 12).getTime()
+    const entries = [
+      { url: 'https://a.com', title: 'today', visitedAt: new Date(2026, 8, 24, 9).getTime() },
+      { url: 'https://b.com', title: 'yesterday', visitedAt: new Date(2026, 8, 23, 9).getTime() },
+      { url: 'https://c.com', title: 'old', visitedAt: new Date(2026, 7, 1, 9).getTime() },
+    ]
+    expect(filterVisitsByRange(entries, 'today', now)).toHaveLength(1)
+    expect(filterVisitsByRange(entries, '7d', now)).toHaveLength(2)
+    expect(buildVisitTrend(entries, 'today', now)[9].count).toBe(1)
   })
 })

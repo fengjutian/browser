@@ -35,6 +35,7 @@ import { classifyDownload } from '../../features/downloads/dangerClassifier'
 import { shellOpen } from '../../services/webviewCompat'
 import { classifyShellOpenUrl, describeScheme } from '../../features/browser/externalSchemes'
 import { redactUrl } from '../../features/browser/logRedaction'
+import { domainFromUrl, recordAdBlock } from '../../features/privacy/adBlockStats'
 import { usePermissionPrompt } from '../../features/browser/usePermissionPrompt'
 import { PermissionPromptBar } from '../../features/browser/PermissionPromptBar'
 import { CertificateErrorBar } from '../../features/browser/CertificateErrorBar'
@@ -238,6 +239,7 @@ export function BrowserPage({ visible = true, onSearchKnowledge }: { visible?: b
   const shortcutsEnabledRef = useRef(getBrowserShortcutsEnabled())
   const readingSecondsRef = useRef(new Map<string, number>())
   const snapshotAttemptedRef = useRef(new Set<string>())
+  const lastAdBlockCountRef = useRef<Record<string, number>>({})
   const active = tabs.find(tab => tab.id === activeTabId) ?? tabs[0]
   const nativeMode = hasNativeTab(active.id)
   const searchTemplate = useMemo(() => resolveActiveSearchTemplate(readSearchEngineConfig()), [])
@@ -308,6 +310,13 @@ export function BrowserPage({ visible = true, onSearchKnowledge }: { visible?: b
     let unlisten: () => void = () => undefined
     void onNativeAdBlockUpdate(update => {
       const tabId = update.tabLabel.replace(/^browser-/, '')
+      const previousCount = lastAdBlockCountRef.current[tabId] ?? 0
+      const delta = update.blockedCount - previousCount
+      lastAdBlockCountRef.current[tabId] = update.blockedCount
+      if (delta > 0) {
+        const tab = tabsRef.current.find(t => t.id === tabId)
+        recordAdBlock(domainFromUrl(tab?.url ?? ''), delta)
+      }
       setBlockedAdsByTab(current => ({ ...current, [tabId]: update.blockedCount }))
     }).then(dispose => { unlisten = () => { dispose() } })
     return () => unlisten()
