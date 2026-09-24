@@ -28,7 +28,7 @@ mod windows_guard {
         else { None }
     }
 
-    pub fn attach<R: Runtime>(app: &AppHandle<R>, label: &str, rules: Vec<SitePermissionRule>) {
+    pub fn attach(app: &AppHandle, label: &str, rules: Vec<SitePermissionRule>, private_mode: bool) {
         let Some(view) = app.get_webview(label) else { return };
         let event_app = app.clone();
         let event_label = label.to_string();
@@ -43,9 +43,11 @@ mod windows_guard {
                 unsafe { args.Uri(&mut raw_uri) }?;
                 let uri = CoTaskMemPWSTR::from(raw_uri).to_string();
                 let origin = url::Url::parse(&uri).ok().map(|url| url.origin().ascii_serialization()).unwrap_or(uri);
-                let decision = rules.iter().find(|rule| rule.origin == origin).map(|rule| match kind_name {
+                let captured_decision = rules.iter().find(|rule| rule.origin == origin).map(|rule| match kind_name {
                     "camera" => rule.camera.as_str(), "microphone" => rule.microphone.as_str(), "location" => rule.location.as_str(), _ => "ask",
                 }).unwrap_or("ask");
+                let stored_decision = if private_mode { None } else { crate::local_store::site_permission_decision(&event_app, &origin, kind_name) };
+                let decision = if private_mode { "deny" } else { stored_decision.as_deref().unwrap_or(captured_decision) };
                 if decision != "ask" {
                     unsafe { args.SetState(if decision == "allow" { COREWEBVIEW2_PERMISSION_STATE_ALLOW } else { COREWEBVIEW2_PERMISSION_STATE_DENY })?; }
                     return Ok(());
@@ -83,9 +85,9 @@ mod windows_guard {
 }
 
 #[cfg(target_os = "windows")]
-pub fn attach_permission_guard<R: Runtime>(app: &AppHandle<R>, label: &str, rules: Vec<SitePermissionRule>) { windows_guard::attach(app, label, rules) }
+pub(crate) fn attach_permission_guard(app: &AppHandle, label: &str, rules: Vec<SitePermissionRule>, private_mode: bool) { windows_guard::attach(app, label, rules, private_mode) }
 #[cfg(not(target_os = "windows"))]
-pub fn attach_permission_guard<R: Runtime>(_app: &AppHandle<R>, _label: &str, _rules: Vec<SitePermissionRule>) {}
+pub(crate) fn attach_permission_guard<R: Runtime>(_app: &AppHandle<R>, _label: &str, _rules: Vec<SitePermissionRule>, _private_mode: bool) {}
 
 #[cfg(target_os = "windows")]
 pub fn respond_native<R: Runtime>(app: &AppHandle<R>, request_id: &str, allow: bool) -> Result<Option<bool>, String> { windows_guard::respond(app, request_id, allow) }

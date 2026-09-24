@@ -1524,6 +1524,11 @@ pub fn local_replace_site_permissions(app: tauri::AppHandle, permissions: Vec<Lo
     transaction.commit().map_err(|error| error.to_string())
 }
 
+pub(crate) fn site_permission_decision(app: &tauri::AppHandle, origin: &str, kind: &str) -> Option<String> {
+    let database = connection(app).ok()?;
+    database.query_row("SELECT decision FROM site_permissions WHERE origin=? AND permission_kind=?", params![origin, kind], |row| row.get(0)).optional().ok().flatten()
+}
+
 fn credential_key(id: &str) -> String { format!("browser-password:{id}") }
 
 fn validate_credential_origin(origin: &str) -> Result<(), String> {

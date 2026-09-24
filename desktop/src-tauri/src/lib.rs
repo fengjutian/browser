@@ -329,6 +329,9 @@ mod context_menu_tests {
 }
 
 fn permission_guard_script(rules: &[SitePermissionRule]) -> String {
+    // WebView2 permission requests are handled by the native event guard on
+    // Windows. Keeping the JavaScript shim there would display two prompts.
+    if cfg!(target_os = "windows") { return "(()=>{})()".into() }
     let rules = serde_json::to_string(rules).unwrap_or_else(|_| "[]".into());
     // Each sensitive JS API is wrapped: the wrapper inspects the current
     // rule for (origin, kind). `allow` keeps the original behaviour;
@@ -694,7 +697,7 @@ async fn browser_create(
     // Intercept WebView2 certificate failures and defer the navigation until
     // the user explicitly rejects it or allows this navigation once.
     certificate_guard::attach_certificate_guard(&app, &label);
-    permission_guard::attach_permission_guard(&app, &label, permissions.unwrap_or_default());
+    permission_guard::attach_permission_guard(&app, &label, permissions.unwrap_or_default(), private_mode);
     let navs = app.state::<NavStacks>();
     let mut guard = navs.stacks.lock().map_err(|_| "nav stack poisoned".to_string())?;
     let stack = guard.entry(label).or_default();
