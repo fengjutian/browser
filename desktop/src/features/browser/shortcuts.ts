@@ -27,6 +27,7 @@ export type ShortcutAction =
   | 'zoomOut'
   | 'zoomReset'
   | 'print'
+  | 'saveWorkspace'
 
 export interface ShortcutEvent {
   ctrlKey: boolean
@@ -89,6 +90,7 @@ export const SHORTCUT_DEFINITIONS: readonly ShortcutDefinition[] = [
   { action: 'forward',           label: '前进',             hint: 'Alt + →',              default: kbd('ArrowRight', false, false, true) },
   { action: 'reload',            label: '刷新当前页',       hint: 'F5 / Ctrl/⌘ + R',     default: kbd('F5', false) },
   { action: 'stop',              label: '停止加载',         hint: 'Esc',                  default: kbd('Escape', false) },
+  { action: 'saveWorkspace',     label: '保存当前标签为工作区', hint: 'Ctrl/⌘ + Shift + W',  default: kbd('w', true, true) },
 ] as const
 
 const STORAGE_KEY = 'arcadia-shortcut-overrides'

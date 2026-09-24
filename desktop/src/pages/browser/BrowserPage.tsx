@@ -558,6 +558,9 @@ export function BrowserPage({ visible = true, onSearchKnowledge }: { visible?: b
         case 'toggleNotesPanel':
           setNotesOpen(value => !value)
           return
+        case 'saveWorkspace':
+          void saveAsWorkspace()
+          return
         case 'print':
           if (hasNativeTab(activeTabIdRef.current)) void printNativeTab(activeTabIdRef.current)
           return
@@ -800,7 +803,7 @@ export function BrowserPage({ visible = true, onSearchKnowledge }: { visible?: b
     { key: 'bookmarks', label: '打开收藏夹', extra: 'Ctrl+Shift+O', onClick: () => runBrowserMenuAction('bookmarks') },
     { key: 'bulk-summary', label: '多链接 AI 摘要', extra: 'Ctrl+Shift+S', onClick: () => runBrowserMenuAction('bulk-summary') },
     { key: 'toggle-notes', label: '网页笔记面板', extra: 'Ctrl+Shift+N', onClick: () => runBrowserMenuAction('toggle-notes') },
-    { key: 'save-workspace', label: '保存当前标签为工作区', icon: <SaveOutlined/>, disabled: tabs.length === 0, onClick: () => runBrowserMenuAction('save-workspace') },
+    { key: 'save-workspace', label: '保存当前标签为工作区', extra: 'Ctrl+Shift+W', icon: <SaveOutlined/>, disabled: tabs.length === 0, onClick: () => runBrowserMenuAction('save-workspace') },
     { key: 'print', label: '打印', icon: <PrinterOutlined/>, extra: 'Ctrl+P', disabled: !nativeMode, onClick: () => runBrowserMenuAction('print') },
     { type: 'divider' },
     { key: 'new-private', label: '新建私密窗口', icon: <LockOutlined/>, extra: 'Shift+Ctrl+N', onClick: () => runBrowserMenuAction('new-private') },
