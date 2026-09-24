@@ -1,8 +1,8 @@
 import { type MouseEvent, useState } from 'react'
 import { Button, Input, Segmented, Select, Typography } from '../../components/ui'
 import { SearchOutlined } from '../../components/ui/icons'
-import { readSearchEngineConfig, renderSearchTemplate, SEARCH_ENGINE_PRESETS } from './searchEngine'
-import { classifyNavigationInput } from './navigation'
+import { readSearchEngineConfig, SEARCH_ENGINE_PRESETS } from './searchEngine'
+import { classifyNavigationInput, renderSearchTemplate } from './navigation'
 import { QUICK_SITES } from './browserUtils'
 
 type SearchMode = 'web' | 'knowledge'

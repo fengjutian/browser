@@ -1,7 +1,7 @@
 import { useEffect, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react'
 import { Avatar, Badge, Layout, Space, Tooltip, Typography } from '../components/ui'
 import { SafetyCertificateOutlined, ThunderboltOutlined } from '../components/ui/icons'
-import { Bot, BookOpen, Globe2, Search, Settings } from 'lucide-react'
+import { Bot, BookOpen, Globe2, Minus, Search, Settings, Square, X } from 'lucide-react'
 import type { View } from '../types'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 
@@ -56,9 +56,9 @@ function WindowChrome() {
   return <>
     <div className="window-drag-strip" data-tauri-drag-region onDoubleClick={() => void window.toggleMaximize().catch(() => undefined)}/>
     <div className="window-controls" aria-label="窗口控制">
-      <button type="button" aria-label="最小化" title="最小化" onClick={() => void window.minimize().catch(() => undefined)}>—</button>
-      <button type="button" aria-label="最大化或还原" title="最大化或还原" onClick={() => void window.toggleMaximize().catch(() => undefined)}>□</button>
-      <button type="button" className="window-controls__close" aria-label="关闭" title="关闭" onClick={() => void window.close().catch(() => undefined)}>×</button>
+      <button type="button" aria-label="最小化" title="最小化" onClick={() => void window.minimize().catch(() => undefined)}><Minus size={16} strokeWidth={1.5}/></button>
+      <button type="button" aria-label="最大化或还原" title="最大化或还原" onClick={() => void window.toggleMaximize().catch(() => undefined)}><Square size={12} strokeWidth={1.5}/></button>
+      <button type="button" className="window-controls__close" aria-label="关闭" title="关闭" onClick={() => void window.close().catch(() => undefined)}><X size={16} strokeWidth={1.5}/></button>
     </div>
   </>
 }
