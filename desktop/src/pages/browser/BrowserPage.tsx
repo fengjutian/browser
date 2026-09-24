@@ -1706,7 +1706,7 @@ export function BrowserPage({ visible = true, onSearchKnowledge }: { visible?: b
                 onDrop={onTabDrop(index)}
                 onDragEnd={onTabDragEnd}
                 className={`browser-tab-title${isDragging ? ' is-dragging' : ''}${isDropTarget ? ' is-drop-target' : ''}${tab.private ? ' browser-tab-title--private' : ''}`}
-              >{tab.crashed ? <WarningOutlined aria-label="标签页崩溃" className="browser-tab-crash"/> : tab.loading ? <LoadingOutlined spin/> : tab.private ? <LockOutlined /> : tab.favicon ? <img src={tab.favicon} alt=""/> : <GlobalOutlined/>}{tab.muted ? <Tooltip title="已静音" mouseEnterDelay={0.6}><AudioMutedOutlined aria-label="已静音" className="browser-tab-audio"/></Tooltip> : tab.audible ? <Tooltip title="正在播放音频" mouseEnterDelay={0.6}><SoundOutlined aria-label="正在播放音频" className="browser-tab-audio"/></Tooltip> : null}<span>{tab.title}</span></span>
+              >{tab.crashed ? <WarningOutlined aria-label="标签页崩溃" className="browser-tab-crash"/> : tab.loading ? <LoadingOutlined spin/> : tab.private ? <LockOutlined /> : <TabFavicon key={tab.favicon ?? tab.url} favicon={tab.favicon} pageUrl={tab.url}/>} {tab.muted ? <Tooltip title="已静音" mouseEnterDelay={0.6}><AudioMutedOutlined aria-label="已静音" className="browser-tab-audio"/></Tooltip> : tab.audible ? <Tooltip title="正在播放音频" mouseEnterDelay={0.6}><SoundOutlined aria-label="正在播放音频" className="browser-tab-audio"/></Tooltip> : null}<span>{tab.title}</span></span>
               </Tooltip>
             </Dropdown>,
             style: group.groupId ? ({ '--tab-group-color': groupColor } as CSSProperties) : undefined,
@@ -1975,3 +1975,20 @@ function BrowserErrorView({tab, onRetry, onNewTab, onCopy}:{tab:BrowserTab;onRet
   </div>
 }
 function ReaderArticleView({article}:{article:ReaderArticle}){return <article className="reader-document"><Typography.Text className="eyebrow">READER MODE · {article.wordCount} WORDS</Typography.Text><Typography.Title>{article.title}</Typography.Title>{article.byline&&<Typography.Text type="secondary">{article.byline}</Typography.Text>}<div className="reader-document__body" dangerouslySetInnerHTML={{__html:article.contentHtml}}/></article>}
+
+function faviconCandidates(favicon: string | undefined, pageUrl: string): string[] {
+  const candidates: string[] = []
+  if (favicon && (/^https:\/\//i.test(favicon) || /^data:image\//i.test(favicon))) candidates.push(favicon)
+  try {
+    const page = new URL(pageUrl)
+    if (page.protocol === 'https:') candidates.push(`${page.origin}/favicon.ico`)
+  } catch { /* invalid/new-tab URL */ }
+  return [...new Set(candidates)]
+}
+
+function TabFavicon({ favicon, pageUrl }: { favicon?: string; pageUrl: string }) {
+  const candidates = faviconCandidates(favicon, pageUrl)
+  const [index, setIndex] = useState(0)
+  if (!candidates[index]) return <GlobalOutlined aria-label="默认网站图标"/>
+  return <img src={candidates[index]} alt="" referrerPolicy="no-referrer" onError={() => setIndex(current => current + 1)}/>
+}
