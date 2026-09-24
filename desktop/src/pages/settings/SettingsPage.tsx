@@ -1,4 +1,4 @@
-import { Alert, Button, Card, Descriptions, Form, Input, InputNumber, List, message, Popconfirm, Segmented, Select, Space, Switch, Tabs, Tag, Typography } from '../../components/ui'
+import { Alert, Button, Card, Descriptions, Form, Input, InputNumber, List, message, Popconfirm, Segmented, Select, Space, Statistic, Switch, Tabs, Tag, Typography } from '../../components/ui'
 import { BgColorsOutlined, DeleteOutlined, KeyOutlined, MoonOutlined, SafetyCertificateOutlined, SaveOutlined, SearchOutlined, SunOutlined, ThunderboltOutlined } from '../../components/ui/icons'
 import { useEffect, useMemo, useState } from 'react'
 import { PageHeader } from '../../shared/components/PageHeader'
@@ -9,12 +9,13 @@ import { readThemePreference, writeThemePreference, type ThemePreference } from 
 import { readSearchEngineConfig, resolveActiveSearchTemplate, SEARCH_ENGINE_PRESETS, writeSearchEngineConfig } from '../../features/browser/searchEngine'
 import { isSearchTemplateValid } from '../../features/browser/navigation'
 import { HISTORY_CHANGE_EVENT, type HistoryEntry } from '../../features/history/dedupeHistory'
-import { buildVisitStats } from '../../features/history/visitStats'
+import { buildVisitStats, buildVisitTrend, filterVisitsByRange, type VisitTimeRange } from '../../features/history/visitStats'
 import { DEFAULT_ADVANCED_SETTINGS, readAdvancedSettings, writeAdvancedSettings, type AdvancedSettings } from '../../features/settings/advanced'
 import { isTrackingCleanerEnabled, setTrackingCleanerEnabled } from '../../features/plugins/trackingCleaner'
 import { isAdBlockerEnabled, setAdBlockerEnabled } from '../../features/plugins/adBlocker'
 import { deleteBrowserPassword, listBrowserPasswords, setNativeAdBlocking, type SavedCredential } from '../../services/nativeBrowser'
 import { PrivacyExportPanel } from '../../features/privacy/PrivacyExportPanel'
+import { getAdBlockStats, onAdBlockStatsChange, resetAdBlockStats, resetSessionAdBlockStats, type AdBlockStatsSnapshot } from '../../features/privacy/adBlockStats'
 import { getBrowserCapabilities, type BrowserCapabilities } from '../../services/browserCapabilities'
 import {
   bindingToDisplay,
@@ -325,7 +326,9 @@ function BrowserSettings() {
     }
   }
 
-  return <>{contextHolder}<Card title="浏览器" className="settings-card">
+  return <>{contextHolder}<Card title="浏览器" className="settings-card browser-settings-card">
+    <Tabs className="browser-settings-tabs privacy-section-tabs" tabPosition="top" defaultActiveKey="shortcuts" destroyOnHidden={false} items={[
+      { key: 'shortcuts', label: '键盘快捷键', children: <>
     <Typography.Title level={5}>键盘快捷键</Typography.Title>
     <Typography.Paragraph type="secondary">关闭后,浏览器视图不再拦截 Ctrl/Cmd + T、W、Tab、1-9、Alt + ←/→ 等全局快捷键,改由各 WebView 自行处理。</Typography.Paragraph>
     <Space>
@@ -354,8 +357,10 @@ function BrowserSettings() {
         })}
       </ul>
     </div>
-    <WorkspacesEditor/>
-    <Typography.Title level={5} style={{ marginTop: 24 }}>默认搜索引擎</Typography.Title>
+      </> },
+      { key: 'workspaces', label: '工作区', children: <WorkspacesEditor/> },
+      { key: 'search', label: '搜索引擎', children: <>
+    <Typography.Title level={5}>默认搜索引擎</Typography.Title>
     <Typography.Paragraph type="secondary">地址栏中非 URL 输入会展开为搜索引擎查询；模板必须包含 <code>{'{query}'}</code> 占位符。</Typography.Paragraph>
     <Segmented
       block
@@ -381,6 +386,8 @@ function BrowserSettings() {
     <Typography.Paragraph type="secondary" style={{ marginTop: 8 }}>
       当前模板：<Typography.Text code>{resolveActiveSearchTemplate(config)}</Typography.Text>
     </Typography.Paragraph>
+      </> },
+    ]}/>
   </Card></>
 }
 
@@ -609,7 +616,10 @@ function PrivacySettings() {
   const [snapshotStats, setSnapshotStats] = useState<ReadingSnapshotStats>({ count: 0, bytes: 0 })
   const [snapshotRetentionDays, setSnapshotRetentionDays] = useState(() => Number(localStorage.getItem('reading.snapshot.retentionDays') || 90))
   const [snapshotMaxMb, setSnapshotMaxMb] = useState(() => Number(localStorage.getItem('reading.snapshot.maxMb') || 200))
-  const visitStats = useMemo(() => buildVisitStats(historyEntries), [historyEntries])
+  const [visitTimeRange, setVisitTimeRange] = useState<VisitTimeRange>('7d')
+  const rangedVisits = useMemo(() => filterVisitsByRange(historyEntries, visitTimeRange), [historyEntries, visitTimeRange])
+  const visitStats = useMemo(() => buildVisitStats(rangedVisits), [rangedVisits])
+  const visitTrend = useMemo(() => buildVisitTrend(historyEntries, visitTimeRange), [historyEntries, visitTimeRange])
 
   useEffect(() => {
     let active = true
@@ -696,13 +706,22 @@ function PrivacySettings() {
 
   const categoryColors: Record<string, string> = { '开发技术':'#1677ff', '视频娱乐':'#9254de', '社交社区':'#13a8a8', '搜索工具':'#52c41a', '购物':'#fa8c16', '其他':'#8c8c8c' }
   const maxSiteVisits = Math.max(1, ...visitStats.sites.map(item => item.count))
+  const maxTrendVisits = Math.max(1, ...visitTrend.map(item => item.count))
   const statisticsContent = <div className="privacy-section visit-statistics">
+    <div className="visit-statistics__toolbar"><Typography.Text strong>统计时间</Typography.Text><Segmented value={visitTimeRange} onChange={value => setVisitTimeRange(value as VisitTimeRange)} options={[{label:'今天',value:'today'},{label:'最近 7 天',value:'7d'},{label:'最近 30 天',value:'30d'},{label:'全部',value:'all'}]}/></div>
     <div className="visit-statistics__summary">
-      <div><b>{visitStats.totalVisits}</b><span>历史访问</span></div>
+      <div><b>{visitStats.totalVisits}</b><span>所选时间内访问</span></div>
       <div><b>{visitStats.uniqueSites}</b><span>不同网站</span></div>
       <div><b>{visitStats.sites[0]?.label ?? '—'}</b><span>最常访问</span></div>
     </div>
     {visitStats.totalVisits === 0 ? <Alert type="info" showIcon message="暂无可统计的浏览历史"/> : <div className="visit-statistics__charts">
+      <section className="visit-chart visit-chart--trend" aria-label="访问次数时间趋势">
+        <Typography.Title level={5}>访问趋势</Typography.Title>
+        <Typography.Paragraph type="secondary">{visitTimeRange === 'today' ? '按小时统计今天的访问次数。' : visitTimeRange === 'all' ? '全部范围的趋势图展示最近 30 天。' : '按天统计所选时间范围的访问次数。'}</Typography.Paragraph>
+        <div className="visit-trend">{visitTrend.map((item, index) => <div className="visit-trend__column" key={item.key} title={`${item.label}：${item.count} 次`}>
+          <span>{item.count || ''}</span><i style={{height:`${item.count ? Math.max(6, item.count / maxTrendVisits * 100) : 2}%`}}/><small>{(visitTrend.length <= 7 || index % Math.ceil(visitTrend.length / 7) === 0 || index === visitTrend.length - 1) ? item.label : ''}</small>
+        </div>)}</div>
+      </section>
       <section className="visit-chart" aria-label="网站访问次数排行">
         <Typography.Title level={5}>网站访问次数</Typography.Title>
         <Typography.Paragraph type="secondary">按域名合并，显示访问次数最多的 10 个网站。</Typography.Paragraph>
@@ -749,6 +768,30 @@ function PrivacySettings() {
     <PrivacyExportPanel />
   </div>
 
+  const [adStats, setAdStats] = useState<AdBlockStatsSnapshot>(getAdBlockStats)
+
+  useEffect(() => onAdBlockStatsChange(stats => setAdStats({ ...stats, domainEntries: Object.entries(stats.byDomain).map(([domain, count]) => ({ domain, count })).sort((a, b) => b.count - a.count) })), [])
+
+  const adBlockContent = <div className="privacy-section">
+    <div className="adblock-stats__summary">
+      <Statistic title="总会话拦截" value={adStats.sessionBlocked} suffix="项" />
+      <Statistic title="历史总拦截" value={adStats.totalBlocked} suffix="项" />
+    </div>
+    {adStats.lastUpdated > 0 && <Typography.Paragraph type="secondary">最后拦截：{new Date(adStats.lastUpdated).toLocaleString()}</Typography.Paragraph>}
+    {adStats.domainEntries.length > 0
+      ? <><Typography.Title level={5}>按站点拦截排行</Typography.Title>
+        <List size="small" dataSource={adStats.domainEntries.slice(0, 20)} renderItem={entry => <List.Item><Typography.Text>{entry.domain}</Typography.Text><Tag>{entry.count}</Tag></List.Item>} />
+      </>
+      : <Alert type="info" showIcon message="尚无拦截记录" description="广告过滤启用后，每个站点的拦截数量会实时显示在这里。" />
+    }
+    <Space style={{ marginTop: 16 }}>
+      <Button onClick={() => { resetSessionAdBlockStats(); messageApi.success('已重置会话统计') }}>重置会话统计</Button>
+      <Popconfirm title="清空全部广告拦截统计？" description="历史总拦截和按站点数据都会被清除。" okText="清空" cancelText="取消" okButtonProps={{ danger: true }} onConfirm={() => { resetAdBlockStats(); messageApi.success('已清空全部拦截统计') }}>
+        <Button danger>清空全部统计</Button>
+      </Popconfirm>
+    </Space>
+  </div>
+
   const exitContent = <div className="privacy-section">
     <Typography.Paragraph type="secondary">控制应用正常退出时是否自动清理本地浏览痕迹。</Typography.Paragraph>
     <Space align="start">
@@ -760,6 +803,7 @@ function PrivacySettings() {
   return <>{contextHolder}<Card title="隐私与站点数据" className="settings-card privacy-settings-card"><Tabs className="privacy-section-tabs" defaultActiveKey="history" destroyOnHidden={false} items={[
     { key: 'private', label: '私密浏览', children: privateContent },
     { key: 'history', label: `浏览历史 ${historyEntries.length}`, children: historyContent },
+    { key: 'adblock', label: `广告拦截 ${adStats.totalBlocked}`, children: adBlockContent },
     { key: 'statistics', label: '访问统计', children: statisticsContent },
     { key: 'cleanup', label: '数据清理', children: cleanupContent },
     { key: 'snapshots', label: `阅读快照 ${snapshotStats.count}`, children: snapshotContent },
