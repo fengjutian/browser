@@ -15,7 +15,7 @@ export interface NativeToolbarMenuAction { tabId: string; action: string; value?
  * `version` field is always present on Rust-emitted events; consumers should
  * treat missing fields as v1.
  */
-interface NativeNewTabRequest { version: number; openerLabel: string; url: string }
+interface NativeNewTabRequest { version: number; openerLabel: string; url: string; private?: boolean }
 /**
  * v2 download progress payload emitted on `browser://download`. Legacy v1
  * fields (`tabLabel`, `url`, `path`, `status`) are preserved; new fields
@@ -46,12 +46,12 @@ const isTauri = () => '__TAURI_INTERNALS__' in window
 export const isNativeBrowserAvailable = (): boolean => isTauri()
 const labelFor = (tabId: string) => `browser-${tabId.replace(/[^a-zA-Z0-9-]/g, '-')}`
 
-export async function openNativeTab(tabId: string, url: string, bounds: BrowserBounds): Promise<boolean> {
+export async function openNativeTab(tabId: string, url: string, bounds: BrowserBounds, options: { private?: boolean } = {}): Promise<boolean> {
   if (!isTauri()) return false
   const label = labelFor(tabId)
   let webview = await Webview.getByLabel(label)
   if (!webview) {
-    await invoke('browser_create', { label, url, bounds, permissions: readSitePermissions(), adBlockEnabled: isAdBlockerEnabled() })
+    await invoke('browser_create', { label, url, bounds, permissions: readSitePermissions(), adBlockEnabled: isAdBlockerEnabled(), private: options.private === true })
     webview = await Webview.getByLabel(label)
     if (!webview) throw new Error('browser tab webview was not created')
   } else {
@@ -63,14 +63,14 @@ export async function openNativeTab(tabId: string, url: string, bounds: BrowserB
   return true
 }
 
-export async function ensureNativeTab(tabId: string, url: string, bounds: BrowserBounds): Promise<boolean> {
+export async function ensureNativeTab(tabId: string, url: string, bounds: BrowserBounds, options: { private?: boolean } = {}): Promise<boolean> {
   if (!isTauri()) return false
   const label = labelFor(tabId)
   const existing = await Webview.getByLabel(label)
   if (existing) {
     await invoke<string>('browser_navigate', { label, url })
   } else {
-    await invoke('browser_create', { label, url, bounds, permissions: readSitePermissions(), adBlockEnabled: isAdBlockerEnabled() })
+    await invoke('browser_create', { label, url, bounds, permissions: readSitePermissions(), adBlockEnabled: isAdBlockerEnabled(), private: options.private === true })
     const created = await Webview.getByLabel(label)
     if (!created) throw new Error('browser tab webview was not created')
   }
@@ -99,9 +99,9 @@ export async function setNativeAdBlocking(enabled: boolean): Promise<void> {
 }
 export async function captureNativePage(tabId: string): Promise<NativePageSnapshot> { const label=labels.get(tabId);if(!label)throw new Error('native webview is not available');return invoke<NativePageSnapshot>('browser_snapshot',{label}) }
 export function hasNativeTab(tabId: string): boolean { return labels.has(tabId) }
-export async function onNativeNewTab(handler: (url: string) => void): Promise<UnlistenFn> {
+export async function onNativeNewTab(handler: (url: string, options: { private: boolean }) => void): Promise<UnlistenFn> {
   if (!isTauri()) return () => undefined
-  return listen<NativeNewTabRequest>('browser://new-tab', event => handler(event.payload.url))
+  return listen<NativeNewTabRequest>('browser://new-tab', event => handler(event.payload.url, { private: event.payload.private === true }))
 }
 export async function onNativeDownload(handler: (download: NativeDownloadUpdate) => void): Promise<UnlistenFn> {
   if (!isTauri()) return () => undefined

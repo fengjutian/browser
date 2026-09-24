@@ -38,6 +38,7 @@ struct NewTabRequest {
     version: u32,
     opener_label: String,
     url: String,
+    private: bool,
 }
 
 #[derive(Clone, Serialize)]
@@ -520,6 +521,7 @@ async fn browser_create(
     bounds: BrowserBounds,
     permissions: Option<Vec<SitePermissionRule>>,
     ad_block_enabled: Option<bool>,
+    private: Option<bool>,
 ) -> Result<(), String> {
     validate_browser_label(&label)?;
     if app.get_webview(&label).is_some() {
@@ -531,7 +533,9 @@ async fn browser_create(
     let event_app = app.clone();
     let download_app = app.clone();
     let download_label = label.clone();
+    let private_mode = private.unwrap_or(false);
     let builder = tauri::webview::WebviewBuilder::new(&label, tauri::WebviewUrl::External(url))
+        .incognito(private_mode)
         .initialization_script(permission_guard_script(permissions.as_deref().unwrap_or(&[])))
         .initialization_script(context_menu_script())
         .initialization_script(ad_blocker_script(&label, ad_block_enabled.unwrap_or(true)))
@@ -544,6 +548,7 @@ async fn browser_create(
                         version: EVENT_PAYLOAD_VERSION,
                         opener_label: opener_label.clone(),
                         url: url.to_string(),
+                        private: private_mode,
                     },
                 );
             }
@@ -562,14 +567,14 @@ async fn browser_create(
                         .map(|s| s.to_owned())
                         .unwrap_or_else(|| "download".to_string());
                     tauri::async_runtime::spawn(async move {
-                        handle_download_started(app, label, url_str, dest_str, file_name).await;
+                        handle_download_started(app, label, url_str, dest_str, file_name, private_mode).await;
                     });
                 }
                 DownloadEvent::Finished { url, path, success } => {
                     let url_str = url.to_string();
                     let path_str = path.map(|value| value.to_string_lossy().into_owned());
                     tauri::async_runtime::spawn(async move {
-                        handle_download_finished(app, label, url_str, path_str, success).await;
+                        handle_download_finished(app, label, url_str, path_str, success, private_mode).await;
                     });
                 }
                 _ => {}
@@ -901,30 +906,33 @@ async fn handle_download_started(
     url: String,
     destination: String,
     file_name: String,
+    private: bool,
 ) {
     let id = uuid::Uuid::new_v4().to_string();
     let origin = source_origin_from_url(&url);
-    let database = match local_store::connection(&app) {
-        Ok(db) => db,
-        Err(error) => {
-            eprintln!("downloads: cannot open database: {error}");
+    if !private {
+        let database = match local_store::connection(&app) {
+            Ok(db) => db,
+            Err(error) => {
+                eprintln!("downloads: cannot open database: {error}");
+                return;
+            }
+        };
+        let record_input = downloads::RecordDownloadInput {
+            id: id.clone(),
+            url: url.clone(),
+            file_name: file_name.clone(),
+            target_path: Some(destination.clone()),
+            mime_type: None,
+            source_origin: origin.clone(),
+            source_tab_label: Some(tab_label.clone()),
+            private: false,
+            danger_type: None,
+        };
+        if let Err(error) = downloads::insert_download(&database, record_input) {
+            eprintln!("downloads: insert_download failed: {error}");
             return;
         }
-    };
-    let record_input = downloads::RecordDownloadInput {
-        id: id.clone(),
-        url: url.clone(),
-        file_name: file_name.clone(),
-        target_path: Some(destination.clone()),
-        mime_type: None,
-        source_origin: origin.clone(),
-        source_tab_label: Some(tab_label.clone()),
-        private: false,
-        danger_type: None,
-    };
-    if let Err(error) = downloads::insert_download(&database, record_input) {
-        eprintln!("downloads: insert_download failed: {error}");
-        return;
     }
     let index = app.state::<DownloadIndex>();
     index.remember(&url, &id);
@@ -943,7 +951,7 @@ async fn handle_download_started(
         status: "downloading".into(),
         danger_type: "none".into(),
         error_message: None,
-        private: false,
+        private,
         source_origin: origin,
     };
     let _ = app.emit_to("main", "browser://download", progress);
@@ -955,6 +963,7 @@ async fn handle_download_finished(
     url: String,
     final_path: Option<String>,
     success: bool,
+    private: bool,
 ) {
     let index = app.state::<DownloadIndex>();
     let id = match index.get(&url) {
@@ -962,35 +971,37 @@ async fn handle_download_finished(
         None => return, // finished without a Requested; rare but harmless
     };
     index.forget(&url);
-    let database = match local_store::connection(&app) {
-        Ok(db) => db,
-        Err(error) => {
-            eprintln!("downloads: cannot open database: {error}");
-            return;
-        }
-    };
     let status = if success {
         downloads::DownloadStatus::Completed
     } else {
         downloads::DownloadStatus::Failed
     };
-    let progress_input = downloads::DownloadProgressInput {
-        id: id.clone(),
-        received_bytes: -1, // unknown on Finished events
-        total_bytes: None,
-        status,
-        error_message: if success { None } else { Some("download failed".into()) },
-    };
-    if let Err(error) = downloads::update_progress(&database, progress_input) {
-        eprintln!("downloads: update_progress failed: {error}");
-    }
-    if let Some(path) = final_path.as_ref() {
-        // Patch the target_path in case WebView resolved a redirected filename.
-        if let Err(error) = database.execute(
-            "UPDATE downloads SET target_path=? WHERE id=?",
-            rusqlite::params![path, id],
-        ) {
-            eprintln!("downloads: target_path update failed: {error}");
+    if !private {
+        let database = match local_store::connection(&app) {
+            Ok(db) => db,
+            Err(error) => {
+                eprintln!("downloads: cannot open database: {error}");
+                return;
+            }
+        };
+        let progress_input = downloads::DownloadProgressInput {
+            id: id.clone(),
+            received_bytes: -1, // unknown on Finished events
+            total_bytes: None,
+            status,
+            error_message: if success { None } else { Some("download failed".into()) },
+        };
+        if let Err(error) = downloads::update_progress(&database, progress_input) {
+            eprintln!("downloads: update_progress failed: {error}");
+        }
+        if let Some(path) = final_path.as_ref() {
+            // Patch the target_path in case WebView resolved a redirected filename.
+            if let Err(error) = database.execute(
+                "UPDATE downloads SET target_path=? WHERE id=?",
+                rusqlite::params![path, id],
+            ) {
+                eprintln!("downloads: target_path update failed: {error}");
+            }
         }
     }
     let origin = source_origin_from_url(&url);
@@ -1009,7 +1020,7 @@ async fn handle_download_finished(
         status: if success { "completed".into() } else { "failed".into() },
         danger_type: "none".into(),
         error_message: if success { None } else { Some("download failed".into()) },
-        private: false,
+        private,
         source_origin: origin,
     };
     let _ = app.emit_to("main", "browser://download", progress);

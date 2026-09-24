@@ -338,7 +338,7 @@ export function BrowserPage({ visible = true, onSearchKnowledge }: { visible?: b
           if (!nextBounds) return
           await Promise.all(parsed.tabs.filter(tab => tab.url && (!tab.suspended || tab.id === parsed.activeTabId)).map(async tab => {
             try {
-              const opened = await ensureNativeTab(tab.id, tab.url, nextBounds)
+              const opened = await ensureNativeTab(tab.id, tab.url, nextBounds, { private: tab.private })
               if (!opened) {
                 setTabs(current => current.map(item => item.id === tab.id ? { ...item, error: { kind: 'web-mode-required', message: '网页浏览仅在 Tauri 桌面应用中可用。' } } : item))
                 return
@@ -456,7 +456,7 @@ export function BrowserPage({ visible = true, onSearchKnowledge }: { visible?: b
       if (!tab?.url || !nextBounds) return
       tabRuntime.enqueueScroll(tab.id, { x: tab.scrollX ?? 0, y: tab.scrollY ?? 0 })
       setTabs(current => current.map(item => item.id === tab.id ? { ...item, crashed: true, loading: true, error: undefined } : item))
-      void openNativeTab(tab.id, tab.url, nextBounds).catch(error => {
+      void openNativeTab(tab.id, tab.url, nextBounds, { private: tab.private }).catch(error => {
         setTabs(current => current.map(item => item.id === tab.id ? { ...item, loading: false, crashed: true, error: classifyNavigationError(error) } : item))
       })
     },
@@ -479,7 +479,7 @@ export function BrowserPage({ visible = true, onSearchKnowledge }: { visible?: b
   useEffect(() => {
     let disposed = false
     let unlisten: (() => void) | undefined
-    void onNativeNewTab(url => openNewTab(url)).then(stop => {
+    void onNativeNewTab((url, options) => openNewTab(url, options)).then(stop => {
       if (disposed) stop()
       else unlisten = stop
     })
@@ -632,7 +632,7 @@ export function BrowserPage({ visible = true, onSearchKnowledge }: { visible?: b
     const nextBounds = bounds()
     if (!nextBounds) return
     try {
-      const opened = await openNativeTab(tabId, url, nextBounds)
+      const opened = await openNativeTab(tabId, url, nextBounds, { private: active.private })
       if (!opened) {
         setTabs(current => current.map(tab => tab.id === tabId ? { ...tab, loading: false, error: { kind: 'web-mode-required', message: '网页浏览仅在 Tauri 桌面应用中可用。' } } : tab))
         return
@@ -685,7 +685,7 @@ export function BrowserPage({ visible = true, onSearchKnowledge }: { visible?: b
     setTabs(current => current.map(item => item.id === tab.id ? { ...item, suspended: false, loading: true, error: undefined } : item))
     try {
       tabRuntime.enqueueScroll(tab.id, { x: tab.scrollX ?? 0, y: tab.scrollY ?? 0 })
-      const opened = await ensureNativeTab(tab.id, tab.url, nextBounds)
+      const opened = await ensureNativeTab(tab.id, tab.url, nextBounds, { private: tab.private })
       if (!opened) throw new Error('网页浏览仅在 Tauri 桌面应用中可用。')
       if (visibleRef.current && activeTabIdRef.current === tab.id) await showNativeTab(tab.id)
       setTabs(current => current.map(item => item.id === tab.id ? { ...item, suspended: false, error: undefined } : item))
@@ -1021,7 +1021,7 @@ export function BrowserPage({ visible = true, onSearchKnowledge }: { visible?: b
     if (nextBounds) {
       await Promise.all(newOnes.map(async tab => {
         try {
-          const opened = await openNativeTab(tab.id, tab.url!, nextBounds)
+          const opened = await openNativeTab(tab.id, tab.url!, nextBounds, { private: tab.private })
           if (!opened) {
             setTabs(current => current.map(item => item.id === tab.id ? { ...item, loading: false, error: { kind: 'web-mode-required', message: '网页浏览仅在 Tauri 桌面应用中可用。' } } : item))
             return
@@ -1045,7 +1045,7 @@ export function BrowserPage({ visible = true, onSearchKnowledge }: { visible?: b
     const nextBounds = bounds()
     if (!nextBounds) return
     try {
-      await openNativeTab(target.id, target.url, nextBounds)
+      await openNativeTab(target.id, target.url, nextBounds, { private: target.private })
       await enforceLiveTabLimit(target.id)
     } catch (error) {
       setTabs(current => current.map(item => item.id === id ? { ...item, loading: false, error: classifyNavigationError(error) } : item))
@@ -1109,7 +1109,7 @@ export function BrowserPage({ visible = true, onSearchKnowledge }: { visible?: b
       // `suspended` until the user clicks them (handled by resumeTab).
       await Promise.all(next.filter(tab => tab.url && tab.id === activeId).map(async tab => {
         try {
-          const opened = await ensureNativeTab(tab.id, tab.url, nextBounds)
+          const opened = await ensureNativeTab(tab.id, tab.url, nextBounds, { private: tab.private })
           if (!opened) return
           tabRuntime.enqueueScroll(tab.id, { x: recoveredScroll[tab.id]?.x ?? 0, y: recoveredScroll[tab.id]?.y ?? 0 })
           if (visibleRef.current) await showNativeTab(tab.id)
@@ -1214,7 +1214,7 @@ export function BrowserPage({ visible = true, onSearchKnowledge }: { visible?: b
         const nextBounds = bounds()
         if (!nextBounds) return
         try {
-          const opened = await openNativeTab(tab.id, url, nextBounds)
+          const opened = await openNativeTab(tab.id, url, nextBounds, { private: tab.private })
           if (!opened) {
             setTabs(current => current.map(item => item.id === tab.id ? { ...item, loading: false, error: { kind: 'web-mode-required', message: '网页浏览仅在 Tauri 桌面应用中可用。' } } : item))
             return
@@ -1488,7 +1488,7 @@ export function BrowserPage({ visible = true, onSearchKnowledge }: { visible?: b
       const nextBounds = bounds()
       if (!nextBounds) return
       try {
-        await ensureNativeTab(tab.id, restored.url, nextBounds)
+        await ensureNativeTab(tab.id, restored.url, nextBounds, { private: tab.private })
         if (activeTabIdRef.current === tab.id) await showNativeTab(tab.id)
         setTabs(current => current.map(item => item.id === tab.id ? { ...item, error: undefined } : item))
         await enforceLiveTabLimit(tab.id)

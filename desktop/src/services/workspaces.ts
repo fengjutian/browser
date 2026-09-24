@@ -60,7 +60,9 @@ const FALLBACK_PAYLOAD: WorkspaceRecord['payload'] = { tabs: [] }
  * poll) are dropped because we cannot resume a transient network load.
  */
 export function snapshotTabsToPayload(tabs: readonly BrowserTabLike[]): WorkspaceRecord['payload'] {
-  const cleaned = tabs.map(tab => ({
+  // Private tabs must never cross the in-memory session boundary. Persisting
+  // them in a named workspace would leak both their URLs and titles.
+  const cleaned = tabs.filter(tab => tab.private !== true).map(tab => ({
     id: tab.id,
     url: tab.url,
     title: tab.title,
@@ -68,10 +70,10 @@ export function snapshotTabsToPayload(tabs: readonly BrowserTabLike[]): Workspac
     pinned: tab.pinned === true,
     muted: tab.muted === true,
     audible: tab.audible === true,
-    private: tab.private === true,
+    private: false,
     groupId: tab.groupId ?? null,
   }))
-  return { tabs: cleaned, activeTabId: tabs[0]?.id ?? '' }
+  return { tabs: cleaned, activeTabId: cleaned[0]?.id ?? '' }
 }
 
 export function emptyWorkspacePayload(): WorkspaceRecord['payload'] {
