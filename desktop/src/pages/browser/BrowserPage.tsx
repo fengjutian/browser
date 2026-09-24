@@ -4,7 +4,7 @@ import { ArrowDownOutlined, ArrowLeftOutlined, ArrowRightOutlined, ArrowUpOutlin
 import { Sparkles as RobotOutlined } from 'lucide-react'
 import type { BrowserTab, BrowserTabError } from '../../types'
 import { addBrowserHistory, deleteClosedTab, findDocumentByUrl, getBrowserShortcutsEnabled, getBrowserWorkspace, getDocument, listBrowserHistory, listClosedTabs, listSitePermissions, recordReadingActivity, saveBrowserWorkspace, saveClosedTab, saveDocument, setSession, toggleStarred } from '../../api'
-import { captureNativePage, closeNativeTab, ensureNativeTab, findInNativeTab, hasNativeTab, hideNativeTab, isNativeBrowserAvailable, navigateHistory, onNativeAdBlockUpdate, onNativeAudioState, onNativeNewTab, onNativeToolbarMenuAction, openNativeTab, printNativeTab, readNativeState, reloadNativeTab, resizeNativeTab, setNativeMuted, setNativeToolbarMenu, setNativeToolbarPanel, showNativeTab, stopNativeTab, zoomNativeTab } from '../../services/nativeBrowser'
+import { captureNativePage, clearNativePageData, closeNativeTab, editNativePage, ensureNativeTab, findInNativeTab, hasNativeTab, hideNativeTab, isNativeBrowserAvailable, navigateHistory, onNativeAdBlockUpdate, onNativeAudioState, onNativeNewTab, onNativeToolbarMenuAction, openNativeTab, printNativeTab, readNativeState, reloadNativeTab, resizeNativeTab, setNativeMuted, setNativeToolbarMenu, setNativeToolbarPanel, showNativeTab, stopNativeTab, zoomNativeTab } from '../../services/nativeBrowser'
 import { extractArticle } from '../../features/reader/extractArticle'
 import type { ReaderArticle } from '../../features/reader/types'
 import { classifySaveError } from '../../features/documents/saveClassifier'
@@ -200,6 +200,8 @@ export function BrowserPage({ visible = true, onSearchKnowledge }: { visible?: b
   const [blockedAdsByTab, setBlockedAdsByTab] = useState<Record<string, number>>({})
   const [toolbarOverlay, setToolbarOverlay] = useState<ToolbarOverlay | null>(null)
   const [modalOverlayCount, setModalOverlayCount] = useState(0)
+  const [sourceView, setSourceView] = useState<{ url: string; html: string } | null>(null)
+  const [clearSiteDataOpen, setClearSiteDataOpen] = useState(false)
   const surfaceRef = useRef<HTMLDivElement>(null)
   const addressRef = useRef<InputRef>(null)
   const previousTab = useRef<string | undefined>(undefined)
@@ -785,6 +787,7 @@ export function BrowserPage({ visible = true, onSearchKnowledge }: { visible?: b
       case 'zoom-out': changeZoom(active.id, -0.1); break
       case 'zoom-in': changeZoom(active.id, 0.1); break
       case 'zoom-reset': setZoom(active.id, 1); break
+      case 'clear-site-data': setClearSiteDataOpen(true); break
     }
   }
 
@@ -842,6 +845,7 @@ export function BrowserPage({ visible = true, onSearchKnowledge }: { visible?: b
     { key: 'toggle-notes', label: '网页笔记面板', extra: 'Ctrl+Shift+N', onClick: () => runBrowserMenuAction('toggle-notes') },
     { key: 'save-workspace', label: '保存当前标签为工作区', extra: 'Ctrl+Shift+W', icon: <SaveOutlined/>, disabled: tabs.length === 0, onClick: () => runBrowserMenuAction('save-workspace') },
     { key: 'print', label: '打印', icon: <PrinterOutlined/>, extra: 'Ctrl+P', disabled: !nativeMode, onClick: () => runBrowserMenuAction('print') },
+    { key: 'clear-site-data', label: '清除此网站数据', disabled: !active.url || !nativeMode, onClick: () => runBrowserMenuAction('clear-site-data') },
     { type: 'divider' },
     { key: 'new-private', label: '新建私密窗口', icon: <LockOutlined/>, extra: 'Shift+Ctrl+N', onClick: () => runBrowserMenuAction('new-private') },
     { key: 'fullscreen', label: isWindowFullscreen ? '退出全屏' : '进入全屏', icon: <FullscreenOutlined/>, extra: 'F11', onClick: () => runBrowserMenuAction('fullscreen') },
@@ -1181,13 +1185,15 @@ export function BrowserPage({ visible = true, onSearchKnowledge }: { visible?: b
       case 'stop': if (hasNativeTab(active.id)) void stopNativeTab(active.id); return
       case 'print': if (hasNativeTab(active.id)) void printNativeTab(active.id); return
       case 'view-source':
-        messageApi.info(`${active.title || '当前页'} · ${active.url || ''}`)
+        try { setSourceView(await captureNativePage(active.id)) }
+        catch (error) { messageApi.error(`无法读取页面源代码：${String(error)}`) }
         return
       case 'copy': await writeClipboard(request.selectionText ?? '', '选区'); return
       case 'cut':
       case 'paste':
       case 'select-all':
-        messageApi.info('请在网页内使用 Ctrl+X / Ctrl+V / Ctrl+A（受限于 WebView 边界）')
+        try { await editNativePage(active.id, action) }
+        catch (error) { messageApi.error(`编辑操作失败：${String(error)}`) }
         return
       case 'search-selection': if (request.selectionText) void navigate(`https://www.google.com/search?q=${encodeURIComponent(request.selectionText)}`); return
       case 'ask-ai':
@@ -1740,10 +1746,39 @@ export function BrowserPage({ visible = true, onSearchKnowledge }: { visible?: b
         canGoBack: !!active.canGoBack,
         canGoForward: !!active.canGoForward,
         canPrint: nativeMode,
-        canAskAi: false,
+        canAskAi: true,
       }}
       onAction={handleContextAction}
     />
+    <Modal
+      open={clearSiteDataOpen}
+      title="清除此网站数据"
+      okText="清除并重新加载"
+      cancelText="取消"
+      okButtonProps={{ danger: true }}
+      onCancel={() => setClearSiteDataOpen(false)}
+      onOk={async () => {
+        try {
+          await clearNativePageData(active.id)
+          setClearSiteDataOpen(false)
+          await reloadNativeTab(active.id)
+          messageApi.success('已清除当前网页可访问的站点数据')
+        } catch (error) { messageApi.error(`清除失败：${String(error)}`) }
+      }}
+    >
+      <Typography.Paragraph>将清除当前网站的普通 Cookie、本地存储、会话存储、Cache Storage 和 IndexedDB，然后重新加载页面。</Typography.Paragraph>
+      <Typography.Paragraph type="secondary">受 WebView2 接口限制，HTTP-only Cookie 和浏览器磁盘缓存可能仍需通过系统浏览器设置清理。</Typography.Paragraph>
+    </Modal>
+    <Modal
+      open={sourceView !== null}
+      title="页面源代码"
+      footer={null}
+      width="min(1100px, 92vw)"
+      onCancel={() => setSourceView(null)}
+      destroyOnHidden
+    >
+      {sourceView && <><Typography.Paragraph type="secondary" copyable>{sourceView.url}</Typography.Paragraph><pre style={{maxHeight:'70vh',overflow:'auto',whiteSpace:'pre-wrap',wordBreak:'break-word',padding:12,background:'#f6f8fa',borderRadius:8}}><code>{sourceView.html}</code></pre></>}
+    </Modal>
     <Modal
       open={pendingShellOpen !== null}
       title="打开外部应用"

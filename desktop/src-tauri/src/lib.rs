@@ -680,6 +680,30 @@ async fn browser_stop(app: tauri::AppHandle, label: String) -> Result<(), String
 }
 
 #[tauri::command]
+async fn browser_edit_action(app: tauri::AppHandle, label: String, action: String) -> Result<(), String> {
+    validate_browser_label(&label)?;
+    let script = match action.as_str() {
+        "cut" => "document.execCommand('cut')",
+        "paste" => "navigator.clipboard.readText().then(t=>document.execCommand('insertText',false,t)).catch(()=>{})",
+        "select-all" => "(()=>{const e=document.activeElement;if(e&&('select' in e)&&typeof e.select==='function')e.select();else document.execCommand('selectAll')})()",
+        _ => return Err("unsupported edit action".into()),
+    };
+    app.get_webview(&label)
+        .ok_or_else(|| "browser tab webview not found".to_string())?
+        .eval(script)
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+async fn browser_clear_page_data(app: tauri::AppHandle, label: String) -> Result<(), String> {
+    validate_browser_label(&label)?;
+    app.get_webview(&label)
+        .ok_or_else(|| "browser tab webview not found".to_string())?
+        .eval("(()=>{try{localStorage.clear()}catch{}try{sessionStorage.clear()}catch{}try{document.cookie.split(';').forEach(c=>{const n=c.split('=')[0].trim();document.cookie=n+'=;expires=Thu, 01 Jan 1970 00:00:00 GMT;path=/'})}catch{}try{caches.keys().then(keys=>Promise.all(keys.map(k=>caches.delete(k))))}catch{}try{indexedDB.databases?.().then(dbs=>dbs.forEach(db=>db.name&&indexedDB.deleteDatabase(db.name)))}catch{}})()")
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
 async fn browser_find(
     app: tauri::AppHandle,
     label: String,
@@ -821,14 +845,17 @@ fn browser_toolbar_menu(app: tauri::AppHandle, label: String, open: bool, zoom_p
           const items = [
             ['find','在页面中查找'],['tab-search','搜索标签页'],['history-search','浏览历史记录'],
             ['bookmark-add','收藏当前页'],['bookmarks','打开收藏夹'],['bulk-summary','多链接 AI 摘要'],
-            ['toggle-notes','网页笔记面板'],['save-workspace','保存当前标签为工作区'],['print','打印'],
+            ['toggle-notes','网页笔记面板'],['save-workspace','保存当前标签为工作区'],['print','打印'],['clear-site-data','清除此网站数据'],
             null,['new-private','新建私密窗口'],['fullscreen','进入全屏'],null
           ];
-          shadow.innerHTML = `<style>
+          const style = document.createElement('style');
+          style.textContent = `
             :host{{all:initial}} .menu{{font:14px/1.4 system-ui,"Microsoft YaHei",sans-serif;color:#202521;background:#fff;border:1px solid #d9dfda;border-radius:12px;box-shadow:0 12px 32px rgba(20,35,27,.18);padding:8px;width:224px;box-sizing:border-box}}
             button{{all:unset;box-sizing:border-box;display:block;width:100%;padding:9px 10px;border-radius:7px;cursor:pointer}} button:hover{{background:#edf5ef}} .sep{{height:1px;background:#e1e6e2;margin:5px 2px}} .zoom{{display:grid;grid-template-columns:34px 1fr 34px;align-items:center;gap:6px;padding:5px 3px}} .zoom button{{padding:6px;text-align:center;border:1px solid #d9dfda;background:#fff}} .zoom span{{text-align:center;font:13px system-ui}}
-          </style><div class="menu" role="menu"></div>`;
-          const menu = shadow.querySelector('.menu');
+          `;
+          const menu = document.createElement('div');
+          menu.className = 'menu'; menu.setAttribute('role', 'menu');
+          shadow.append(style, menu);
           for(const item of items) {{
             if(!item) {{ const sep=document.createElement('div'); sep.className='sep'; menu.append(sep); continue; }}
             const button=document.createElement('button'); button.type='button'; button.textContent=item[1]; button.onclick=()=>{{emit(item[0]);close(false)}}; menu.append(button);
@@ -1201,6 +1228,8 @@ pub fn run() {
             browser_navigate,
             browser_reload,
             browser_stop,
+            browser_edit_action,
+            browser_clear_page_data,
             browser_find,
             browser_zoom,
             browser_print,
