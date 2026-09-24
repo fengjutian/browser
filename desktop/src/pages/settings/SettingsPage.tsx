@@ -2,7 +2,7 @@ import { Alert, Button, Card, Descriptions, Form, Input, InputNumber, List, mess
 import { BgColorsOutlined, DeleteOutlined, KeyOutlined, MoonOutlined, SafetyCertificateOutlined, SaveOutlined, SunOutlined, ThunderboltOutlined } from '../../components/ui/icons'
 import { useEffect, useState } from 'react'
 import { PageHeader } from '../../shared/components/PageHeader'
-import { clearBrowserHistory, clearClosedTabs as clearClosedTabsInDb, deleteAIProvider, exportBackup, getAIProvider, getBrowserShortcutsEnabled, importBackup, listAIProviders, listBrowserHistory, replaceSitePermissions, saveAIProvider, aiTestProvider, setBrowserShortcutsEnabled, type AIProviderInput } from '../../api'
+import { clearBrowserHistory, clearClosedTabs as clearClosedTabsInDb, clearReadingSnapshots, deleteAIProvider, exportBackup, getAIProvider, getBrowserShortcutsEnabled, getReadingSnapshotStats, importBackup, listAIProviders, listBrowserHistory, purgeReadingSnapshots, replaceSitePermissions, saveAIProvider, aiTestProvider, setBrowserShortcutsEnabled, type AIProviderInput, type ReadingSnapshotStats } from '../../api'
 import type { AIProvider, AIProviderType } from '../../types'
 import { normalizeOrigin, readSitePermissions, writeSitePermissions, type SitePermissionKind, type SitePermissionRule } from '../../features/browser/sitePermissions'
 import { readThemePreference, writeThemePreference, type ThemePreference } from '../../features/settings/theme'
@@ -605,6 +605,9 @@ function PrivacySettings() {
   const [messageApi, contextHolder] = message.useMessage()
   const [historyEntries, setHistoryEntries] = useState<HistoryEntry[]>([])
   const [cleanupOnExit, setCleanupOnExit] = useState<boolean>(() => readCleanupOnExitPreference())
+  const [snapshotStats, setSnapshotStats] = useState<ReadingSnapshotStats>({ count: 0, bytes: 0 })
+  const [snapshotRetentionDays, setSnapshotRetentionDays] = useState(() => Number(localStorage.getItem('reading.snapshot.retentionDays') || 90))
+  const [snapshotMaxMb, setSnapshotMaxMb] = useState(() => Number(localStorage.getItem('reading.snapshot.maxMb') || 200))
 
   useEffect(() => {
     let active = true
@@ -613,6 +616,18 @@ function PrivacySettings() {
     })
     return () => { active = false }
   }, [])
+
+  useEffect(() => { void getReadingSnapshotStats().then(setSnapshotStats) }, [])
+
+  async function applySnapshotPolicy() {
+    const days = Math.max(1, Math.min(3650, Math.round(snapshotRetentionDays)))
+    const mb = Math.max(1, Math.min(10240, Math.round(snapshotMaxMb)))
+    localStorage.setItem('reading.snapshot.retentionDays', String(days))
+    localStorage.setItem('reading.snapshot.maxMb', String(mb))
+    const stats = await purgeReadingSnapshots(days, mb * 1024 * 1024)
+    setSnapshotRetentionDays(days); setSnapshotMaxMb(mb); setSnapshotStats(stats)
+    messageApi.success('阅读快照策略已应用')
+  }
 
   async function clearHistory(scope: 'hour' | 'day' | 'week' | 'all') {
     const all = historyEntries
@@ -686,6 +701,17 @@ function PrivacySettings() {
     </Space>
   </div>
 
+  const snapshotContent = <div className="privacy-section">
+    <Typography.Paragraph>当前保存 <b>{snapshotStats.count}</b> 个正文快照，占用 <b>{formatSnapshotBytes(snapshotStats.bytes)}</b>。清理快照不会删除阅读时间、滚动深度或浏览历史。</Typography.Paragraph>
+    <Space wrap align="end">
+      <label><Typography.Text type="secondary">保留天数</Typography.Text><InputNumber min={1} max={3650} value={snapshotRetentionDays} onChange={value=>setSnapshotRetentionDays(value ?? 90)}/></label>
+      <label><Typography.Text type="secondary">容量上限（MB）</Typography.Text><InputNumber min={1} max={10240} value={snapshotMaxMb} onChange={value=>setSnapshotMaxMb(value ?? 200)}/></label>
+      <Button type="primary" onClick={()=>void applySnapshotPolicy()}>应用并立即清理</Button>
+      <Popconfirm title="清空全部阅读正文快照？" description="基础阅读记录会保留。" onConfirm={()=>void clearReadingSnapshots().then(stats=>{setSnapshotStats(stats);messageApi.success('已清空全部阅读快照')})}><Button danger>清空全部快照</Button></Popconfirm>
+    </Space>
+    <Typography.Paragraph type="secondary" style={{marginTop:12}}>超过保留期限或容量上限时，优先删除最早采集的正文快照。</Typography.Paragraph>
+  </div>
+
   const exportContent = <div className="privacy-section">
     <Typography.Paragraph type="secondary">把历史 / 收藏 / 关闭的标签 / 下载记录 / 站点权限打包成 AES-GCM 加密 JSON。导入会按 URL 合并，不覆盖现有条目。</Typography.Paragraph>
     <PrivacyExportPanel />
@@ -703,9 +729,16 @@ function PrivacySettings() {
     { key: 'private', label: '私密浏览', children: privateContent },
     { key: 'history', label: `浏览历史 ${historyEntries.length}`, children: historyContent },
     { key: 'cleanup', label: '数据清理', children: cleanupContent },
+    { key: 'snapshots', label: `阅读快照 ${snapshotStats.count}`, children: snapshotContent },
     { key: 'export', label: '导入/导出', children: exportContent },
     { key: 'exit', label: '退出时', children: exitContent },
   ]}/></Card></>
+}
+
+function formatSnapshotBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
+  return `${(bytes / 1024 / 1024).toFixed(1)} MB`
 }
 
 const CLEANUP_ON_EXIT_KEY = 'browser.cleanupOnExit.v1'

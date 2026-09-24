@@ -237,6 +237,20 @@ export async function saveReadingSnapshot(input: { url:string; excerpt:string; m
   if (isTauri()) await invoke('local_save_reading_snapshot', input)
 }
 
+export interface ReadingSnapshotStats { count:number; bytes:number }
+export async function getReadingSnapshotStats(): Promise<ReadingSnapshotStats> {
+  return isTauri() ? invoke('local_reading_snapshot_stats') : { count:0, bytes:0 }
+}
+export async function deleteReadingSnapshot(url:string): Promise<void> {
+  if (isTauri()) await invoke('local_delete_reading_snapshot', { url })
+}
+export async function clearReadingSnapshots(): Promise<ReadingSnapshotStats> {
+  return isTauri() ? invoke('local_clear_reading_snapshots') : { count:0, bytes:0 }
+}
+export async function purgeReadingSnapshots(retentionDays:number, maxBytes:number): Promise<ReadingSnapshotStats> {
+  return isTauri() ? invoke('local_purge_reading_snapshots', { retentionDays, maxBytes }) : { count:0, bytes:0 }
+}
+
 export async function clearBrowserHistory(since?: number): Promise<number> {
   if (!isTauri()) {
     const entries = await listBrowserHistory()

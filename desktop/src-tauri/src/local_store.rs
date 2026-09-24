@@ -1,4 +1,4 @@
-use rusqlite::{params, Connection};
+use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -1258,6 +1258,14 @@ pub fn local_delete_reading_snapshot(app: tauri::AppHandle, url: String) -> Resu
         "UPDATE reading_activity SET excerpt=NULL,markdown=NULL,captured_at=NULL WHERE url=?1", params![url]
     ).map_err(|error| error.to_string())?;
     Ok(())
+}
+
+#[tauri::command]
+pub fn local_clear_reading_snapshots(app: tauri::AppHandle) -> Result<ReadingSnapshotStats, String> {
+    let database = connection(&app)?;
+    database.execute("UPDATE reading_activity SET excerpt=NULL,markdown=NULL,captured_at=NULL", [])
+        .map_err(|error| error.to_string())?;
+    reading_snapshot_stats(&database)
 }
 
 #[tauri::command]

@@ -3,7 +3,7 @@ import { AutoComplete, Badge, Button, Dropdown, Input, message, Modal, Popover, 
 import { ArrowDownOutlined, ArrowLeftOutlined, ArrowRightOutlined, ArrowUpOutlined, AudioMutedOutlined, BookOutlined, CheckCircleOutlined, CloseCircleOutlined, CloseOutlined, CopyOutlined, DownloadOutlined, FullscreenOutlined, GlobalOutlined, LoadingOutlined, MoreOutlined, PlusOutlined, PrinterOutlined, ReloadOutlined, SafetyCertificateOutlined, SaveOutlined, SearchOutlined, SoundOutlined, StarFilled, StarOutlined, ThunderboltOutlined, TranslationOutlined, WarningOutlined } from '../../components/ui/icons'
 import { Sparkles as RobotOutlined } from 'lucide-react'
 import type { BrowserTab, BrowserTabError } from '../../types'
-import { addBrowserHistory, deleteClosedTab, findDocumentByUrl, getBrowserShortcutsEnabled, getBrowserWorkspace, getDocument, listBrowserHistory, listClosedTabs, listSitePermissions, recordReadingActivity, saveBrowserWorkspace, saveClosedTab, saveDocument, saveReadingSnapshot, setSession, toggleStarred } from '../../api'
+import { addBrowserHistory, deleteClosedTab, findDocumentByUrl, getBrowserShortcutsEnabled, getBrowserWorkspace, getDocument, listBrowserHistory, listClosedTabs, listSitePermissions, purgeReadingSnapshots, recordReadingActivity, saveBrowserWorkspace, saveClosedTab, saveDocument, saveReadingSnapshot, setSession, toggleStarred } from '../../api'
 import { captureNativePage, clearNativePageData, closeNativeTab, editNativePage, ensureNativeTab, findInNativeTab, hasNativeTab, hideNativeTab, isNativeBrowserAvailable, navigateHistory, onNativeAdBlockUpdate, onNativeAudioState, onNativeNewTab, onNativeToolbarMenuAction, openNativeTab, printNativeTab, readNativeState, reloadNativeTab, resizeNativeTab, setNativeMuted, setNativeToolbarMenu, setNativeToolbarPanel, showNativeTab, stopNativeTab, zoomNativeTab } from '../../services/nativeBrowser'
 import { extractArticle } from '../../features/reader/extractArticle'
 import type { ReaderArticle } from '../../features/reader/types'
@@ -434,6 +434,11 @@ export function BrowserPage({ visible = true, onSearchKnowledge }: { visible?: b
         void captureNativePage(current.id)
           .then(snapshot => extractArticle(snapshot))
           .then(article => saveReadingSnapshot({ url: current.url, excerpt: article.excerpt, markdown: article.markdown }))
+          .then(() => {
+            const days = Number(localStorage.getItem('reading.snapshot.retentionDays') || 90)
+            const mb = Number(localStorage.getItem('reading.snapshot.maxMb') || 200)
+            return purgeReadingSnapshots(Number.isFinite(days) ? days : 90, (Number.isFinite(mb) ? mb : 200) * 1024 * 1024)
+          })
           .catch(() => snapshotAttemptedRef.current.delete(current.url))
       }
     }, 5_000)
