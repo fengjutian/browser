@@ -4,7 +4,7 @@ import { ArrowDownOutlined, ArrowLeftOutlined, ArrowRightOutlined, ArrowUpOutlin
 import { Sparkles as RobotOutlined } from 'lucide-react'
 import type { BrowserTab, BrowserTabError } from '../../types'
 import { addBrowserHistory, deleteClosedTab, findDocumentByUrl, getBrowserShortcutsEnabled, getBrowserWorkspace, getDocument, listBrowserHistory, listClosedTabs, listSitePermissions, purgeReadingSnapshots, recordReadingActivity, saveBrowserWorkspace, saveClosedTab, saveDocument, saveReadingSnapshot, setSession, toggleStarred } from '../../api'
-import { captureNativePage, clearNativePageData, closeNativeTab, diagnoseNativeNavigation, editNativePage, ensureNativeTab, findInNativeTab, hasNativeTab, hideNativeTab, isNativeBrowserAvailable, navigateHistory, onNativeAdBlockUpdate, onNativeAudioState, onNativeNewTab, onNativeToolbarMenuAction, openNativeDevtools, openNativeTab, printNativeTab, readNativeState, reloadNativeTab, resizeNativeTab, setNativeMuted, setNativeToolbarMenu, setNativeToolbarPanel, showNativeTab, stopNativeTab, zoomNativeTab } from '../../services/nativeBrowser'
+import { captureNativePage, captureNativeScreenshot, clearNativePageData, closeNativeTab, diagnoseNativeNavigation, editNativePage, ensureNativeTab, findInNativeTab, hasNativeTab, hideNativeTab, isNativeBrowserAvailable, navigateHistory, onNativeAdBlockUpdate, onNativeAudioState, onNativeNewTab, onNativeToolbarMenuAction, openNativeDevtools, openNativeTab, printNativeTab, readNativeState, reloadNativeTab, resizeNativeTab, setNativeMuted, setNativeToolbarMenu, setNativeToolbarPanel, showNativeTab, stopNativeTab, zoomNativeTab } from '../../services/nativeBrowser'
 import { extractArticle } from '../../features/reader/extractArticle'
 import type { ReaderArticle } from '../../features/reader/types'
 import { classifySaveError } from '../../features/documents/saveClassifier'
@@ -132,6 +132,10 @@ function classifyNavigationError(error: unknown): BrowserTabError {
     return { kind: 'unsupported-protocol', message: `不支持的协议：${scheme}://（应用仅打开 http/https 链接）` }
   }
   return { kind: 'load-failed', message }
+}
+
+function safeFileName(value: string): string {
+  return value.replace(/[<>:"/\\|?*\u0000-\u001f]/g, '_').replace(/[. ]+$/g, '').slice(0, 100) || '网页'
 }
 
 async function diagnoseNavigationError(url: string, error: unknown): Promise<BrowserTabError> {
@@ -813,6 +817,8 @@ export function BrowserPage({ visible = true, onSearchKnowledge }: { visible?: b
       case 'save-workspace': void saveAsWorkspace(); break
       case 'print': void printNativeTab(active.id); break
       case 'devtools': void openNativeDevtools(active.id); break
+      case 'screenshot-visible': void saveScreenshot(false); break
+      case 'screenshot-full': void saveScreenshot(true); break
       case 'translate-page':
         void openReader().then(() => { setAiTranslationSource(''); setAiInitialMode('translate'); setAiOpen(true) })
         break
@@ -823,6 +829,17 @@ export function BrowserPage({ visible = true, onSearchKnowledge }: { visible?: b
       case 'zoom-reset': setZoom(active.id, 1); break
       case 'clear-site-data': setClearSiteDataOpen(true); break
     }
+  }
+
+  async function saveScreenshot(fullPage: boolean) {
+    try {
+      const data = await captureNativeScreenshot(active.id, fullPage)
+      const link = document.createElement('a')
+      link.href = `data:image/png;base64,${data}`
+      link.download = `${safeFileName(active.title || '网页')}-${fullPage ? '整页' : '可视区域'}.png`
+      document.body.appendChild(link); link.click(); link.remove()
+      messageApi.success('截图已生成')
+    } catch (error) { messageApi.error(`截图失败：${String(error)}`) }
   }
 
   useEffect(() => {
@@ -881,6 +898,8 @@ export function BrowserPage({ visible = true, onSearchKnowledge }: { visible?: b
     { key: 'translate-page', label: '翻译当前网页', icon: <TranslationOutlined/>, disabled: !active.url, onClick: () => runBrowserMenuAction('translate-page') },
     { key: 'print', label: '打印 / 保存为 PDF', icon: <PrinterOutlined/>, extra: 'Ctrl+P', disabled: !nativeMode, onClick: () => runBrowserMenuAction('print') },
     { key: 'devtools', label: '开发者工具', extra: 'F12', disabled: !nativeMode, onClick: () => runBrowserMenuAction('devtools') },
+    { key: 'screenshot-visible', label: '截取可视区域', disabled: !nativeMode, onClick: () => runBrowserMenuAction('screenshot-visible') },
+    { key: 'screenshot-full', label: '截取整个网页', disabled: !nativeMode, onClick: () => runBrowserMenuAction('screenshot-full') },
     { key: 'clear-site-data', label: '清除此网站数据', disabled: !active.url || !nativeMode, onClick: () => runBrowserMenuAction('clear-site-data') },
     { type: 'divider' },
     { key: 'new-private', label: '新建私密窗口', icon: <LockOutlined/>, extra: 'Shift+Ctrl+N', onClick: () => runBrowserMenuAction('new-private') },

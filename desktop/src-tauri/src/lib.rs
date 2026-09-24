@@ -798,6 +798,45 @@ fn browser_open_devtools(app: tauri::AppHandle, label: String) -> Result<(), Str
     Ok(())
 }
 
+#[cfg(target_os = "windows")]
+#[tauri::command]
+fn browser_capture_screenshot(app: tauri::AppHandle, label: String, full_page: bool) -> Result<String, String> {
+    use std::sync::mpsc;
+    use webview2_com::{CallDevToolsProtocolMethodCompletedHandler, CoTaskMemPWSTR};
+    validate_browser_label(&label)?;
+    let view = app.get_webview(&label).ok_or_else(|| "browser tab webview not found".to_string())?;
+    let (sender, receiver) = mpsc::sync_channel(1);
+    view.with_webview(move |platform| {
+        let core = match unsafe { platform.controller().CoreWebView2() } {
+            Ok(core) => core,
+            Err(error) => { let _ = sender.send(Err(error.to_string())); return; }
+        };
+        let (callback_sender, callback_receiver) = mpsc::channel();
+        let handler = CallDevToolsProtocolMethodCompletedHandler::create(Box::new(move |status, result| {
+            let value = status.map(|_| result).map_err(|error| error.to_string());
+            let _ = callback_sender.send(value);
+            Ok(())
+        }));
+        let method = CoTaskMemPWSTR::from("Page.captureScreenshot");
+        let params = CoTaskMemPWSTR::from(if full_page { r#"{"format":"png","captureBeyondViewport":true,"fromSurface":true}"# } else { r#"{"format":"png","captureBeyondViewport":false,"fromSurface":true}"# });
+        let started = unsafe { core.CallDevToolsProtocolMethod(*method.as_ref().as_pcwstr(), *params.as_ref().as_pcwstr(), &handler) };
+        let result = match started {
+            Ok(()) => webview2_com::wait_with_pump(callback_receiver).map_err(|error| error.to_string()).and_then(|value| value),
+            Err(error) => Err(error.to_string()),
+        };
+        let _ = sender.send(result);
+    }).map_err(|error| error.to_string())?;
+    let raw = receiver.recv_timeout(Duration::from_secs(30)).map_err(|_| "screenshot timed out".to_string())??;
+    let value: serde_json::Value = serde_json::from_str(&raw).map_err(|error| error.to_string())?;
+    value.get("data").and_then(|item| item.as_str()).map(str::to_string).ok_or_else(|| "screenshot data missing".into())
+}
+
+#[cfg(not(target_os = "windows"))]
+#[tauri::command]
+fn browser_capture_screenshot(_app: tauri::AppHandle, _label: String, _full_page: bool) -> Result<String, String> {
+    Err("native screenshot is currently available on Windows/WebView2".into())
+}
+
 #[tauri::command]
 async fn browser_history(app: tauri::AppHandle, label: String, delta: i32) -> Result<(), String> {
     validate_browser_label(&label)?;
@@ -1288,6 +1327,7 @@ pub fn run() {
             browser_zoom,
             browser_print,
             browser_open_devtools,
+            browser_capture_screenshot,
             browser_history,
             browser_state,
             browser_diagnose_url,
