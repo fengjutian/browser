@@ -216,6 +216,18 @@ const MIGRATIONS: &[(i64, &str)] = &[
          ALTER TABLE reading_activity ADD COLUMN markdown TEXT;
          ALTER TABLE reading_activity ADD COLUMN captured_at INTEGER;",
     ),
+    (
+        16,
+        "CREATE TABLE saved_credentials (
+            id TEXT PRIMARY KEY,
+            origin TEXT NOT NULL,
+            username TEXT NOT NULL,
+            created_at INTEGER NOT NULL,
+            updated_at INTEGER NOT NULL,
+            UNIQUE(origin, username)
+        );
+        CREATE INDEX idx_saved_credentials_origin ON saved_credentials(origin);",
+    ),
 ];
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -325,6 +337,22 @@ pub struct LocalSitePermission {
     origin: String,
     permission_kind: String,
     decision: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SavedCredential {
+    id: String,
+    origin: String,
+    username: String,
+    updated_at: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AutofillCredential {
+    username: String,
+    password: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1494,6 +1522,66 @@ pub fn local_replace_site_permissions(app: tauri::AppHandle, permissions: Vec<Lo
         transaction.execute("INSERT INTO site_permissions(origin,permission_kind,decision,updated_at) VALUES(?,?,?,?)", params![permission.origin, permission.permission_kind, permission.decision, unix_seconds()]).map_err(|error| error.to_string())?;
     }
     transaction.commit().map_err(|error| error.to_string())
+}
+
+fn credential_key(id: &str) -> String { format!("browser-password:{id}") }
+
+fn validate_credential_origin(origin: &str) -> Result<(), String> {
+    let parsed = url::Url::parse(origin).map_err(|_| "invalid credential origin".to_string())?;
+    if parsed.scheme() != "https" || parsed.origin().ascii_serialization() != origin {
+        return Err("passwords can only be saved for an HTTPS origin".into());
+    }
+    Ok(())
+}
+
+#[tauri::command]
+pub fn browser_password_save(app: tauri::AppHandle, origin: String, username: String, password: String) -> Result<SavedCredential, String> {
+    validate_credential_origin(&origin)?;
+    let username = username.trim().to_string();
+    if username.is_empty() || username.len() > 320 || password.is_empty() || password.len() > 4096 { return Err("invalid username or password".into()) }
+    let database = connection(&app)?;
+    let existing: Option<String> = database.query_row("SELECT id FROM saved_credentials WHERE origin=? AND username=?", params![origin, username], |row| row.get(0)).optional().map_err(|e| e.to_string())?;
+    let id = existing.unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+    keyring_set(&credential_key(&id), &password)?;
+    let now = unix_seconds();
+    database.execute("INSERT INTO saved_credentials(id,origin,username,created_at,updated_at) VALUES(?,?,?,?,?) ON CONFLICT(origin,username) DO UPDATE SET updated_at=excluded.updated_at", params![id, origin, username, now, now]).map_err(|e| e.to_string())?;
+    Ok(SavedCredential { id, origin, username, updated_at: now })
+}
+
+#[tauri::command]
+pub fn browser_password_list(app: tauri::AppHandle) -> Result<Vec<SavedCredential>, String> {
+    let database = connection(&app)?;
+    let mut statement = database.prepare("SELECT id,origin,username,updated_at FROM saved_credentials ORDER BY updated_at DESC").map_err(|e| e.to_string())?;
+    let rows = statement.query_map([], |row| Ok(SavedCredential { id: row.get(0)?, origin: row.get(1)?, username: row.get(2)?, updated_at: row.get(3)? })).map_err(|e| e.to_string())?;
+    rows.collect::<Result<Vec<_>, _>>().map_err(|e| e.to_string())
+}
+
+pub(crate) fn password_for_origin(app: &tauri::AppHandle, origin: &str) -> Result<Option<AutofillCredential>, String> {
+    validate_credential_origin(origin)?;
+    let database = connection(app)?;
+    let row: Option<(String, String)> = database.query_row("SELECT id,username FROM saved_credentials WHERE origin=? ORDER BY updated_at DESC LIMIT 1", [origin], |row| Ok((row.get(0)?, row.get(1)?))).optional().map_err(|e| e.to_string())?;
+    let Some((id, username)) = row else { return Ok(None) };
+    let password = keyring::Entry::new(KEYRING_SERVICE, &credential_key(&id)).map_err(|e| e.to_string())?.get_password().map_err(|e| e.to_string())?;
+    Ok(Some(AutofillCredential { username, password }))
+}
+
+#[tauri::command]
+pub fn browser_password_delete(app: tauri::AppHandle, id: String) -> Result<bool, String> {
+    let database = connection(&app)?;
+    let changed = database.execute("DELETE FROM saved_credentials WHERE id=?", [&id]).map_err(|e| e.to_string())? > 0;
+    if changed { let _ = keyring_delete(&credential_key(&id)); }
+    Ok(changed)
+}
+
+#[tauri::command]
+pub fn browser_password_generate(length: Option<usize>) -> Result<String, String> {
+    let length = length.unwrap_or(20).clamp(16, 64);
+    let seed = format!("{}{}", uuid::Uuid::new_v4().simple(), uuid::Uuid::new_v4().simple());
+    let alphabet = b"ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789!@#$%^&*";
+    let mut out = String::with_capacity(length);
+    for (index, byte) in seed.bytes().enumerate().take(length.saturating_sub(4)) { out.push(alphabet[(byte as usize + index * 17) % alphabet.len()] as char); }
+    out.push_str("A9!a");
+    Ok(out.chars().take(length).collect())
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

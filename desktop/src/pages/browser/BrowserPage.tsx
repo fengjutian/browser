@@ -4,7 +4,7 @@ import { ArrowDownOutlined, ArrowLeftOutlined, ArrowRightOutlined, ArrowUpOutlin
 import { Sparkles as RobotOutlined } from 'lucide-react'
 import type { BrowserTab, BrowserTabError } from '../../types'
 import { addBrowserHistory, deleteClosedTab, findDocumentByUrl, getBrowserShortcutsEnabled, getBrowserWorkspace, getDocument, listBrowserHistory, listClosedTabs, listSitePermissions, purgeReadingSnapshots, recordReadingActivity, saveBrowserWorkspace, saveClosedTab, saveDocument, saveReadingSnapshot, setSession, toggleStarred } from '../../api'
-import { captureNativePage, captureNativeScreenshot, clearNativePageData, closeNativeTab, diagnoseNativeNavigation, editNativePage, ensureNativeTab, findInNativeTab, hasNativeTab, hideNativeTab, isNativeBrowserAvailable, navigateHistory, onNativeAdBlockUpdate, onNativeAudioState, onNativeNewTab, onNativeToolbarMenuAction, openNativeDevtools, openNativeTab, printNativeTab, readNativeState, reloadNativeTab, resizeNativeTab, setNativeMuted, setNativeToolbarMenu, setNativeToolbarPanel, showNativeTab, stopNativeTab, zoomNativeTab } from '../../services/nativeBrowser'
+import { captureNativePage, captureNativeScreenshot, clearNativePageData, closeNativeTab, diagnoseNativeNavigation, editNativePage, ensureNativeTab, findInNativeTab, generateBrowserPassword, hasNativeTab, hideNativeTab, isNativeBrowserAvailable, navigateHistory, onNativeAdBlockUpdate, onNativeAudioState, onNativeNewTab, onNativeToolbarMenuAction, onPasswordCandidate, openNativeDevtools, openNativeTab, printNativeTab, readNativeState, reloadNativeTab, resizeNativeTab, saveBrowserPassword, setNativeMuted, setNativeToolbarMenu, setNativeToolbarPanel, showNativeTab, stopNativeTab, zoomNativeTab, type PasswordCandidate } from '../../services/nativeBrowser'
 import { extractArticle } from '../../features/reader/extractArticle'
 import type { ReaderArticle } from '../../features/reader/types'
 import { classifySaveError } from '../../features/documents/saveClassifier'
@@ -219,6 +219,7 @@ export function BrowserPage({ visible = true, onSearchKnowledge }: { visible?: b
   const [modalOverlayCount, setModalOverlayCount] = useState(0)
   const [sourceView, setSourceView] = useState<{ url: string; html: string } | null>(null)
   const [clearSiteDataOpen, setClearSiteDataOpen] = useState(false)
+  const [passwordCandidate, setPasswordCandidate] = useState<PasswordCandidate | null>(null)
   const surfaceRef = useRef<HTMLDivElement>(null)
   const addressRef = useRef<InputRef>(null)
   const previousTab = useRef<string | undefined>(undefined)
@@ -545,6 +546,16 @@ export function BrowserPage({ visible = true, onSearchKnowledge }: { visible?: b
   useEffect(() => {
     let disposed = false
     let unlisten: (() => void) | undefined
+    void onPasswordCandidate(candidate => { if (!disposed) setPasswordCandidate(candidate) }).then(stop => {
+      if (disposed) stop()
+      else unlisten = stop
+    })
+    return () => { disposed = true; unlisten?.() }
+  }, [])
+
+  useEffect(() => {
+    let disposed = false
+    let unlisten: (() => void) | undefined
     void onNativeAudioState(state => {
       if (disposed) return
       setTabs(current => current.map(tab => tab.id === state.tabId
@@ -858,10 +869,10 @@ export function BrowserPage({ visible = true, onSearchKnowledge }: { visible?: b
   })
 
   function toggleBrowserMenu() {
-    const open = toolbarOverlay !== 'menu'
-    setToolbarOverlay(open ? 'menu' : null)
-    void setNativeToolbarMenu(active.id, open, Math.round((zoomLevels[active.id] ?? 1) * 100)).catch(() => {
-      setToolbarOverlay(null)
+    // Native popup menus are drawn by the OS above every child WebView. Keep
+    // the React dropdown closed so no hidden overlay state survives dismissal.
+    setToolbarOverlay(null)
+    void setNativeToolbarMenu(active.id, true, Math.round((zoomLevels[active.id] ?? 1) * 100)).catch(() => {
       messageApi.error('菜单浮层加载失败，请重启桌面应用后重试')
     })
   }
@@ -1834,6 +1845,34 @@ export function BrowserPage({ visible = true, onSearchKnowledge }: { visible?: b
     >
       <Typography.Paragraph>将清除 WebView2 Profile 中的全部 Cookie（包括 HTTP-only Cookie）、磁盘缓存、Cache Storage 与 Service Worker，并清除当前网页的本地存储、会话存储和 IndexedDB。</Typography.Paragraph>
       <Typography.Paragraph type="secondary">Cookie 与磁盘缓存由同一浏览器 Profile 共享，因此其他已打开网站可能需要重新登录或重新加载。</Typography.Paragraph>
+    </Modal>
+    <Modal
+      open={passwordCandidate !== null}
+      title="保存密码"
+      okText="保存到系统密码库"
+      cancelText="暂不保存"
+      onCancel={() => setPasswordCandidate(null)}
+      onOk={async () => {
+        if (!passwordCandidate) return
+        try {
+          await saveBrowserPassword(passwordCandidate)
+          setPasswordCandidate(null)
+          messageApi.success('密码已安全保存，之后访问该网站会自动填充')
+        } catch (error) { messageApi.error(`保存密码失败：${String(error)}`) }
+      }}
+    >
+      {passwordCandidate && <Space direction="vertical" style={{width:'100%'}}>
+        <Typography.Text type="secondary">仅为 HTTPS 网站保存；密码正文写入操作系统凭据保险库，数据库只保存网站和用户名。</Typography.Text>
+        <Typography.Text copyable>{passwordCandidate.origin}</Typography.Text>
+        <Input value={passwordCandidate.username} onChange={event => setPasswordCandidate(current => current ? {...current, username:event.target.value} : current)} placeholder="用户名" />
+        <Input.Password value={passwordCandidate.password} onChange={event => setPasswordCandidate(current => current ? {...current, password:event.target.value} : current)} placeholder="密码" />
+        <Button onClick={async () => {
+          const password = await generateBrowserPassword(20)
+          setPasswordCandidate(current => current ? {...current, password} : current)
+          await navigator.clipboard.writeText(password).catch(() => undefined)
+          messageApi.success('已生成强密码并复制，可粘贴到网页密码框')
+        }}>生成强密码并复制</Button>
+      </Space>}
     </Modal>
     <Modal
       open={sourceView !== null}

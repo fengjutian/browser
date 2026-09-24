@@ -8,6 +8,7 @@ pub mod webview_compat;
 pub mod certificate_guard;
 pub mod bookmarks;
 pub mod process_memory;
+pub mod permission_guard;
 
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
@@ -16,8 +17,9 @@ use std::collections::HashMap;
 use std::sync::Mutex;
 use std::time::Duration;
 use tauri::image::Image;
+use tauri::menu::MenuBuilder;
 use tauri::webview::DownloadEvent;
-use tauri::{Emitter, Manager};
+use tauri::{Emitter, LogicalPosition, Manager};
 
 use crate::providers::{AiProvider, ChatMessage, ChatRequest, ChatResponse};
 
@@ -49,6 +51,10 @@ struct PermissionRequestPayload {
     origin: String,
     kind: String,
 }
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PasswordCandidatePayload { origin: String, username: String, password: String }
 
 /// v2 download progress payload. The legacy v1 fields (`tabLabel`, `url`,
 /// `path`, `status`) are preserved so existing consumers keep working; new
@@ -162,7 +168,7 @@ fn browser_capabilities() -> BrowserCapabilities {
         download_progress_bytes: true,   // tauri::webview::DownloadEvent::Progress
         download_pause_resume: false,    // not exposed by Tauri 2 stable; would need reqwest streaming
         download_cancel: true,           // return false from on_download Requested
-        native_permission_events: false, // Tauri 2 stable does not surface PermissionRequested
+        native_permission_events: cfg!(target_os = "windows"),
         native_context_menu: false,      // wry has no context-menu integration in stable
         clear_site_data: cfg!(target_os = "windows"),
         certificate_error_interceptor: cfg!(target_os = "windows"),
@@ -576,6 +582,35 @@ fn audio_monitor_script(label: &str) -> String {
     }})()"#)
 }
 
+fn password_manager_script(label: &str, private_mode: bool) -> String {
+    if private_mode { return "(()=>{})()".into() }
+    let label = serde_json::to_string(label).unwrap_or_else(|_| "\"\"".into());
+    format!(r#"(() => {{
+      const label={label};
+      const fields=()=>Array.from(document.querySelectorAll('input'));
+      const fill=async()=>{{
+        if(location.protocol!=='https:')return;
+        try{{
+          const item=await window.__TAURI_INTERNALS__.invoke('browser_password_autofill',{{label,origin:location.origin}});
+          if(!item)return;
+          const password=fields().find(input=>input.type==='password'&&!input.value);
+          const username=fields().find(input=>!input.value&&(input.autocomplete==='username'||input.type==='email'||input.name?.toLowerCase().includes('user')));
+          const set=(input,value)=>{{if(!input)return;const setter=Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value')?.set;setter?.call(input,value);input.dispatchEvent(new Event('input',{{bubbles:true}}));input.dispatchEvent(new Event('change',{{bubbles:true}}));}};
+          set(username,item.username);set(password,item.password);
+        }}catch{{}}
+      }};
+      document.addEventListener('submit',event=>{{
+        if(location.protocol!=='https:')return;
+        const form=event.target; if(!(form instanceof HTMLFormElement))return;
+        const inputs=Array.from(form.querySelectorAll('input'));
+        const password=inputs.find(input=>input.type==='password'&&input.value);
+        const username=inputs.find(input=>input.autocomplete==='username'||input.type==='email'||input.name?.toLowerCase().includes('user'));
+        if(password&&username?.value)window.__TAURI_INTERNALS__.invoke('browser_password_candidate',{{label,origin:location.origin,username:username.value,password:password.value}}).catch(()=>undefined);
+      }},true);
+      if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',fill,{{once:true}});else fill();
+    }})()"#)
+}
+
 #[tauri::command]
 async fn browser_create(
     app: tauri::AppHandle,
@@ -602,6 +637,7 @@ async fn browser_create(
         .initialization_script(permission_guard_script(permissions.as_deref().unwrap_or(&[])))
         .initialization_script(context_menu_script())
         .initialization_script(audio_monitor_script(&label))
+        .initialization_script(password_manager_script(&label, private_mode))
         .initialization_script(ad_blocker_script(&label, ad_block_enabled.unwrap_or(true)))
         .on_new_window(move |url, _features| {
             if matches!(url.scheme(), "http" | "https") {
@@ -658,6 +694,7 @@ async fn browser_create(
     // Intercept WebView2 certificate failures and defer the navigation until
     // the user explicitly rejects it or allows this navigation once.
     certificate_guard::attach_certificate_guard(&app, &label);
+    permission_guard::attach_permission_guard(&app, &label, permissions.unwrap_or_default());
     let navs = app.state::<NavStacks>();
     let mut guard = navs.stacks.lock().map_err(|_| "nav stack poisoned".to_string())?;
     let stack = guard.entry(label).or_default();
@@ -963,7 +1000,7 @@ fn browser_restore_scroll(app: tauri::AppHandle, label: String, x: f64, y: f64) 
 }
 
 #[tauri::command]
-fn browser_toolbar_menu(app: tauri::AppHandle, label: String, open: bool, zoom_percent: u16) -> Result<(), String> {
+fn browser_toolbar_menu_in_page(app: tauri::AppHandle, label: String, open: bool, zoom_percent: u16) -> Result<(), String> {
     validate_browser_label(&label)?;
     let webview = app
         .get_webview(&label)
@@ -1009,6 +1046,48 @@ fn browser_toolbar_menu(app: tauri::AppHandle, label: String, open: bool, zoom_p
         }})()"#)
     };
     webview.eval(script).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn browser_toolbar_menu(app: tauri::AppHandle, label: String, open: bool, zoom_percent: u16) -> Result<(), String> {
+    validate_browser_label(&label)?;
+    if !open {
+        return Ok(());
+    }
+    let id = |action: &str| format!("browser-toolbar|{label}|{action}");
+    let menu = MenuBuilder::new(&app)
+        .text(id("find"), "在页面中查找\tCtrl+F")
+        .text(id("tab-search"), "搜索标签页\tCtrl+K")
+        .text(id("history-search"), "浏览历史记录\tCtrl+H")
+        .text(id("bookmark-add"), "收藏当前页\tCtrl+D")
+        .text(id("bookmarks"), "打开收藏夹\tCtrl+Shift+O")
+        .text(id("bulk-summary"), "多链接 AI 摘要\tCtrl+Shift+S")
+        .text(id("toggle-notes"), "网页笔记面板\tCtrl+Shift+N")
+        .text(id("save-workspace"), "保存当前标签为工作区\tCtrl+Shift+W")
+        .text(id("translate-page"), "翻译当前网页")
+        .text(id("print"), "打印 / 保存为 PDF\tCtrl+P")
+        .text(id("screenshot-visible"), "截取可视区域")
+        .text(id("screenshot-full"), "截取整个网页")
+        .text(id("devtools"), "开发者工具")
+        .text(id("clear-site-data"), "清除此网站数据")
+        .separator()
+        .text(id("new-private"), "新建私密窗口\tCtrl+Shift+N")
+        .text(id("fullscreen"), "进入/退出全屏\tF11")
+        .separator()
+        .text(id("zoom-out"), "缩小\t−")
+        .text(id("zoom-in"), "放大\t+")
+        .text(id("zoom-reset"), format!("重置缩放（{zoom_percent}%）\tCtrl+0"))
+        .build()
+        .map_err(|error| error.to_string())?;
+    let window = app
+        .get_webview_window("main")
+        .ok_or_else(|| "main window not found".to_string())?;
+    let size = window.inner_size().map_err(|error| error.to_string())?;
+    let scale = window.scale_factor().map_err(|error| error.to_string())?;
+    let x = (size.width as f64 / scale - 248.0).max(0.0);
+    window
+        .popup_menu_at(&menu, LogicalPosition::new(x, 104.0))
+        .map_err(|error| error.to_string())
 }
 
 #[tauri::command]
@@ -1350,6 +1429,16 @@ pub fn run() {
             }
             Ok(())
         })
+        .on_menu_event(|app, event| {
+            let raw: &str = event.id().as_ref();
+            let Some(rest) = raw.strip_prefix("browser-toolbar|") else { return };
+            let Some((tab_label, action)) = rest.rsplit_once('|') else { return };
+            let _ = app.emit_to("main", "browser://toolbar-menu-action", serde_json::json!({
+                "version": 1,
+                "tabLabel": tab_label,
+                "action": action,
+            }));
+        })
         .on_window_event(|window, event| {
             // Tauri 2 surfaces WindowEvent::CloseRequested for every window;
             // we treat any of them as a graceful exit and clear the lock.
@@ -1388,6 +1477,12 @@ pub fn run() {
             browser_capabilities,
             browser_permission_request,
             browser_permission_respond,
+            browser_password_autofill,
+            browser_password_candidate,
+            local_store::browser_password_save,
+            local_store::browser_password_list,
+            local_store::browser_password_delete,
+            local_store::browser_password_generate,
             downloads::download_list,
             downloads::download_get,
             downloads::download_remove_record,
@@ -1517,8 +1612,34 @@ fn browser_permission_respond(
     request_id: String,
     allow: bool,
 ) -> Result<bool, String> {
+    if let Some(resolved) = permission_guard::respond_native(&app, &request_id, allow)? {
+        return Ok(resolved);
+    }
     let waiters = app.state::<PermissionWaiters>();
     Ok(waiters.resolve(&request_id, allow))
+}
+
+fn validate_password_origin(app: &tauri::AppHandle, label: &str, origin: &str) -> Result<(), String> {
+    validate_browser_label(label)?;
+    let view = app.get_webview(label).ok_or_else(|| "browser tab webview not found".to_string())?;
+    let current = view.url().map_err(|error| error.to_string())?;
+    if current.scheme() != "https" || current.origin().ascii_serialization() != origin {
+        return Err("credential origin does not match the requesting page".into());
+    }
+    Ok(())
+}
+
+#[tauri::command]
+fn browser_password_autofill(app: tauri::AppHandle, label: String, origin: String) -> Result<Option<local_store::AutofillCredential>, String> {
+    validate_password_origin(&app, &label, &origin)?;
+    local_store::password_for_origin(&app, &origin)
+}
+
+#[tauri::command]
+fn browser_password_candidate(app: tauri::AppHandle, label: String, origin: String, username: String, password: String) -> Result<(), String> {
+    validate_password_origin(&app, &label, &origin)?;
+    if username.is_empty() || password.is_empty() || username.len() > 320 || password.len() > 4096 { return Err("invalid credential candidate".into()) }
+    app.emit_to("main", "browser://password-candidate", PasswordCandidatePayload { origin, username, password }).map_err(|error| error.to_string())
 }
 
 #[cfg(test)]
@@ -1570,7 +1691,7 @@ mod tests {
         assert!(caps.download_progress_bytes, "Tauri 2 DownloadEvent::Progress is observable");
         assert!(!caps.download_pause_resume, "no pause/resume API in stable");
         assert!(caps.download_cancel, "Requested handler returning false cancels");
-        assert!(!caps.native_permission_events, "PermissionRequested not in Tauri 2 stable");
+        assert_eq!(caps.native_permission_events, cfg!(target_os = "windows"));
         assert!(!caps.native_context_menu, "wry has no context menu integration");
         assert_eq!(caps.clear_site_data, cfg!(target_os = "windows"));
         assert_eq!(caps.certificate_error_interceptor, cfg!(target_os = "windows"));

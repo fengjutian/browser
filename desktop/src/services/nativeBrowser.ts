@@ -13,6 +13,17 @@ interface NativeToolbarMenuEvent { version: number; tabLabel: string; action: st
 export interface NativeToolbarMenuAction { tabId: string; action: string; value?: string }
 interface NativeAudioStateEvent { version: number; tabLabel: string; audible: boolean; muted: boolean }
 export interface NativeAudioState { tabId: string; audible: boolean; muted: boolean }
+export interface PasswordCandidate { origin: string; username: string; password: string }
+export interface SavedCredential { id: string; origin: string; username: string; updatedAt: number }
+
+export async function onPasswordCandidate(handler: (candidate: PasswordCandidate) => void): Promise<UnlistenFn> {
+  if (!isTauri()) return () => undefined
+  return listen<PasswordCandidate>('browser://password-candidate', event => handler(event.payload))
+}
+export async function saveBrowserPassword(candidate: PasswordCandidate): Promise<SavedCredential> { return invoke('browser_password_save', { origin: candidate.origin, username: candidate.username, password: candidate.password }) }
+export async function listBrowserPasswords(): Promise<SavedCredential[]> { return isTauri() ? invoke('browser_password_list') : [] }
+export async function deleteBrowserPassword(id: string): Promise<boolean> { return isTauri() ? invoke('browser_password_delete', { id }) : false }
+export async function generateBrowserPassword(length = 20): Promise<string> { return invoke('browser_password_generate', { length }) }
 /**
  * v1: openerLabel + url. Future revisions may add origin, gesture, etc. The
  * `version` field is always present on Rust-emitted events; consumers should
