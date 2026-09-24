@@ -210,6 +210,12 @@ const MIGRATIONS: &[(i64, &str)] = &[
         );
         CREATE INDEX idx_reading_activity_last_visited ON reading_activity(last_visited_at DESC);",
     ),
+    (
+        15,
+        "ALTER TABLE reading_activity ADD COLUMN excerpt TEXT;
+         ALTER TABLE reading_activity ADD COLUMN markdown TEXT;
+         ALTER TABLE reading_activity ADD COLUMN captured_at INTEGER;",
+    ),
 ];
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -256,6 +262,9 @@ pub struct LocalReadingActivity {
     active_seconds: i64,
     max_scroll_depth: f64,
     visit_count: i64,
+    excerpt: Option<String>,
+    markdown: Option<String>,
+    captured_at: Option<i64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1204,13 +1213,27 @@ pub fn local_record_reading_activity(
 pub fn local_list_reading_activity(app: tauri::AppHandle) -> Result<Vec<LocalReadingActivity>, String> {
     let database = connection(&app)?;
     let mut statement = database.prepare(
-        "SELECT url,title,first_visited_at,last_visited_at,active_seconds,max_scroll_depth,visit_count FROM reading_activity ORDER BY last_visited_at DESC"
+        "SELECT url,title,first_visited_at,last_visited_at,active_seconds,max_scroll_depth,visit_count,excerpt,markdown,captured_at FROM reading_activity ORDER BY last_visited_at DESC"
     ).map_err(|error| error.to_string())?;
     let rows = statement.query_map([], |row| Ok(LocalReadingActivity {
         url: row.get(0)?, title: row.get(1)?, first_visited_at: row.get(2)?, last_visited_at: row.get(3)?,
         active_seconds: row.get(4)?, max_scroll_depth: row.get(5)?, visit_count: row.get(6)?,
+        excerpt: row.get(7)?, markdown: row.get(8)?, captured_at: row.get(9)?,
     })).map_err(|error| error.to_string())?;
     rows.collect::<Result<Vec<_>, _>>().map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub fn local_save_reading_snapshot(app: tauri::AppHandle, url: String, excerpt: String, markdown: String) -> Result<(), String> {
+    if url.len() > 8192 || excerpt.len() > 16_384 || markdown.len() > 4 * 1024 * 1024 {
+        return Err("reading snapshot is too large".into());
+    }
+    let updated = connection(&app)?.execute(
+        "UPDATE reading_activity SET excerpt=?2,markdown=?3,captured_at=?4 WHERE url=?1",
+        params![url, excerpt, markdown, unix_seconds()],
+    ).map_err(|error| error.to_string())?;
+    if updated == 0 { return Err("reading activity not found".into()); }
+    Ok(())
 }
 
 #[tauri::command]

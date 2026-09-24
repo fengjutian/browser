@@ -233,6 +233,10 @@ export async function listReadingActivity(): Promise<ReadingActivity[]> {
   return isTauri() ? invoke<ReadingActivity[]>('local_list_reading_activity') : []
 }
 
+export async function saveReadingSnapshot(input: { url:string; excerpt:string; markdown:string }): Promise<void> {
+  if (isTauri()) await invoke('local_save_reading_snapshot', input)
+}
+
 export async function clearBrowserHistory(since?: number): Promise<number> {
   if (!isTauri()) {
     const entries = await listBrowserHistory()

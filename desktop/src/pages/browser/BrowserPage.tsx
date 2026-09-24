@@ -3,7 +3,7 @@ import { AutoComplete, Badge, Button, Dropdown, Input, message, Modal, Popover, 
 import { ArrowDownOutlined, ArrowLeftOutlined, ArrowRightOutlined, ArrowUpOutlined, AudioMutedOutlined, BookOutlined, CheckCircleOutlined, CloseCircleOutlined, CloseOutlined, CopyOutlined, DownloadOutlined, FullscreenOutlined, GlobalOutlined, LoadingOutlined, MoreOutlined, PlusOutlined, PrinterOutlined, ReloadOutlined, SafetyCertificateOutlined, SaveOutlined, SearchOutlined, SoundOutlined, StarFilled, StarOutlined, ThunderboltOutlined, TranslationOutlined, WarningOutlined } from '../../components/ui/icons'
 import { Sparkles as RobotOutlined } from 'lucide-react'
 import type { BrowserTab, BrowserTabError } from '../../types'
-import { addBrowserHistory, deleteClosedTab, findDocumentByUrl, getBrowserShortcutsEnabled, getBrowserWorkspace, getDocument, listBrowserHistory, listClosedTabs, listSitePermissions, recordReadingActivity, saveBrowserWorkspace, saveClosedTab, saveDocument, setSession, toggleStarred } from '../../api'
+import { addBrowserHistory, deleteClosedTab, findDocumentByUrl, getBrowserShortcutsEnabled, getBrowserWorkspace, getDocument, listBrowserHistory, listClosedTabs, listSitePermissions, recordReadingActivity, saveBrowserWorkspace, saveClosedTab, saveDocument, saveReadingSnapshot, setSession, toggleStarred } from '../../api'
 import { captureNativePage, clearNativePageData, closeNativeTab, editNativePage, ensureNativeTab, findInNativeTab, hasNativeTab, hideNativeTab, isNativeBrowserAvailable, navigateHistory, onNativeAdBlockUpdate, onNativeAudioState, onNativeNewTab, onNativeToolbarMenuAction, openNativeTab, printNativeTab, readNativeState, reloadNativeTab, resizeNativeTab, setNativeMuted, setNativeToolbarMenu, setNativeToolbarPanel, showNativeTab, stopNativeTab, zoomNativeTab } from '../../services/nativeBrowser'
 import { extractArticle } from '../../features/reader/extractArticle'
 import type { ReaderArticle } from '../../features/reader/types'
@@ -220,6 +220,8 @@ export function BrowserPage({ visible = true, onSearchKnowledge }: { visible?: b
   const lastActiveAtRef = useRef(new Map<string, number>([['new', Date.now()]]))
   const lastHistoryUrl = useRef<string>('')
   const shortcutsEnabledRef = useRef(getBrowserShortcutsEnabled())
+  const readingSecondsRef = useRef(new Map<string, number>())
+  const snapshotAttemptedRef = useRef(new Set<string>())
   const active = tabs.find(tab => tab.id === activeTabId) ?? tabs[0]
   const nativeMode = hasNativeTab(active.id)
   const searchTemplate = useMemo(() => resolveActiveSearchTemplate(readSearchEngineConfig()), [])
@@ -425,6 +427,15 @@ export function BrowserPage({ visible = true, onSearchKnowledge }: { visible?: b
       const current = tabsRef.current.find(tab => tab.id === active.id)
       if (!current || current.private || current.loading || !/^https?:\/\//.test(current.url)) return
       void recordReadingActivity({ url: current.url, title: current.title || current.url, activeSeconds: 5, scrollDepth: current.scrollDepth ?? 0 }).catch(() => undefined)
+      const seconds = (readingSecondsRef.current.get(current.url) ?? 0) + 5
+      readingSecondsRef.current.set(current.url, seconds)
+      if (seconds >= 30 && (current.scrollDepth ?? 0) >= .2 && !snapshotAttemptedRef.current.has(current.url)) {
+        snapshotAttemptedRef.current.add(current.url)
+        void captureNativePage(current.id)
+          .then(snapshot => extractArticle(snapshot))
+          .then(article => saveReadingSnapshot({ url: current.url, excerpt: article.excerpt, markdown: article.markdown }))
+          .catch(() => snapshotAttemptedRef.current.delete(current.url))
+      }
     }, 5_000)
     return () => window.clearInterval(timer)
   }, [active.id, active.url, active.loading, active.private, visible])

@@ -1285,6 +1285,7 @@ pub fn run() {
             local_store::local_list_history,
             local_store::local_record_reading_activity,
             local_store::local_list_reading_activity,
+            local_store::local_save_reading_snapshot,
             local_store::local_add_history,
             local_store::local_clear_history,
             local_store::local_get_browser_workspace,
