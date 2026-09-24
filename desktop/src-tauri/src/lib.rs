@@ -242,13 +242,16 @@ fn context_menu_script() -> String {
             if (linkUrl && imageUrl) break;
             node = node.parentElement;
           }
-          const selectionText = window.getSelection ? String(window.getSelection() || '') : '';
+          const selection = window.getSelection ? window.getSelection() : null;
+          const selectionText = selection ? String(selection) : '';
+          const rect = selection && selection.rangeCount ? selection.getRangeAt(0).getBoundingClientRect() : null;
+          const selectionRect = rect && rect.width > 0 && rect.height > 0 ? { x: rect.x, y: rect.y, width: rect.width, height: rect.height } : null;
           let kind;
           if (imageUrl) kind = 'image';
           else if (linkUrl) kind = 'link';
           else if (selectionText && selectionText.length > 0) kind = 'selection';
           else kind = 'page';
-          emit({ kind, clientX: event.clientX, clientY: event.clientY, selectionText, linkUrl, imageUrl, editable: false });
+          emit({ kind, clientX: event.clientX, clientY: event.clientY, selectionText, selectionRect, linkUrl, imageUrl, editable: false });
         } catch (error) {
           emit({ kind: 'page', clientX: event.clientX, clientY: event.clientY, selectionText: '', linkUrl: null, imageUrl: null, editable: false });
         }
@@ -799,8 +802,13 @@ fn browser_open_devtools(app: tauri::AppHandle, label: String) -> Result<(), Str
 }
 
 #[cfg(target_os = "windows")]
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ScreenshotClip { x: f64, y: f64, width: f64, height: f64 }
+
+#[cfg(target_os = "windows")]
 #[tauri::command]
-fn browser_capture_screenshot(app: tauri::AppHandle, label: String, full_page: bool) -> Result<String, String> {
+fn browser_capture_screenshot(app: tauri::AppHandle, label: String, full_page: bool, clip: Option<ScreenshotClip>) -> Result<String, String> {
     use std::sync::mpsc;
     use webview2_com::{CallDevToolsProtocolMethodCompletedHandler, CoTaskMemPWSTR};
     validate_browser_label(&label)?;
@@ -818,7 +826,11 @@ fn browser_capture_screenshot(app: tauri::AppHandle, label: String, full_page: b
             Ok(())
         }));
         let method = CoTaskMemPWSTR::from("Page.captureScreenshot");
-        let params = CoTaskMemPWSTR::from(if full_page { r#"{"format":"png","captureBeyondViewport":true,"fromSurface":true}"# } else { r#"{"format":"png","captureBeyondViewport":false,"fromSurface":true}"# });
+        let params_value = if let Some(clip) = clip {
+            serde_json::json!({"format":"png","fromSurface":true,"clip":{"x":clip.x.max(0.0),"y":clip.y.max(0.0),"width":clip.width.max(1.0),"height":clip.height.max(1.0),"scale":1}})
+        } else { serde_json::json!({"format":"png","captureBeyondViewport":full_page,"fromSurface":true}) };
+        let params_json = params_value.to_string();
+        let params = CoTaskMemPWSTR::from(params_json.as_str());
         let started = unsafe { core.CallDevToolsProtocolMethod(*method.as_ref().as_pcwstr(), *params.as_ref().as_pcwstr(), &handler) };
         let result = match started {
             Ok(()) => webview2_com::wait_with_pump(callback_receiver).map_err(|error| error.to_string()).and_then(|value| value),
@@ -833,7 +845,7 @@ fn browser_capture_screenshot(app: tauri::AppHandle, label: String, full_page: b
 
 #[cfg(not(target_os = "windows"))]
 #[tauri::command]
-fn browser_capture_screenshot(_app: tauri::AppHandle, _label: String, _full_page: bool) -> Result<String, String> {
+fn browser_capture_screenshot(_app: tauri::AppHandle, _label: String, _full_page: bool, _clip: Option<serde_json::Value>) -> Result<String, String> {
     Err("native screenshot is currently available on Windows/WebView2".into())
 }
 
@@ -933,7 +945,7 @@ fn browser_toolbar_menu(app: tauri::AppHandle, label: String, open: bool, zoom_p
           const items = [
             ['find','在页面中查找'],['tab-search','搜索标签页'],['history-search','浏览历史记录'],
             ['bookmark-add','收藏当前页'],['bookmarks','打开收藏夹'],['bulk-summary','多链接 AI 摘要'],
-            ['toggle-notes','网页笔记面板'],['save-workspace','保存当前标签为工作区'],['translate-page','翻译当前网页'],['print','打印 / 保存为 PDF'],['devtools','开发者工具'],['clear-site-data','清除此网站数据'],
+            ['toggle-notes','网页笔记面板'],['save-workspace','保存当前标签为工作区'],['translate-page','翻译当前网页'],['print','打印 / 保存为 PDF'],['screenshot-visible','截取可视区域'],['screenshot-full','截取整个网页'],['devtools','开发者工具'],['clear-site-data','清除此网站数据'],
             null,['new-private','新建私密窗口'],['fullscreen','进入全屏'],null
           ];
           const style = document.createElement('style');

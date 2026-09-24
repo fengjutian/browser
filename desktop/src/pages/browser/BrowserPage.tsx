@@ -831,12 +831,12 @@ export function BrowserPage({ visible = true, onSearchKnowledge }: { visible?: b
     }
   }
 
-  async function saveScreenshot(fullPage: boolean) {
+  async function saveScreenshot(fullPage: boolean, clip?: {x:number;y:number;width:number;height:number}) {
     try {
-      const data = await captureNativeScreenshot(active.id, fullPage)
+      const data = await captureNativeScreenshot(active.id, fullPage, clip)
       const link = document.createElement('a')
       link.href = `data:image/png;base64,${data}`
-      link.download = `${safeFileName(active.title || '网页')}-${fullPage ? '整页' : '可视区域'}.png`
+      link.download = `${safeFileName(active.title || '网页')}-${clip ? '选区' : fullPage ? '整页' : '可视区域'}.png`
       document.body.appendChild(link); link.click(); link.remove()
       messageApi.success('截图已生成')
     } catch (error) { messageApi.error(`截图失败：${String(error)}`) }
@@ -1218,7 +1218,7 @@ export function BrowserPage({ visible = true, onSearchKnowledge }: { visible?: b
     })
   }
 
-  async function handleContextAction(action: ContextMenuAction, request: { linkUrl: string | null; imageUrl: string | null; selectionText: string }) {
+  async function handleContextAction(action: ContextMenuAction, request: { linkUrl: string | null; imageUrl: string | null; selectionText: string; selectionRect?: {x:number;y:number;width:number;height:number}|null }) {
   if (action === 'add-to-notes') {
     const text = request.selectionText?.trim()
     if (!text) { messageApi.info('请先选中文本'); return }
@@ -1263,6 +1263,9 @@ export function BrowserPage({ visible = true, onSearchKnowledge }: { visible?: b
         setAiTranslationSource(request.selectionText || '')
         setAiInitialMode('translate')
         setAiOpen(true)
+        return
+      case 'screenshot-selection':
+        if (request.selectionRect) await saveScreenshot(false, request.selectionRect)
         return
       case 'open-link-current': if (request.linkUrl) void navigate(request.linkUrl); return
       case 'open-link-new': if (request.linkUrl) openNewTab(request.linkUrl); return

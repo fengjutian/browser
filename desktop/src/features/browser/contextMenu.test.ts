@@ -34,11 +34,12 @@ describe('buildContextMenu', () => {
   it('selection region exposes notes, AI question, and translation actions', () => {
     const { sections } = buildContextMenu({ ...baseRequest, kind: 'selection', selectionText: 'hello world' }, caps)
     const items = sections.flatMap(s => s.items)
-    expect(items.map(i => i.action)).toEqual(['copy', 'search-selection', 'add-to-notes', 'ask-ai', 'translate-selection'])
+    expect(items.map(i => i.action)).toEqual(['copy', 'search-selection', 'add-to-notes', 'ask-ai', 'translate-selection', 'screenshot-selection'])
     const ai = items.find(i => i.action === 'ask-ai')!
     expect(ai.enabled).toBe(false)
     expect(ai.disabledReason).toBeTruthy()
     expect(items.find(i => i.action === 'translate-selection')?.enabled).toBe(false)
+    expect(items.find(i => i.action === 'screenshot-selection')?.enabled).toBe(false)
     const add = items.find(i => i.action === 'add-to-notes')!
     expect(add.enabled).toBe(true)
   })

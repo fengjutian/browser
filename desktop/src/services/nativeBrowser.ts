@@ -94,7 +94,7 @@ export async function findInNativeTab(tabId: string, query: string, backwards = 
 export async function zoomNativeTab(tabId: string, scale: number): Promise<void> { const label=labels.get(tabId);if(label)await invoke('browser_zoom',{label,scale}) }
 export async function printNativeTab(tabId: string): Promise<void> { const label=labels.get(tabId);if(label)await invoke('browser_print',{label}) }
 export async function openNativeDevtools(tabId: string): Promise<void> { const label=labels.get(tabId);if(label)await invoke('browser_open_devtools',{label}) }
-export async function captureNativeScreenshot(tabId:string, fullPage:boolean): Promise<string> { const label=labels.get(tabId);if(!label)throw new Error('native webview is not available');return invoke<string>('browser_capture_screenshot',{label,fullPage}) }
+export async function captureNativeScreenshot(tabId:string, fullPage:boolean, clip?:{x:number;y:number;width:number;height:number}): Promise<string> { const label=labels.get(tabId);if(!label)throw new Error('native webview is not available');return invoke<string>('browser_capture_screenshot',{label,fullPage,clip:clip??null}) }
 export async function navigateHistory(tabId: string, delta: -1|1): Promise<void> { const label=labels.get(tabId);if(label)await invoke('browser_history',{label,delta}) }
 export async function readNativeState(tabId: string): Promise<NativeBrowserState | null> { const label=labels.get(tabId);return label ? invoke<NativeBrowserState>('browser_state',{label}) : null }
 export async function diagnoseNativeNavigation(url:string): Promise<NetworkDiagnosis> { return invoke<NetworkDiagnosis>('browser_diagnose_url',{url}) }
@@ -146,6 +146,7 @@ export interface ContextMenuRequest {
   linkUrl: string | null
   imageUrl: string | null
   editable: boolean
+  selectionRect?: { x:number; y:number; width:number; height:number } | null
 }
 
 const CONTEXT_MENU_PAYLOAD_VERSION = 1
