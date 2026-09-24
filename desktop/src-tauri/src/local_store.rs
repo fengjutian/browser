@@ -267,6 +267,10 @@ pub struct LocalReadingActivity {
     captured_at: Option<i64>,
 }
 
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReadingSnapshotStats { count: i64, bytes: i64 }
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct LocalBrowserWorkspace {
@@ -1236,6 +1240,47 @@ pub fn local_save_reading_snapshot(app: tauri::AppHandle, url: String, excerpt: 
     Ok(())
 }
 
+fn reading_snapshot_stats(database: &Connection) -> Result<ReadingSnapshotStats, String> {
+    database.query_row(
+        "SELECT COUNT(markdown),COALESCE(SUM(LENGTH(CAST(markdown AS BLOB))+LENGTH(CAST(COALESCE(excerpt,'') AS BLOB))),0) FROM reading_activity WHERE markdown IS NOT NULL",
+        [], |row| Ok(ReadingSnapshotStats { count: row.get(0)?, bytes: row.get(1)? })
+    ).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub fn local_reading_snapshot_stats(app: tauri::AppHandle) -> Result<ReadingSnapshotStats, String> {
+    reading_snapshot_stats(&connection(&app)?)
+}
+
+#[tauri::command]
+pub fn local_delete_reading_snapshot(app: tauri::AppHandle, url: String) -> Result<(), String> {
+    connection(&app)?.execute(
+        "UPDATE reading_activity SET excerpt=NULL,markdown=NULL,captured_at=NULL WHERE url=?1", params![url]
+    ).map_err(|error| error.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+pub fn local_purge_reading_snapshots(app: tauri::AppHandle, retention_days: i64, max_bytes: i64) -> Result<ReadingSnapshotStats, String> {
+    if !(1..=3650).contains(&retention_days) || !(1024 * 1024..=10 * 1024 * 1024 * 1024_i64).contains(&max_bytes) {
+        return Err("invalid snapshot retention settings".into());
+    }
+    let database = connection(&app)?;
+    let cutoff = unix_seconds() - retention_days * 86_400;
+    database.execute(
+        "UPDATE reading_activity SET excerpt=NULL,markdown=NULL,captured_at=NULL WHERE captured_at IS NOT NULL AND captured_at<?1", params![cutoff]
+    ).map_err(|error| error.to_string())?;
+    while reading_snapshot_stats(&database)?.bytes > max_bytes {
+        let url: Option<String> = database.query_row(
+            "SELECT url FROM reading_activity WHERE markdown IS NOT NULL ORDER BY captured_at ASC LIMIT 1", [], |row| row.get(0)
+        ).optional().map_err(|error| error.to_string())?;
+        let Some(url) = url else { break };
+        database.execute("UPDATE reading_activity SET excerpt=NULL,markdown=NULL,captured_at=NULL WHERE url=?1", params![url])
+            .map_err(|error| error.to_string())?;
+    }
+    reading_snapshot_stats(&database)
+}
+
 #[tauri::command]
 pub fn local_add_history(app: tauri::AppHandle, entry: LocalHistoryEntry) -> Result<(), String> {
     validate_history_entry(&entry)?;
@@ -1600,7 +1645,7 @@ mod tests {
             .unwrap()
             .collect::<Result<Vec<_>, _>>()
             .unwrap();
-        assert_eq!(versions, vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14]);
+        assert_eq!(versions, vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]);
     }
 
     #[test]
@@ -1632,7 +1677,7 @@ mod tests {
             .unwrap()
             .collect::<Result<Vec<_>, _>>()
             .unwrap();
-        assert_eq!(versions, vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14]);
+        assert_eq!(versions, vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]);
     }
 
     #[test]
@@ -1648,7 +1693,7 @@ mod tests {
             .unwrap()
             .collect::<Result<Vec<_>, _>>()
             .unwrap();
-        assert_eq!(versions, vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14]);
+        assert_eq!(versions, vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]);
     }
 
     #[test]

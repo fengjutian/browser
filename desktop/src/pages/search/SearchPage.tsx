@@ -1,4 +1,4 @@
-import { Empty, Input, List, Segmented, Select, Space, Statistic, Tag, Typography } from '../../components/ui'
+import { Button, Empty, Input, List, Modal, Segmented, Select, Space, Statistic, Tag, Typography } from '../../components/ui'
 import { FileSearchOutlined, RightOutlined, SearchOutlined } from '../../components/ui/icons'
 import { Fragment, useEffect, useMemo, useState } from 'react'
 import { PageHeader } from '../../shared/components/PageHeader'
@@ -15,6 +15,7 @@ export function SearchPage({ initialQuery = '', onOpenUrl }: { initialQuery?: st
   const [documents, setDocuments] = useState<Document[]>([])
   const [reading, setReading] = useState<ReadingActivity[]>([])
   const [selected, setSelected] = useState<Document | null>(null)
+  const [selectedReading, setSelectedReading] = useState<ReadingActivity | null>(null)
   const [loading, setLoading] = useState(false)
   const [unavailable, setUnavailable] = useState(false)
   const [tagFilter, setTagFilter] = useState<string[]>([])
@@ -51,7 +52,7 @@ export function SearchPage({ initialQuery = '', onOpenUrl }: { initialQuery?: st
     return reading.filter(item => {
       if (savedUrls.has(item.url) || readingStatus(item) === 'seen') return false
       if (!lower) return true
-      return item.title.toLowerCase().includes(lower) || item.url.toLowerCase().includes(lower)
+      return item.title.toLowerCase().includes(lower) || item.url.toLowerCase().includes(lower) || (item.markdown ?? '').toLowerCase().includes(lower)
     })
   }, [documents, reading, debouncedQuery])
 
@@ -105,7 +106,8 @@ export function SearchPage({ initialQuery = '', onOpenUrl }: { initialQuery?: st
       {durationMs !== null && <Statistic title="耗时" value={durationMs} suffix="ms" valueStyle={{fontSize:14}}/>}
     </Space>
     <List loading={loading} className="search-results" dataSource={filtered} locale={{ emptyText: unsavedReading.length ? null : <Empty description={emptyText}/> }} renderItem={item => { const activity=readingByUrl.get(item.url); return <List.Item onClick={() => setSelected(item)} className="search-result-clickable" actions={[<RightOutlined key="open"/>]}><List.Item.Meta avatar={<span className="result-icon"><FileSearchOutlined/></span>} title={<Highlight text={item.title} terms={terms}/>} description={<><Space size={4}>{item.tags.map(tag => <Tag className={tagFilter.includes(tag) ? 'search-tag is-active' : 'search-tag'} key={tag}>{tag}</Tag>)}{activity && <Tag color={readingStatus(activity)==='deep'?'green':'blue'}>{readingLabel(activity)}</Tag>}</Space><Typography.Paragraph ellipsis={{ rows: 2, expandable: false }}><Highlight text={extractSummary(item.summary, item.markdown)} terms={terms}/></Typography.Paragraph></>}/></List.Item> }}/>
-    {unsavedReading.length > 0 && <><Typography.Title level={4}>读过但未保存</Typography.Title><List className="search-results" dataSource={unsavedReading} renderItem={item => <List.Item onClick={() => onOpenUrl?.(item.url)} className="search-result-clickable" actions={[<RightOutlined key="reopen"/>]}><List.Item.Meta avatar={<span className="result-icon"><SearchOutlined/></span>} title={<Highlight text={item.title || item.url} terms={terms}/>} description={<><Space size={4}><Tag color={readingStatus(item)==='deep'?'green':'blue'}>{readingLabel(item)}</Tag><Tag>未保存</Tag></Space><Typography.Paragraph ellipsis={{ rows: 1, expandable: false }}>{item.url}</Typography.Paragraph></>}/></List.Item>}/></>}
+    {unsavedReading.length > 0 && <><Typography.Title level={4}>读过但未保存</Typography.Title><List className="search-results" dataSource={unsavedReading} renderItem={item => <List.Item onClick={() => item.markdown ? setSelectedReading(item) : onOpenUrl?.(item.url)} className="search-result-clickable" actions={[<RightOutlined key="open"/>]}><List.Item.Meta avatar={<span className="result-icon"><SearchOutlined/></span>} title={<Highlight text={item.title || item.url} terms={terms}/>} description={<><Space size={4}><Tag color={readingStatus(item)==='deep'?'green':'blue'}>{readingLabel(item)}</Tag><Tag>{item.markdown ? '正文快照' : '未保存'}</Tag></Space><Typography.Paragraph ellipsis={{ rows: 2, expandable: false }}><Highlight text={item.excerpt || item.url} terms={terms}/></Typography.Paragraph></>}/></List.Item>}/></>}
+    <Modal open={selectedReading !== null} title={selectedReading?.title || '阅读快照'} footer={<Space><Button onClick={() => setSelectedReading(null)}>关闭</Button><Button type="primary" onClick={() => { const url=selectedReading?.url;setSelectedReading(null);if(url)onOpenUrl?.(url) }}>重新打开原网页</Button></Space>} width="min(900px, 90vw)" onCancel={() => setSelectedReading(null)} destroyOnHidden>{selectedReading && <><Typography.Paragraph type="secondary" copyable>{selectedReading.url}</Typography.Paragraph><Typography.Paragraph style={{whiteSpace:'pre-wrap',maxHeight:'65vh',overflow:'auto'}}>{selectedReading.markdown}</Typography.Paragraph></>}</Modal>
     <DocumentDetailDrawer document={selected} onClose={() => setSelected(null)} onDeleted={id => setDocuments(items => items.filter(item => item.id !== id))}/>
   </section>
 }
