@@ -9,7 +9,7 @@ export interface BrowserBounds { x: number; y: number; width: number; height: nu
 export interface NativeBrowserState { url: string; title: string; favicon?: string; loading: boolean; scrollX: number; scrollY: number; canGoBack: boolean; canGoForward: boolean }
 export interface NativePageSnapshot { url: string; html: string }
 interface NativeToolbarMenuEvent { version: number; tabLabel: string; action: string }
-export interface NativeToolbarMenuAction { tabId: string; action: string }
+export interface NativeToolbarMenuAction { tabId: string; action: string; value?: string }
 /**
  * v1: openerLabel + url. Future revisions may add origin, gesture, etc. The
  * `version` field is always present on Rust-emitted events; consumers should
@@ -92,6 +92,7 @@ export async function navigateHistory(tabId: string, delta: -1|1): Promise<void>
 export async function readNativeState(tabId: string): Promise<NativeBrowserState | null> { const label=labels.get(tabId);return label ? invoke<NativeBrowserState>('browser_state',{label}) : null }
 export async function restoreNativeScroll(tabId: string, x: number, y: number): Promise<void> { const label=labels.get(tabId);if(label)await invoke('browser_restore_scroll',{label,x,y}) }
 export async function setNativeToolbarMenu(tabId: string, open: boolean, zoomPercent = 100): Promise<void> { const label=labels.get(tabId);if(label)await invoke('browser_toolbar_menu',{label,open,zoomPercent}) }
+export async function setNativeToolbarPanel(tabId: string, open: boolean, kind: 'downloads' | 'bookmarks' | 'resources', payload: unknown): Promise<void> { const label=labels.get(tabId);if(label)await invoke('browser_toolbar_panel',{label,open,kind,payload:JSON.stringify(payload)}) }
 export async function isNativeTabAlive(tabId: string): Promise<boolean> { const label=labels.get(tabId) ?? labelFor(tabId);return !!(await Webview.getByLabel(label)) }
 export async function setNativeAdBlocking(enabled: boolean): Promise<void> {
   await Promise.all(Array.from(labels.values(), label => invoke('browser_set_ad_blocking', { label, enabled })))
@@ -139,9 +140,9 @@ export async function onNativeContextMenu(handler: (request: ContextMenuRequest)
 
 export async function onNativeToolbarMenuAction(handler: (request: NativeToolbarMenuAction) => void): Promise<UnlistenFn> {
   if (!isTauri()) return () => undefined
-  return listen<NativeToolbarMenuEvent>('browser://toolbar-menu-action', event => {
+  return listen<NativeToolbarMenuEvent & { value?: string }>('browser://toolbar-menu-action', event => {
     const tabId = Array.from(labels.entries()).find(([, label]) => label === event.payload.tabLabel)?.[0]
-    if (tabId) handler({ tabId, action: event.payload.action })
+    if (tabId) handler({ tabId, action: event.payload.action, value: event.payload.value })
   })
 }
 

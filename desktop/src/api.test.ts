@@ -56,6 +56,7 @@ describe('api', () => {
       expect(result.title).toBe(baseInput.title)
       expect(result.source).toBe('example.com')
       expect(result.wordCount).toBe(3)
+      expect(result.autoTags).toEqual([])
       expect(typeof result.createdAt).toBe('string')
     })
 
@@ -119,6 +120,7 @@ describe('api', () => {
             title: baseInput.title,
             source: 'example.com',
             wordCount: 3,
+            autoTags: [],
           }),
         }),
       )

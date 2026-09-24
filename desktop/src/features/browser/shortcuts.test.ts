@@ -54,6 +54,10 @@ describe('interpretShortcut', () => {
     expect(interpretShortcut(evt('ArrowRight', { alt: true }))).toBe('forward')
   })
 
+  it('matches the save-workspace shortcut', () => {
+    expect(interpretShortcut(evt('w', { ctrl: true, shift: true }))).toBe('saveWorkspace')
+  })
+
   it('falls through when no pattern matches', () => {
     expect(interpretShortcut(evt('x', { ctrl: true }))).toBeNull()
     expect(interpretShortcut(evt('z'))).toBeNull()

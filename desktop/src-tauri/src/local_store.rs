@@ -212,6 +212,7 @@ pub struct LocalDocument {
     word_count: i64,
     status: String,
     tags: Vec<String>,
+    #[serde(default)]
     auto_tags: Vec<String>,
     created_at: String,
     starred: bool,
@@ -1476,6 +1477,24 @@ mod tests {
 
     fn fresh() -> Connection {
         Connection::open_in_memory().expect("open in-memory db")
+    }
+
+    #[test]
+    fn document_deserialization_defaults_missing_auto_tags() {
+        let document: LocalDocument = serde_json::from_value(serde_json::json!({
+            "id": "local-test",
+            "title": "Test",
+            "url": "https://example.com",
+            "source": "example.com",
+            "wordCount": 1,
+            "status": "READY",
+            "tags": ["Inbox"],
+            "createdAt": "2026-09-24T00:00:00.000Z",
+            "starred": false
+        }))
+        .expect("documents created by older clients remain valid");
+
+        assert!(document.auto_tags.is_empty());
     }
 
     #[test]

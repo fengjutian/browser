@@ -336,5 +336,5 @@ export async function importBackup(backup: Backup): Promise<ImportSummary> {
 function createDocument(input: { title: string; url: string; markdown: string; tags: string[] }): Document {
   let source = ''
   try { source = new URL(input.url).hostname } catch { /* keep source empty */ }
-  return { id: `local-${crypto.randomUUID()}`, ...input, source, wordCount: input.markdown.trim() ? input.markdown.trim().split(/\s+/u).length : 0, status: 'READY', createdAt: new Date().toISOString(), starred: false }
+  return { id: `local-${crypto.randomUUID()}`, ...input, source, wordCount: input.markdown.trim() ? input.markdown.trim().split(/\s+/u).length : 0, status: 'READY', autoTags: [], createdAt: new Date().toISOString(), starred: false }
 }

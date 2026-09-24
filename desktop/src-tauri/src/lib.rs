@@ -812,6 +812,69 @@ fn browser_toolbar_menu(app: tauri::AppHandle, label: String, open: bool, zoom_p
 }
 
 #[tauri::command]
+fn browser_toolbar_panel(
+    app: tauri::AppHandle,
+    label: String,
+    open: bool,
+    kind: String,
+    payload: String,
+) -> Result<(), String> {
+    validate_browser_label(&label)?;
+    if !matches!(kind.as_str(), "downloads" | "bookmarks" | "resources") {
+        return Err("unsupported toolbar panel".into());
+    }
+    let data: serde_json::Value = serde_json::from_str(&payload)
+        .map_err(|error| format!("invalid toolbar panel payload: {error}"))?;
+    let webview = app
+        .get_webview(&label)
+        .ok_or_else(|| "browser tab webview not found".to_string())?;
+    if !open {
+        return webview
+            .eval("window.__arcadiaToolbarMenu?.close(false)")
+            .map_err(|error| error.to_string());
+    }
+    let kind_js = serde_json::to_string(&kind).map_err(|error| error.to_string())?;
+    let data_js = serde_json::to_string(&data).map_err(|error| error.to_string())?;
+    let script = format!(r#"(() => {{
+      window.__arcadiaToolbarMenu?.close(false);
+      const kind={kind_js}, data={data_js};
+      const host=document.createElement('div'); host.id='__arcadia-toolbar-panel';
+      const shadow=host.attachShadow({{mode:'closed'}});
+      const emit=(action,value)=>window.__TAURI_INTERNALS__?.invoke('tauri://emit',{{event:'browser://toolbar-menu-action',payload:{{version:1,tabLabel:'{label}',action,value}}}}).catch(()=>undefined);
+      const close=(notify=true)=>{{document.removeEventListener('pointerdown',outside,true);document.removeEventListener('keydown',keydown,true);host.remove();delete window.__arcadiaToolbarMenu;if(notify)emit('__dismiss__')}};
+      const outside=event=>{{if(!event.composedPath().includes(host))close()}};
+      const keydown=event=>{{if(event.key==='Escape')close()}};
+      shadow.innerHTML=`<style>
+        :host{{all:initial}}*{{box-sizing:border-box}}.panel{{width:340px;max-height:68vh;overflow:auto;padding:12px;font:13px/1.45 system-ui,"Microsoft YaHei",sans-serif;color:#202521;background:#fff;border:1px solid #d9dfda;border-radius:12px;box-shadow:0 12px 32px rgba(20,35,27,.2)}}
+        .head{{display:flex;justify-content:space-between;align-items:center;margin-bottom:9px}}.head b{{font-size:15px}}.muted{{color:#748078;font-size:12px}}.empty{{padding:24px 8px;text-align:center;color:#748078}}
+        .row{{display:flex;justify-content:space-between;gap:12px;padding:7px 5px;border-top:1px solid #eef1ef}}.row:first-child{{border-top:0}}.stack{{display:block;width:100%}}.stack b,.stack span{{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}}.stack span{{margin-top:2px;color:#748078;font-size:11px}}
+        button{{all:unset;box-sizing:border-box;display:block;width:100%;padding:8px;border-radius:7px;cursor:pointer}}button:hover{{background:#edf5ef}}.section{{margin-top:12px;color:#4c9167;font-size:11px;font-weight:700;letter-spacing:1px;text-transform:uppercase}}
+      </style><div class="panel" role="dialog"></div>`;
+      const panel=shadow.querySelector('.panel');
+      const head=(title,subtitle)=>{{const node=document.createElement('div');node.className='head';const bold=document.createElement('b');bold.textContent=title;const small=document.createElement('span');small.className='muted';small.textContent=subtitle||'';node.append(bold,small);panel.append(node)}};
+      const empty=text=>{{const node=document.createElement('div');node.className='empty';node.textContent=text;panel.append(node)}};
+      const row=(label,value)=>{{const node=document.createElement('div');node.className='row';const left=document.createElement('span');left.textContent=label;const right=document.createElement('b');right.textContent=value;node.append(left,right);panel.append(node)}};
+      if(kind==='bookmarks'){{
+        head('收藏夹',`${{data.total||0}} 条`);
+        if(!data.items?.length)empty('还没有收藏，Ctrl+D 收藏当前页');
+        for(const item of data.items||[]){{const button=document.createElement('button');button.type='button';button.className='stack';const title=document.createElement('b');title.textContent=item.title||item.url;const url=document.createElement('span');url.textContent=item.url;button.append(title,url);button.onclick=()=>{{emit('bookmark-open',item.url);close(false)}};panel.append(button)}}
+        if((data.total||0)>(data.items?.length||0)){{const button=document.createElement('button');button.type='button';button.textContent=`查看全部 ${{data.total}} 条`;button.onclick=()=>{{emit('bookmarks');close(false)}};panel.append(button)}}
+      }} else if(kind==='downloads'){{
+        head('下载',data.subtitle||'暂无活动');
+        if(!data.items?.length)empty('暂无下载');
+        for(const item of data.items||[]){{const node=document.createElement('div');node.className='row stack';const title=document.createElement('b');title.textContent=item.name;const status=document.createElement('span');status.textContent=item.detail||item.status;node.append(title,status);panel.append(node)}}
+      }} else {{
+        head('资源面板',data.subtitle||'');
+        for(const section of data.sections||[]){{const title=document.createElement('div');title.className='section';title.textContent=section.title;panel.append(title);for(const item of section.items||[])row(item.label,String(item.value))}}
+        if(data.hint){{const hint=document.createElement('p');hint.className='muted';hint.textContent=data.hint;panel.append(hint)}}
+      }}
+      Object.assign(host.style,{{position:'fixed',top:'8px',right:'8px',zIndex:'2147483647'}});document.documentElement.append(host);
+      setTimeout(()=>{{document.addEventListener('pointerdown',outside,true);document.addEventListener('keydown',keydown,true)}},0);window.__arcadiaToolbarMenu={{close}};
+    }})()"#);
+    webview.eval(script).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
 async fn browser_snapshot(app: tauri::AppHandle, label: String) -> Result<PageSnapshot, String> {
     validate_browser_label(&label)?;
     let webview = app
@@ -1103,6 +1166,7 @@ pub fn run() {
             browser_state,
             browser_restore_scroll,
             browser_toolbar_menu,
+            browser_toolbar_panel,
             browser_snapshot,
             browser_capabilities,
             browser_permission_request,

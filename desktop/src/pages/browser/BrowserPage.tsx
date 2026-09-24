@@ -4,7 +4,7 @@ import { ArrowDownOutlined, ArrowLeftOutlined, ArrowRightOutlined, ArrowUpOutlin
 import { Sparkles as RobotOutlined } from 'lucide-react'
 import type { BrowserTab, BrowserTabError } from '../../types'
 import { addBrowserHistory, deleteClosedTab, findDocumentByUrl, getBrowserShortcutsEnabled, getBrowserWorkspace, getDocument, listBrowserHistory, listClosedTabs, listSitePermissions, saveBrowserWorkspace, saveClosedTab, saveDocument, setSession, toggleStarred } from '../../api'
-import { captureNativePage, closeNativeTab, ensureNativeTab, findInNativeTab, hasNativeTab, hideNativeTab, isNativeBrowserAvailable, navigateHistory, onNativeAdBlockUpdate, onNativeNewTab, onNativeToolbarMenuAction, openNativeTab, printNativeTab, readNativeState, reloadNativeTab, resizeNativeTab, setNativeToolbarMenu, showNativeTab, stopNativeTab, zoomNativeTab } from '../../services/nativeBrowser'
+import { captureNativePage, closeNativeTab, ensureNativeTab, findInNativeTab, hasNativeTab, hideNativeTab, isNativeBrowserAvailable, navigateHistory, onNativeAdBlockUpdate, onNativeNewTab, onNativeToolbarMenuAction, openNativeTab, printNativeTab, readNativeState, reloadNativeTab, resizeNativeTab, setNativeToolbarMenu, setNativeToolbarPanel, showNativeTab, stopNativeTab, zoomNativeTab } from '../../services/nativeBrowser'
 import { extractArticle } from '../../features/reader/extractArticle'
 import type { ReaderArticle } from '../../features/reader/types'
 import { classifySaveError } from '../../features/documents/saveClassifier'
@@ -69,11 +69,7 @@ type ToolbarOverlay = 'downloads' | 'bookmarks' | 'resources' | 'menu' | 'tab-me
 // Native child WebViews are always composited above the React window on
 // Windows. Keep enough room for toolbar popovers instead of hiding the whole
 // page (which made opening the browser menu look like a blank-page failure).
-const TOOLBAR_OVERLAY_INSET: Partial<Record<ToolbarOverlay, number>> = {
-  downloads: 420,
-  bookmarks: 340,
-  resources: 280,
-}
+const TOOLBAR_OVERLAY_INSET: Partial<Record<ToolbarOverlay, number>> = {}
 const TAB_GROUP_PALETTE = ['#a7dfbd', '#9bc6e8', '#dfc0a7', '#c8a7df', '#dfb5b5', '#bce0c6']
 const tabGroupColor = (id: string | null | undefined): string => {
   if (!id) return 'transparent'
@@ -755,9 +751,10 @@ export function BrowserPage({ visible = true, onSearchKnowledge }: { visible?: b
   useEffect(() => {
     let disposed = false
     let unlisten: (() => void) | undefined
-    void onNativeToolbarMenuAction(({ tabId, action }) => {
+    void onNativeToolbarMenuAction(({ tabId, action, value }) => {
       if (disposed || tabId !== activeTabIdRef.current) return
-      if (action !== '__dismiss__') runBrowserMenuAction(action)
+      if (action === 'bookmark-open' && value) void navigate(value)
+      else if (action !== '__dismiss__') runBrowserMenuAction(action)
       if (!action.startsWith('zoom-') || action === 'zoom-reset') setToolbarOverlay(null)
     }).then(stop => {
       if (disposed) stop()
@@ -848,6 +845,83 @@ export function BrowserPage({ visible = true, onSearchKnowledge }: { visible?: b
 
   const processMemory = useProcessMemory({ enabled: nativeMode })
   const memory = processMemory.snapshot
+
+  const nativePanelPayloads = useMemo(() => ({
+    bookmarks: {
+      total: bookmarkActions.bookmarks.length,
+      items: bookmarkActions.bookmarks.slice(0, 8).map(bookmark => ({ title: bookmark.title, url: bookmark.url })),
+    },
+    downloads: {
+      subtitle: downloads.some(item => item.status === 'downloading')
+        ? `${downloads.filter(item => item.status === 'downloading').length} 个正在下载 / 上限 ${downloadQueue.maxConcurrent}`
+        : downloadQueue.pending.length > 0 ? `${downloadQueue.pending.length} 个排队中` : '暂无活动',
+      items: downloads.slice(0, 5).map(item => ({
+        name: item.fileName || item.url.split('/').pop() || '下载文件',
+        status: item.status,
+        detail: item.totalBytes
+          ? `${item.status} · ${Math.min(100, Math.round(((item.receivedBytes ?? 0) / item.totalBytes) * 100))}%`
+          : item.status,
+      })),
+    },
+    resources: {
+      sections: [
+        { title: '标签页', items: [
+          { label: '总标签页', value: resourceStats.totalTabs },
+          { label: '活跃 WebView', value: resourceStats.liveTabs },
+          { label: '已休眠', value: resourceStats.suspendedTabs },
+          { label: '固定', value: resourceStats.pinnedTabs },
+          { label: '播放音频', value: resourceStats.audibleTabs },
+          { label: '下载中', value: resourceStats.downloadingTabs },
+          { label: '最久未活跃', value: `${resourceStats.idleMinutes} 分钟` },
+        ]},
+        { title: '进程内存', items: [
+          { label: '工作集', value: formatProcessBytes(memory?.workingSetBytes) },
+          { label: '提交大小', value: formatProcessBytes(memory?.commitBytes) },
+          { label: '峰值', value: formatProcessBytes(memory?.peakWorkingSetBytes) },
+          { label: '缺页中断', value: memory?.pageFaultCount == null ? '—' : memory.pageFaultCount.toLocaleString('zh-CN') },
+        ]},
+      ],
+      hint: `LRU 阈值 ${advancedSettings.maxLiveWebviews} 个 WebView；空闲 ${advancedSettings.idleSuspendMinutes} 分钟自动休眠。`,
+    },
+  }), [advancedSettings.idleSuspendMinutes, advancedSettings.maxLiveWebviews, bookmarkActions.bookmarks, downloadQueue.maxConcurrent, downloadQueue.pending.length, downloads, memory, resourceStats])
+
+  useEffect(() => {
+    if (!nativeMode) return
+    const triggerKinds: Record<string, 'downloads' | 'bookmarks' | 'resources'> = {
+      下载: 'downloads',
+      收藏夹: 'bookmarks',
+      资源面板: 'resources',
+    }
+    const kindFor = (event: Event) => {
+      if (!(event.target instanceof Element)) return undefined
+      const button = event.target.closest<HTMLButtonElement>('button[aria-label]')
+      return button ? triggerKinds[button.getAttribute('aria-label') ?? ''] : undefined
+    }
+    const stopPointerDown = (event: Event) => { if (kindFor(event)) event.stopImmediatePropagation() }
+    const interceptClick = (event: Event) => {
+      const kind = kindFor(event)
+      if (!kind) return
+      event.preventDefault()
+      event.stopImmediatePropagation()
+      const open = toolbarOverlay !== kind
+      setToolbarOverlay(open ? kind : null)
+      void setNativeToolbarPanel(active.id, open, kind, nativePanelPayloads[kind]).catch(() => {
+        setToolbarOverlay(null)
+        messageApi.error('浮层加载失败，请重启桌面应用后重试')
+      })
+    }
+    document.addEventListener('pointerdown', stopPointerDown, true)
+    document.addEventListener('click', interceptClick, true)
+    return () => {
+      document.removeEventListener('pointerdown', stopPointerDown, true)
+      document.removeEventListener('click', interceptClick, true)
+    }
+  }, [active.id, nativeMode, nativePanelPayloads, toolbarOverlay])
+
+  useEffect(() => {
+    if (!nativeMode || !toolbarOverlay || toolbarOverlay === 'menu' || toolbarOverlay === 'tab-menu') return
+    void setNativeToolbarPanel(active.id, true, toolbarOverlay, nativePanelPayloads[toolbarOverlay])
+  }, [active.id, nativeMode, nativePanelPayloads, toolbarOverlay])
 
   const resourcePanel = (
     <div className="resource-panel" role="status">
