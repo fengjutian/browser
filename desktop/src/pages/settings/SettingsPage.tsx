@@ -1,6 +1,6 @@
 import { Alert, Button, Card, Descriptions, Form, Input, InputNumber, List, message, Popconfirm, Segmented, Select, Space, Switch, Tabs, Tag, Typography } from '../../components/ui'
 import { BgColorsOutlined, DeleteOutlined, KeyOutlined, MoonOutlined, SafetyCertificateOutlined, SaveOutlined, SearchOutlined, SunOutlined, ThunderboltOutlined } from '../../components/ui/icons'
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { PageHeader } from '../../shared/components/PageHeader'
 import { clearBrowserHistory, clearClosedTabs as clearClosedTabsInDb, clearReadingSnapshots, deleteAIProvider, exportBackup, getAIProvider, getBrowserShortcutsEnabled, getReadingSnapshotStats, importBackup, listAIProviders, listBrowserHistory, purgeReadingSnapshots, replaceSitePermissions, saveAIProvider, aiTestProvider, setBrowserShortcutsEnabled, type AIProviderInput, type ReadingSnapshotStats } from '../../api'
 import type { AIProvider, AIProviderType } from '../../types'
@@ -9,6 +9,7 @@ import { readThemePreference, writeThemePreference, type ThemePreference } from 
 import { readSearchEngineConfig, resolveActiveSearchTemplate, SEARCH_ENGINE_PRESETS, writeSearchEngineConfig } from '../../features/browser/searchEngine'
 import { isSearchTemplateValid } from '../../features/browser/navigation'
 import { HISTORY_CHANGE_EVENT, type HistoryEntry } from '../../features/history/dedupeHistory'
+import { buildVisitStats } from '../../features/history/visitStats'
 import { DEFAULT_ADVANCED_SETTINGS, readAdvancedSettings, writeAdvancedSettings, type AdvancedSettings } from '../../features/settings/advanced'
 import { isTrackingCleanerEnabled, setTrackingCleanerEnabled } from '../../features/plugins/trackingCleaner'
 import { isAdBlockerEnabled, setAdBlockerEnabled } from '../../features/plugins/adBlocker'
@@ -608,6 +609,7 @@ function PrivacySettings() {
   const [snapshotStats, setSnapshotStats] = useState<ReadingSnapshotStats>({ count: 0, bytes: 0 })
   const [snapshotRetentionDays, setSnapshotRetentionDays] = useState(() => Number(localStorage.getItem('reading.snapshot.retentionDays') || 90))
   const [snapshotMaxMb, setSnapshotMaxMb] = useState(() => Number(localStorage.getItem('reading.snapshot.maxMb') || 200))
+  const visitStats = useMemo(() => buildVisitStats(historyEntries), [historyEntries])
 
   useEffect(() => {
     let active = true
@@ -692,6 +694,36 @@ function PrivacySettings() {
     <List className="privacy-history-list" size="small" dataSource={historyEntries} locale={{ emptyText: '暂无浏览历史' }} renderItem={item => <List.Item key={`${item.url}-${item.visitedAt}`}><List.Item.Meta title={item.title || item.url} description={<><Typography.Text type="secondary">{new Date(item.visitedAt).toLocaleString()}</Typography.Text><Typography.Text className="privacy-history-url" copyable={{ text: item.url }}>{item.url}</Typography.Text></>}/></List.Item>}/>
   </div>
 
+  const categoryColors: Record<string, string> = { '开发技术':'#1677ff', '视频娱乐':'#9254de', '社交社区':'#13a8a8', '搜索工具':'#52c41a', '购物':'#fa8c16', '其他':'#8c8c8c' }
+  const maxSiteVisits = Math.max(1, ...visitStats.sites.map(item => item.count))
+  const statisticsContent = <div className="privacy-section visit-statistics">
+    <div className="visit-statistics__summary">
+      <div><b>{visitStats.totalVisits}</b><span>历史访问</span></div>
+      <div><b>{visitStats.uniqueSites}</b><span>不同网站</span></div>
+      <div><b>{visitStats.sites[0]?.label ?? '—'}</b><span>最常访问</span></div>
+    </div>
+    {visitStats.totalVisits === 0 ? <Alert type="info" showIcon message="暂无可统计的浏览历史"/> : <div className="visit-statistics__charts">
+      <section className="visit-chart" aria-label="网站访问次数排行">
+        <Typography.Title level={5}>网站访问次数</Typography.Title>
+        <Typography.Paragraph type="secondary">按域名合并，显示访问次数最多的 10 个网站。</Typography.Paragraph>
+        <div className="visit-bars">{visitStats.sites.map(item => <div className="visit-bar" key={item.key} title={`${item.label}：${item.count} 次`}>
+          <span className="visit-bar__label">{item.label}</span>
+          <span className="visit-bar__track"><i style={{width:`${Math.max(4, item.count / maxSiteVisits * 100)}%`}}/></span>
+          <b>{item.count}</b>
+        </div>)}</div>
+      </section>
+      <section className="visit-chart" aria-label="网站类型分布">
+        <Typography.Title level={5}>网站类型分布</Typography.Title>
+        <Typography.Paragraph type="secondary">依据域名在本地归类，不会上传浏览记录。</Typography.Paragraph>
+        <div className="visit-category-chart">{visitStats.categories.map(item => <div className="visit-category" key={item.key}>
+          <span className="visit-category__name"><i style={{background:categoryColors[item.label] ?? '#8c8c8c'}}/>{item.label}</span>
+          <span className="visit-category__track"><i style={{width:`${item.percentage}%`,background:categoryColors[item.label] ?? '#8c8c8c'}}/></span>
+          <b>{item.count} 次</b><small>{item.percentage.toFixed(1)}%</small>
+        </div>)}</div>
+      </section>
+    </div>}
+  </div>
+
   const cleanupContent = <div className="privacy-section">
     <Typography.Paragraph type="secondary">清理浏览器生成的辅助数据，不会删除知识库文档或磁盘中的下载文件。</Typography.Paragraph>
     <Space wrap>
@@ -728,6 +760,7 @@ function PrivacySettings() {
   return <>{contextHolder}<Card title="隐私与站点数据" className="settings-card privacy-settings-card"><Tabs className="privacy-section-tabs" defaultActiveKey="history" destroyOnHidden={false} items={[
     { key: 'private', label: '私密浏览', children: privateContent },
     { key: 'history', label: `浏览历史 ${historyEntries.length}`, children: historyContent },
+    { key: 'statistics', label: '访问统计', children: statisticsContent },
     { key: 'cleanup', label: '数据清理', children: cleanupContent },
     { key: 'snapshots', label: `阅读快照 ${snapshotStats.count}`, children: snapshotContent },
     { key: 'export', label: '导入/导出', children: exportContent },
