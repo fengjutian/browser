@@ -289,7 +289,10 @@ body[data-theme='beige'] {
   .privacy-status .ant-typography,
   .user-card small { color: #817366; }
   .user-card { border-top-color: #ded2c3; }
-  .browser-tabs { background: #e9e1d6; }
+  .browser-tabs {
+    --browser-tab-active-bg: #fcfaf6;
+    background: #e9e1d6;
+  }
   .browser-toolbar,
   .ai-panel { background: #fcfaf6; }
   .new-tab { background: radial-gradient(circle at 50% 30%, #f0e4d2, #faf7f1 44%); }
@@ -305,7 +308,10 @@ body[data-theme='light'] {
   .privacy-status .ant-typography,
   .user-card small { color: #747d78; }
   .user-card { border-top-color: #dde2df; }
-  .browser-tabs { background: #e9ecea; }
+  .browser-tabs {
+    --browser-tab-active-bg: #f7f8f7;
+    background: #e9ecea;
+  }
   .new-tab { background: radial-gradient(circle at 50% 30%, #edf1ee, #fafbfa 44%); }
 }
 
@@ -330,7 +336,10 @@ body[data-theme='github'] {
   .user-card small { color: #57606a; }
   .page-header h1.ant-typography,
   .document-card h4.ant-typography { font-family: inherit; }
-  .browser-tabs { background: #eaeef2; }
+  .browser-tabs {
+    --browser-tab-active-bg: #f6f8fa;
+    background: #eaeef2;
+  }
   .browser-toolbar,
   .ai-panel { background: #f6f8fa; }
   .web-surface { background: #fff; }
@@ -388,7 +397,10 @@ body[data-theme='dark'] {
 
     small { color: #99a89f; }
   }
-  .browser-tabs { background: #1b2420; }
+  .browser-tabs {
+    --browser-tab-active-bg: #171e1a;
+    background: #1b2420;
+  }
   .browser-toolbar,
   .ai-panel { background: #171e1a; }
   .web-surface { background: #111714; }
@@ -1444,11 +1456,12 @@ body[data-theme='dark'] .window-controls > .window-controls__close:hover { backg
 // Browser-style tab strip: the new-tab action follows the last tab; when the
 // row fills, tabs shrink and Ant's overflow control takes over.
 .browser-tabs {
+  --browser-tab-active-bg: #f7f8f7;
   position: relative;
   align-items: stretch !important;
   gap: 0 !important;
   height: 44px !important;
-  padding: 5px 146px 5px 8px !important;
+  padding: 5px 146px 0 8px !important;
   border-bottom: 1px solid #d8ded9;
   background: #e7ebe7 !important;
 
@@ -1456,7 +1469,7 @@ body[data-theme='dark'] .window-controls > .window-controls__close:hover { backg
 
   .ant-tabs-nav {
     width: 100%;
-    height: 34px;
+    height: 39px;
     margin: 0 !important;
 
     &::before { border-bottom: 0 !important; }
@@ -1468,44 +1481,57 @@ body[data-theme='dark'] .window-controls > .window-controls__close:hover { backg
   }
 
   .ant-tabs-nav-list {
-    align-items: center;
-    gap: 3px;
+    align-items: flex-end;
+    gap: 0;
   }
 
   .ant-tabs-tab {
     position: relative;
-    width: clamp(96px, calc((100vw - var(--sider-width, 56px) - 92px) / var(--tab-count, 1)), 220px);
+    width: clamp(96px, calc((100vw - var(--sider-width, 56px) - 190px) / var(--tab-count, 1)), 180px);
     min-width: 96px !important;
-    max-width: 220px !important;
+    max-width: 180px !important;
     height: 34px;
     margin: 0 !important;
     padding: 0 8px 0 11px !important;
     border: 1px solid transparent !important;
-    border-radius: 8px !important;
+    border-radius: 7px 7px 0 0 !important;
     background: transparent !important;
     color: #59645e;
-    opacity: .84;
-    transition: background-color .14s, border-color .14s, box-shadow .14s;
+    opacity: .9;
+    transition: background-color .12s, color .12s;
 
-    &::after { display: none; }
+    &::after {
+      position: absolute;
+      top: 8px;
+      right: 0;
+      bottom: 8px;
+      display: block;
+      width: 1px;
+      background: rgba(79, 92, 84, .16);
+      content: '';
+    }
 
     &:not(.ant-tabs-tab-active):hover {
-      background: rgba(255, 255, 255, .52) !important;
+      background: rgba(255, 255, 255, .38) !important;
       color: #26322b;
       opacity: 1;
     }
 
     &.ant-tabs-tab-active {
       z-index: 1;
-      border-color: rgba(22,119,255,.28) !important;
-      background: #fff !important;
-      color: #1677ff;
+      height: 39px;
+      border-color: rgba(79, 92, 84, .16) !important;
+      border-bottom-color: var(--browser-tab-active-bg) !important;
+      background: var(--browser-tab-active-bg) !important;
+      color: #243029;
       opacity: 1;
-      box-shadow: inset 0 -2px 0 #1677ff, 0 2px 6px rgba(34,49,40,.12);
+      box-shadow: none;
+
+      &::after { display: none; }
 
       .ant-tabs-tab-btn {
-        color: #1677ff !important;
-        font-weight: 600;
+        color: inherit !important;
+        font-weight: 500;
       }
     }
 
@@ -1541,7 +1567,7 @@ body[data-theme='dark'] .window-controls > .window-controls__close:hover { backg
       box-shadow: inset 0 3px 0 var(--tab-group-color);
 
       &.ant-tabs-tab-active {
-        box-shadow: inset 0 3px 0 var(--tab-group-color), inset 0 -2px 0 #1677ff, 0 2px 6px rgba(34,49,40,.12);
+        box-shadow: inset 0 3px 0 var(--tab-group-color);
       }
     }
   }
