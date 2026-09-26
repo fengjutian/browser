@@ -24,6 +24,7 @@ keyring = { version = "3", features = ["windows-native", "apple-native", "linux-
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json", "stream"] }
 futures-util = "0.3"
 tokio = { version = "1", features = ["sync", "rt", "macros", "fs", "io-util"] }
+tokio-util = { version = "0.7", features = ["rt"] }
 async-trait = "0.1"
 thiserror = "1"
 

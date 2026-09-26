@@ -33,7 +33,7 @@ AI Knowledge Browser 是一款以浏览器为入口、以个人知识库为核�
 - Knowledge：文章保存、SQLite、全文搜索、标签、集合。
 - AI：页面总结、问答、翻译、自动标签；Provider 可配置。
 - Privacy：广告/追踪请求规则、统计面板。
-- Backend：Go HTTP API、文档/知识/搜索/AI 服务。
+- Search：桌面 SQLite FTS5（`local_documents_fts` + BM25 排序 + 前缀匹配）。
 - Plugin：仅 Manifest、权限、注册表和 UI 占位。
 
 ### P1：知识增强
@@ -109,9 +109,9 @@ AI Knowledge Browser 是一款以浏览器为入口、以个人知识库为核�
 
 ## 6. 数据模型
 
-主实体：Document、Chunk、Collection、Tag、Asset、Embedding、Task。数据库定义见 `backend/migrations/001_init.sql`。
+主实体：Document、Chunk、Collection、Tag、Asset、Embedding、Task。数据库定义见 `desktop/src-tauri/src/local_store.rs` 的 `MIGRATIONS` 常量（截至迁移 #17：`local_documents`、`local_documents_fts`、`collections`、`collection_documents`、`tasks`、`ai_providers`、`downloads`、`bookmarks`、`workspaces`、`reading_activity`、`saved_credentials` 等）。
 
-文档最小字段：id、title、url、source、author、published_at、language、content、markdown、summary、cover_image、word_count、status、created_at、updated_at。
+文档最小字段：id、title、url、source、author、language、content、markdown、summary、word_count、status、tags、auto_tags、created_at、starred。
 
 ## 7. 非功能要求
 
@@ -137,9 +137,9 @@ AI Knowledge Browser 是一款以浏览器为入口、以个人知识库为核�
 
 ## 10. 里程碑
 
-- M1 Foundation：仓库、UI Shell、Go API、Tauri 命令桥、测试与 CI。
+- M1 Foundation：仓库、UI Shell、Tauri 命令桥、测试与 CI。
 - M2 Reader：提取、清洗、Markdown、Reader UI、保存原文。
-- M3 Knowledge：SQLite/FTS、任务队列、标签与集合、搜索 UI。
+- M3 Knowledge：SQLite + FTS5、任务队列、标签与集合、搜索 UI。
 - M4 AI：Provider 配置、摘要/问答/翻译/标签、密钥安全存储。
 - M5 Privacy：请求过滤、规则更新、站点开关和统计。
 - M6 RAG/Agent：混合搜索、引用问答、MCP 与受控 Agent。
@@ -148,5 +148,5 @@ AI Knowledge Browser 是一款以浏览器为入口、以个人知识库为核�
 
 - 文档、架构与 API 契约已落盘。
 - 前端可展示 Browser、Library、Search、AI、Settings 五个主要入口并完成核心交互原型。
-- Go API 可运行且核心路由有自动化测试。
+- 桌面 SQLite + FTS5 迁移链可重复运行；核心检索命令单测覆盖。
 - Rust 插件占位类型可单元测试；不实现第三方运行时。

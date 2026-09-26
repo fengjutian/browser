@@ -1,5 +1,5 @@
 import { Alert, Button, Card, Empty, Input, message, Segmented, Select, Space, Spin, Tag, Typography } from '../../components/ui'
-import { ArrowRightOutlined, BookOutlined, CloseOutlined, CopyOutlined, GlobalOutlined, RobotOutlined, SaveOutlined, ThunderboltOutlined, TranslationOutlined } from '../../components/ui/icons'
+import { ArrowRightOutlined, BookOutlined, CloseOutlined, CopyOutlined, GlobalOutlined, RobotOutlined, SaveOutlined, StopOutlined, ThunderboltOutlined, TranslationOutlined } from '../../components/ui/icons'
 import { useEffect, useMemo, useState } from 'react'
 import { aiChat, findDocumentByUrl, getSession, listAIProviders, setSession, updateDocument } from '../../api'
 import type { AIProvider } from '../../types'
@@ -7,6 +7,7 @@ import type { ReaderArticle } from '../reader/types'
 import { buildAskPrompt, numberPassages, parseAnswer, passageById } from './ask'
 import { buildSummaryPrompt, summaryKindLabel, type SummaryKind } from './summarize'
 import { TRANSLATION_VIEW_LABEL, buildTranslatePrompt, detectTranslationTarget, translationKey, type TranslationView } from './translate'
+import { useStreamingChat } from './useStreamingChat'
 
 type PanelMode = 'summarize' | 'ask' | 'translate'
 
@@ -48,6 +49,7 @@ export function AssistantPanel({ close, saveToLibrary, currentUrl, currentTabId,
   const [targetLanguage, setTargetLanguage] = useState('zh-CN')
   const [translationView, setTranslationView] = useState<TranslationView>('translation-only')
   const [translation, setTranslation] = useState('')
+  const askStream = useStreamingChat()
   const [cache, setCache] = useState<TranslationCacheEntry[]>([])
 
   useEffect(() => {
@@ -109,12 +111,15 @@ export function AssistantPanel({ close, saveToLibrary, currentUrl, currentTabId,
     setBusy(true); setError(null); setAskAnswer(''); setAskCitations([]); setAskNotFound(false)
     try {
       const request = buildAskPrompt(markdown, trimmed, readerArticle?.title || currentUrl)
-      const response = await aiChat(providerId, request)
-      const parsed = parseAnswer(response.content)
+      const result = await askStream.start(providerId, request)
+      const parsed = parseAnswer(result.content)
       setAskAnswer(parsed.answer)
       setAskCitations(parsed.citations)
       setAskNotFound(parsed.notFound)
-    } catch (caught) { setError(caught instanceof Error ? caught.message : '回答失败') }
+    } catch (caught) {
+      const message = caught instanceof Error ? caught.message : '回答失败'
+      if (message !== 'cancelled') setError(message)
+    }
     finally { setBusy(false) }
   }
 
@@ -208,7 +213,12 @@ export function AssistantPanel({ close, saveToLibrary, currentUrl, currentTabId,
       <>
         <Space orientation="vertical" className="panel-actions" style={{width:'100%'}}>
           <Input.TextArea autoSize={{minRows:2,maxRows:4}} value={question} onChange={event => setQuestion(event.target.value)} placeholder="向当前页面提问…" disabled={busy}/>
-          <Button block type="primary" icon={<ArrowRightOutlined/>} onClick={() => void askQuestion()} loading={busy} disabled={noProvider || noArticle || !question.trim()}>提问</Button>
+          {askStream.status === 'streaming'
+            ? <Button block danger icon={<StopOutlined/>} onClick={() => askStream.cancel()}>停止生成</Button>
+            : <Button block type="primary" icon={<ArrowRightOutlined/>} onClick={() => void askQuestion()} loading={busy} disabled={noProvider || noArticle || !question.trim()}>提问</Button>}
+          {askStream.status === 'failed' && askStream.retryable && (
+            <Alert type="warning" showIcon message={`上次失败：${askStream.errorMessage ?? ''}`} description="网络或服务端暂时不可用，可重新提交以触发自动重试。" />
+          )}
         </Space>
         <Card className="ai-result" size="small">
           {busy && <Spin/>}

@@ -33,7 +33,7 @@ assert that the Rust side matches.
 | 10 | Performance / LRU | `lruPolicy.ts` (planLruSweep), `resourceStats.ts`, Settings 3 new toggles | — | — |
 | 4 | Tab enhancements | `tabGrouping.ts`, tab menu (close-domain / mute), `crashed` field + UI | — | — |
 | 7 | Download danger + log redaction + shell-open confirmation | `dangerClassifier.ts`, `logRedaction.ts`, `externalSchemes.ts` | — | — |
-| 7+.cert | Certificate prompt UI | `useCertificatePrompt`, `<CertificateErrorBar>` | `certificate_guard.rs` (UI-only stub — see Known Limitations) | this file |
+| 7+.cert | Certificate prompt UI + COM subscription | `useCertificatePrompt`, `<CertificateErrorBar>` | `certificate_guard.rs` Windows 实现已通过 `ICoreWebView2_14::add_ServerCertificateErrorDetected` 真实订阅事件，捕获 5 类证书错误，发出 `browser://certificate-error`，`browser_certificate_respond` 写入 allow/deny 并 Complete deferral；非 Windows 平台为 no-op | this file |
 
 ## Capability Matrix
 
@@ -44,8 +44,8 @@ assert that the Rust side matches.
 | Pause / resume download | ✅ Reqwest | `reqwest::Client` + `Range` header | Tauri 2 stable does NOT expose pause/resume on native downloads. WebView2 `IDownloadOperation` is reachable only via `webview2-com`, which we add for batch 7+.cert but do not use for this yet. |
 | Native permission request events | ❌ Not supported | — | Tauri 2 stable does not surface `ICoreWebView2.PermissionRequested`. We inject a `permission_guard_script` that denies JS access and surface a JS-level prompt. **Frontend ↔ Rust roundtrip works**, but the host cannot intercept a real permission prompt fired by WebView2 itself. |
 | Native context menu | ❌ Not supported | — | wry does not expose `ICoreWebView2ContextMenuRequested` in stable. We inject `context_menu_script` that emits `browser://context-menu` for the React overlay. |
-| Clear site data (per-origin) | ❌ Not supported in stable | needs `webview2-com` | `ICoreWebView2Profile.ClearBrowsingData` + `ClearBrowsingDataInTimeRange` are reachable only via `webview2-com`. The dep is now in `Cargo.toml` but no method binding is wired up. Privacy cleanup falls back to localStorage / SQLite deletion. |
-| Certificate error interceptor | ⚠️ Partial | `webview2-com` 0.39 + manual COM vtable | We added the dependency and a complete UI (banner + respond command), but `webview2-com` 0.39 only exposes `ServerCertificateErrorDetectedEventHandler` as a type — no `ICoreWebView2_5` cast helper. The Rust side is a no-op stub. **WebView2's default behaviour still blocks invalid certs**, so the user is never silently exposed; the banner only renders when something explicitly emits `browser://certificate-error`. |
+| Clear site data (per-origin) | ✅ Supported (Windows) / ❌ Not supported (macOS, Linux) | `webview2-com` 0.39 + `ICoreWebView2Profile2::ClearBrowsingData` | Windows: `lib.rs` 通过 `ClearBrowsingDataCompletedHandler` 绑定 `ICoreWebView2Profile2::ClearBrowsingData`，支持按 Kind 集合清理。macOS / Linux：WKWebView / WebKitGTK 平台尚未实现等价调用，no-op 降级到 localStorage / SQLite 清理。 |
+| Certificate error interceptor | ✅ Supported (Windows) / ❌ Not supported (macOS, Linux) | `webview2-com` 0.39 + `ICoreWebView2_14::add_ServerCertificateErrorDetected` | Windows: 真实 COM 订阅 + Deferral/Complete 全链路；识别 5 类 `COREWEBVIEW2_WEB_ERROR_STATUS_CERTIFICATE_*` 并发出本地化 message。macOS / Linux：WKWebView 与 WebKitGTK 不暴露等价事件，目前 no-op（`attach_certificate_guard` 在非 Windows target 直接返回）。WebView2 默认仍会拦截无效证书；用户可选择临时放行一次（3 秒后 `ClearServerCertificateErrorActions` 自动清空 allow-list）。 |
 | Audible detection (automatic) | ❌ Not supported | — | WebView2 does not expose audio playback events to JS in stable. `tab.audible` is a hint the user toggles via the right-click menu → "静音此标签页". Auto-detection would require `ICoreWebView2.WebView2Process` extended inspection or a media-element polling shim — not pursued. |
 | Process-level WebView memory | ❌ Not supported in stable | needs `webview2-com` | `ICoreWebView2Process` (`WorkingSetSize`, `PrivateMemoryUsage`) requires `webview2-com` plus the same manual COM cast as certificates. The resource panel currently reports tab counts and LRU state, not process bytes. |
 | WebView2 navigation error status | ⚠️ Partial | `wry::WebviewBuilder.on_page_load` | `NavigationCompleted` event with `WebErrorStatus` is reachable via `wry`'s `on_page_load` callback in newer versions. Currently not wired — relies on WebView2's automatic error page. Future: parse `WEBVIEW2_WEB_ERROR_STATUS_CERTIFICATE_*` and emit `browser://certificate-error`. |
@@ -65,15 +65,11 @@ assert that the Rust side matches.
 
 These are deliberate "supported in the matrix → but with the documented limitation above" gaps. Each line tells the next person what to chase when Tauri / WebView2 / `webview2-com` unblocks the path.
 
-1. **Certificate interception (`certificate_guard.rs`)** — `attach_certificate_guard` is a no-op today. To upgrade:
-   - Wait for `webview2-com` to ship `ICoreWebView2_5` (currently 0.39 only provides the callback type and declared IIDs).
-   - Alternative: bind `ICoreWebView2_5` directly via `windows-rs` + raw COM cast (`QueryInterface`).
-   - Wire a `Mutex<HashMap<requestId, oneshot::Sender<Allow>>>` so the deferral can be completed when `browser_certificate_respond` is invoked.
-   - Subscribe to `wry::WebviewBuilder.on_page_load` for `WebErrorStatus::CertificateCommonNameInvalid` etc. and emit `browser://certificate-error` automatically.
+1. **Certificate interception on macOS / Linux** — Windows 已通过 `ICoreWebView2_14` 真实订阅；WKWebView / WebKitGTK 平台目前 no-op。如未来要落地：监听 `WKNavigationDelegate::didReceiveAuthenticationChallenge`（macOS）或 `WebKitWebView::signal-load-failed-with-tls-errors`（Linux）。
 
 2. **Audible detection** — Add a polling shim that runs `document.querySelectorAll('audio, video').forEach(e => ...)` in the active tab via `webview.eval()` and feeds counts back through `browser_state`. Cheap, JS-only, ~5% overhead. Useful when LRU wants to keep audible tabs alive (batch 10 already does this for manually-muted tabs).
 
-3. **Process-level memory** — Same path as certificates: once `ICoreWebView2_5` (or `ICoreWebView2Process`) is bound, expose `WorkingSetSize` per label. Resource panel grows a fourth row "WebView 进程内存". Tauri may also add a `webview.process_id()` accessor in a future release.
+3. **Process-level memory** — `ICoreWebView2Process` (`WorkingSetSize`, `PrivateMemoryUsage`) requires the same manual COM cast as certificates but for `ICoreWebView2_5`. Once bound, expose `WorkingSetSize` per label. Resource panel grows a fourth row "WebView 进程内存". Tauri may also add a `webview.process_id()` accessor in a future release.
 
 4. **`NavigationCompleted` status** — When `wry::WebviewBuilder.on_page_load` exposes the status enum, classify the WebErrorStatus enum and forward `WebErrorStatus::Certificate*` into the certificate pipeline.
 

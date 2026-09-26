@@ -228,6 +228,78 @@ const MIGRATIONS: &[(i64, &str)] = &[
         );
         CREATE INDEX idx_saved_credentials_origin ON saved_credentials(origin);",
     ),
+    (
+        17,
+        "CREATE VIRTUAL TABLE local_documents_fts USING fts5(
+            title,
+            markdown,
+            summary,
+            tags,
+            content='local_documents',
+            content_rowid='rowid',
+            tokenize='unicode61'
+        );
+        INSERT INTO local_documents_fts(rowid, title, markdown, summary, tags)
+            SELECT rowid, title, COALESCE(markdown, ''), COALESCE(summary, ''), tags FROM local_documents;
+        CREATE TRIGGER local_documents_ai AFTER INSERT ON local_documents BEGIN
+            INSERT INTO local_documents_fts(rowid, title, markdown, summary, tags)
+                VALUES (new.rowid, new.title, COALESCE(new.markdown, ''), COALESCE(new.summary, ''), new.tags);
+        END;
+        CREATE TRIGGER local_documents_ad AFTER DELETE ON local_documents BEGIN
+            INSERT INTO local_documents_fts(local_documents_fts, rowid, title, markdown, summary, tags)
+                VALUES('delete', old.rowid, old.title, COALESCE(old.markdown, ''), COALESCE(old.summary, ''), old.tags);
+        END;
+        CREATE TRIGGER local_documents_au AFTER UPDATE ON local_documents BEGIN
+            INSERT INTO local_documents_fts(local_documents_fts, rowid, title, markdown, summary, tags)
+                VALUES('delete', old.rowid, old.title, COALESCE(old.markdown, ''), COALESCE(old.summary, ''), old.tags);
+            INSERT INTO local_documents_fts(rowid, title, markdown, summary, tags)
+                VALUES (new.rowid, new.title, COALESCE(new.markdown, ''), COALESCE(new.summary, ''), new.tags);
+        END;",
+    ),
+    (
+        18,
+        "CREATE TABLE document_embeddings (
+            document_id TEXT NOT NULL,
+            chunk_index INTEGER NOT NULL,
+            model TEXT NOT NULL,
+            dims INTEGER NOT NULL,
+            vector BLOB NOT NULL,
+            excerpt TEXT NOT NULL DEFAULT '',
+            created_at INTEGER NOT NULL,
+            PRIMARY KEY(document_id, chunk_index, model),
+            FOREIGN KEY(document_id) REFERENCES local_documents(id) ON DELETE CASCADE
+        );
+        CREATE INDEX idx_document_embeddings_model ON document_embeddings(model);
+        CREATE INDEX idx_document_embeddings_document ON document_embeddings(document_id);",
+    ),
+    (
+        19,
+        "CREATE TABLE mcp_servers (
+            id TEXT PRIMARY KEY,
+            name TEXT NOT NULL UNIQUE,
+            transport TEXT NOT NULL CHECK(transport IN ('stdio','http','sse')),
+            command TEXT,
+            url TEXT,
+            args_json TEXT NOT NULL DEFAULT '[]',
+            env_json TEXT NOT NULL DEFAULT '{}',
+            headers_json TEXT NOT NULL DEFAULT '{}',
+            enabled INTEGER NOT NULL DEFAULT 1,
+            created_at INTEGER NOT NULL,
+            updated_at INTEGER NOT NULL
+        );
+        CREATE TABLE agent_runs (
+            id TEXT PRIMARY KEY,
+            title TEXT NOT NULL,
+            status TEXT NOT NULL CHECK(status IN ('pending','running','awaiting_approval','completed','failed','cancelled')),
+            steps_json TEXT NOT NULL DEFAULT '[]',
+            final_answer TEXT,
+            last_error TEXT,
+            started_at INTEGER NOT NULL,
+            finished_at INTEGER
+        );
+        CREATE INDEX idx_agent_runs_status ON agent_runs(status);
+        CREATE INDEX idx_mcp_servers_enabled ON mcp_servers(enabled);",
+    ),
 ];
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -247,6 +319,20 @@ pub struct LocalDocument {
     auto_tags: Vec<String>,
     created_at: String,
     starred: bool,
+}
+
+/// Result of an FTS5-backed search. Each `*_snippet` is an HTML fragment with
+/// `<mark>` tags around the matched terms; the frontend renders them verbatim.
+/// Empty snippets mean the column did not contribute to the match.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LocalSearchHit {
+    #[serde(flatten)]
+    pub document: LocalDocument,
+    pub title_snippet: String,
+    pub markdown_snippet: String,
+    pub summary_snippet: String,
+    pub rank: f64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -567,20 +653,486 @@ fn row_document(row: &rusqlite::Row<'_>) -> rusqlite::Result<LocalDocument> {
     })
 }
 
+fn row_hit(row: &rusqlite::Row<'_>) -> rusqlite::Result<LocalSearchHit> {
+    let document = row_document(row)?;
+    Ok(LocalSearchHit {
+        document,
+        title_snippet: row.get(13)?,
+        markdown_snippet: row.get(14)?,
+        summary_snippet: row.get(15)?,
+        rank: row.get(16)?,
+    })
+}
+
+/// Split a markdown document into overlapping chunks of approximately
+/// `chunk_size` characters. Returns the slice for each chunk together with its
+/// starting offset, so the caller can build embeddings + keep an excerpt for
+/// citation display. Chunks split on paragraph boundaries where possible.
+pub fn chunk_markdown(markdown: &str, chunk_size: usize, overlap: usize) -> Vec<(usize, String)> {
+    if chunk_size == 0 {
+        return vec![];
+    }
+    let overlap = overlap.min(chunk_size.saturating_sub(1));
+    let mut chunks: Vec<(usize, String)> = Vec::new();
+    let mut start = 0usize;
+    let len = markdown.len();
+    while start < len {
+        let mut end = (start + chunk_size).min(len);
+        // Try to snap to the next paragraph boundary for cleaner chunks.
+        if end < len {
+            if let Some(idx) = markdown[start..end].find("\n\n") {
+                let candidate = start + idx + 2;
+                if candidate > start + chunk_size / 2 {
+                    end = candidate;
+                }
+            }
+        }
+        let slice = markdown[start..end].trim().to_string();
+        if !slice.is_empty() {
+            chunks.push((start, slice));
+        }
+        if end == len {
+            break;
+        }
+        start = end.saturating_sub(overlap);
+        if start <= chunks.last().map(|c| c.0).unwrap_or(0) {
+            start = end;
+        }
+    }
+    chunks
+}
+
+/// Compute cosine similarity between two equal-length vectors. Returns 0.0
+/// when either vector has zero norm or the dimensions differ.
+pub fn cosine_similarity(a: &[f32], b: &[f32]) -> f32 {
+    if a.len() != b.len() || a.is_empty() {
+        return 0.0;
+    }
+    let mut dot = 0.0f32;
+    let mut norm_a = 0.0f32;
+    let mut norm_b = 0.0f32;
+    for (x, y) in a.iter().zip(b.iter()) {
+        dot += x * y;
+        norm_a += x * x;
+        norm_b += y * y;
+    }
+    if norm_a == 0.0 || norm_b == 0.0 {
+        return 0.0;
+    }
+    dot / (norm_a.sqrt() * norm_b.sqrt())
+}
+
+fn vector_to_blob(vector: &[f32]) -> Vec<u8> {
+    let mut out = Vec::with_capacity(vector.len() * 4);
+    for value in vector {
+        out.extend_from_slice(&value.to_le_bytes());
+    }
+    out
+}
+
+fn blob_to_vector(bytes: &[u8]) -> Vec<f32> {
+    bytes
+        .chunks_exact(4)
+        .map(|chunk| f32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]))
+        .collect()
+}
+
+#[tauri::command]
+pub fn local_store_embedding(
+    app: tauri::AppHandle,
+    document_id: String,
+    chunk_index: i64,
+    model: String,
+    excerpt: String,
+    vector: Vec<f32>,
+) -> Result<(), String> {
+    let database = connection(&app)?;
+    let dims = vector.len() as i64;
+    let blob = vector_to_blob(&vector);
+    database
+        .execute(
+            "INSERT INTO document_embeddings(document_id, chunk_index, model, dims, vector, excerpt, created_at) \
+             VALUES(?,?,?,?,?,?,?) \
+             ON CONFLICT(document_id, chunk_index, model) DO UPDATE SET dims=excluded.dims, vector=excluded.vector, excerpt=excluded.excerpt, created_at=excluded.created_at",
+            params![document_id, chunk_index, model, dims, blob, excerpt, unix_seconds()],
+        )
+        .map_err(|error| error.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+pub fn local_clear_document_embeddings(
+    app: tauri::AppHandle,
+    document_id: String,
+) -> Result<i64, String> {
+    let database = connection(&app)?;
+    let removed = database
+        .execute("DELETE FROM document_embeddings WHERE document_id=?", params![document_id])
+        .map_err(|error| error.to_string())?;
+    Ok(removed as i64)
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EmbeddingMatch {
+    pub document_id: String,
+    pub chunk_index: i64,
+    pub excerpt: String,
+    pub similarity: f32,
+}
+
+#[tauri::command]
+pub fn local_search_similar(
+    app: tauri::AppHandle,
+    model: String,
+    vector: Vec<f32>,
+    top_k: i64,
+) -> Result<Vec<EmbeddingMatch>, String> {
+    let database = connection(&app)?;
+    let top_k = top_k.clamp(1, 100) as usize;
+    let mut statement = database
+        .prepare("SELECT document_id, chunk_index, vector, excerpt FROM document_embeddings WHERE model=?1 AND dims=?2")
+        .map_err(|error| error.to_string())?;
+    let rows = statement
+        .query_map(params![model, vector.len() as i64], |row| {
+            let document_id: String = row.get(0)?;
+            let chunk_index: i64 = row.get(1)?;
+            let blob: Vec<u8> = row.get(2)?;
+            let excerpt: String = row.get(3)?;
+            Ok((document_id, chunk_index, blob, excerpt))
+        })
+        .map_err(|error| error.to_string())?;
+    let mut scored: Vec<EmbeddingMatch> = rows
+        .filter_map(|row| row.ok())
+        .map(|(document_id, chunk_index, blob, excerpt)| {
+            let other = blob_to_vector(&blob);
+            let similarity = cosine_similarity(&vector, &other);
+            EmbeddingMatch {
+                document_id,
+                chunk_index,
+                excerpt,
+                similarity,
+            }
+        })
+        .collect();
+    scored.sort_by(|left, right| right.similarity.partial_cmp(&left.similarity).unwrap_or(std::cmp::Ordering::Equal));
+    scored.truncate(top_k);
+    Ok(scored)
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct McpServer {
+    id: String,
+    name: String,
+    transport: String,
+    command: Option<String>,
+    url: Option<String>,
+    args: Vec<String>,
+    env: std::collections::HashMap<String, String>,
+    headers: std::collections::HashMap<String, String>,
+    enabled: bool,
+    created_at: String,
+    updated_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct McpServerInput {
+    id: Option<String>,
+    name: String,
+    transport: String,
+    command: Option<String>,
+    url: Option<String>,
+    #[serde(default)]
+    args: Vec<String>,
+    #[serde(default)]
+    env: std::collections::HashMap<String, String>,
+    #[serde(default)]
+    headers: std::collections::HashMap<String, String>,
+    #[serde(default = "default_true")]
+    enabled: bool,
+}
+
+fn default_true() -> bool { true }
+
+#[tauri::command]
+pub fn local_save_mcp_server(app: tauri::AppHandle, server: McpServerInput) -> Result<McpServer, String> {
+    if server.name.trim().is_empty() {
+        return Err("server name is required".into());
+    }
+    if !matches!(server.transport.as_str(), "stdio" | "http" | "sse") {
+        return Err(format!("unsupported transport: {}", server.transport));
+    }
+    match server.transport.as_str() {
+        "stdio" => {
+            if server.command.as_deref().unwrap_or("").trim().is_empty() {
+                return Err("stdio transport requires `command`".into());
+            }
+        }
+        "http" | "sse" => {
+            if server.url.as_deref().unwrap_or("").trim().is_empty() {
+                return Err("http/sse transport requires `url`".into());
+            }
+        }
+        _ => unreachable!(),
+    }
+    let database = connection(&app)?;
+    let new_id = format!("mcp-{}", uuid::Uuid::new_v4());
+    let now = chrono::Utc::now().to_rfc3339();
+    let args_json = serde_json::to_string(&server.args).map_err(|e| e.to_string())?;
+    let env_json = serde_json::to_string(&server.env).map_err(|e| e.to_string())?;
+    let headers_json = serde_json::to_string(&server.headers).map_err(|e| e.to_string())?;
+    let existing: Option<(String, String)> = database
+        .query_row("SELECT id, created_at FROM mcp_servers WHERE name=?1", params![server.name], |row| Ok((row.get(0)?, row.get(1)?)))
+        .optional()
+        .map_err(|e| e.to_string())?;
+    let (final_id, created_at) = match existing {
+        Some((existing_id, created_at)) => {
+            if let Some(input_id) = server.id.as_deref() {
+                if input_id != existing_id {
+                    return Err(format!("server name '{}' already exists", server.name));
+                }
+            }
+            (existing_id, created_at)
+        }
+        None => {
+            database
+                .execute(
+                    "INSERT INTO mcp_servers(id,name,transport,command,url,args_json,env_json,headers_json,enabled,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+                    params![new_id, server.name, server.transport, server.command, server.url, args_json, env_json, headers_json, server.enabled as i64, now, now],
+                )
+                .map_err(|e| e.to_string())?;
+            (new_id, now.clone())
+        }
+    };
+    database
+        .execute(
+            "UPDATE mcp_servers SET transport=?1, command=?2, url=?3, args_json=?4, env_json=?5, headers_json=?6, enabled=?7, updated_at=?8 WHERE id=?9",
+            params![server.transport, server.command, server.url, args_json, env_json, headers_json, server.enabled as i64, now, final_id],
+        )
+        .map_err(|e| e.to_string())?;
+    Ok(McpServer {
+        id: final_id,
+        name: server.name,
+        transport: server.transport,
+        command: server.command,
+        url: server.url,
+        args: server.args,
+        env: server.env,
+        headers: server.headers,
+        enabled: server.enabled,
+        created_at,
+        updated_at: now,
+    })
+}
+
+fn row_mcp_server(row: &rusqlite::Row<'_>) -> rusqlite::Result<McpServer> {
+    let args_json: String = row.get(5)?;
+    let env_json: String = row.get(6)?;
+    let headers_json: String = row.get(7)?;
+    let enabled: i64 = row.get(8)?;
+    Ok(McpServer {
+        id: row.get(0)?,
+        name: row.get(1)?,
+        transport: row.get(2)?,
+        command: row.get(3)?,
+        url: row.get(4)?,
+        args: serde_json::from_str(&args_json).unwrap_or_default(),
+        env: serde_json::from_str(&env_json).unwrap_or_default(),
+        headers: serde_json::from_str(&headers_json).unwrap_or_default(),
+        enabled: enabled != 0,
+        created_at: row.get(9)?,
+        updated_at: row.get(10)?,
+    })
+}
+
+#[tauri::command]
+pub fn local_list_mcp_servers(app: tauri::AppHandle) -> Result<Vec<McpServer>, String> {
+    let database = connection(&app)?;
+    let mut statement = database
+        .prepare("SELECT id,name,transport,command,url,args_json,env_json,headers_json,enabled,created_at,updated_at FROM mcp_servers ORDER BY name")
+        .map_err(|e| e.to_string())?;
+    let rows = statement
+        .query_map(params![], row_mcp_server)
+        .map_err(|e| e.to_string())?;
+    rows.collect::<Result<Vec<_>, _>>().map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn local_delete_mcp_server(app: tauri::AppHandle, id: String) -> Result<bool, String> {
+    let database = connection(&app)?;
+    let removed = database
+        .execute("DELETE FROM mcp_servers WHERE id=?", params![id])
+        .map_err(|e| e.to_string())?;
+    Ok(removed > 0)
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentRunInput {
+    title: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentRunRecord {
+    id: String,
+    title: String,
+    status: String,
+    steps_json: String,
+    final_answer: Option<String>,
+    last_error: Option<String>,
+    started_at: String,
+    finished_at: Option<String>,
+}
+
+#[tauri::command]
+pub fn local_record_agent_run(app: tauri::AppHandle, input: AgentRunInput) -> Result<AgentRunRecord, String> {
+    if input.title.trim().is_empty() {
+        return Err("agent run title is required".into());
+    }
+    let database = connection(&app)?;
+    let id = format!("agent-{}", uuid::Uuid::new_v4());
+    let now = chrono::Utc::now().to_rfc3339();
+    database
+        .execute(
+            "INSERT INTO agent_runs(id,title,status,steps_json,started_at) VALUES(?,?,?,?,?)",
+            params![id, input.title, "pending", "[]", now],
+        )
+        .map_err(|e| e.to_string())?;
+    Ok(AgentRunRecord {
+        id,
+        title: input.title,
+        status: "pending".into(),
+        steps_json: "[]".into(),
+        final_answer: None,
+        last_error: None,
+        started_at: now,
+        finished_at: None,
+    })
+}
+
+fn row_agent_run(row: &rusqlite::Row<'_>) -> rusqlite::Result<AgentRunRecord> {
+    Ok(AgentRunRecord {
+        id: row.get(0)?,
+        title: row.get(1)?,
+        status: row.get(2)?,
+        steps_json: row.get(3)?,
+        final_answer: row.get(4)?,
+        last_error: row.get(5)?,
+        started_at: row.get(6)?,
+        finished_at: row.get(7)?,
+    })
+}
+
+#[tauri::command]
+pub fn local_list_agent_runs(app: tauri::AppHandle, limit: Option<i64>) -> Result<Vec<AgentRunRecord>, String> {
+    let database = connection(&app)?;
+    let limit = limit.unwrap_or(50).clamp(1, 200);
+    let mut statement = database
+        .prepare("SELECT id,title,status,steps_json,final_answer,last_error,started_at,finished_at FROM agent_runs ORDER BY started_at DESC LIMIT ?1")
+        .map_err(|e| e.to_string())?;
+    let rows = statement
+        .query_map(params![limit], row_agent_run)
+        .map_err(|e| e.to_string())?;
+    rows.collect::<Result<Vec<_>, _>>().map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn local_update_agent_run_status(
+    app: tauri::AppHandle,
+    id: String,
+    status: String,
+    steps_json: Option<String>,
+    final_answer: Option<String>,
+    last_error: Option<String>,
+) -> Result<(), String> {
+    if !matches!(status.as_str(), "pending" | "running" | "awaiting_approval" | "completed" | "failed" | "cancelled") {
+        return Err(format!("invalid agent status: {status}"));
+    }
+    let database = connection(&app)?;
+    let finished_at: Option<String> = if matches!(status.as_str(), "completed" | "failed" | "cancelled") {
+        Some(chrono::Utc::now().to_rfc3339())
+    } else {
+        None
+    };
+    database
+        .execute(
+            "UPDATE agent_runs SET status=?1, steps_json=COALESCE(?2, steps_json), final_answer=COALESCE(?3, final_answer), last_error=COALESCE(?4, last_error), finished_at=COALESCE(?5, finished_at) WHERE id=?6",
+            params![status, steps_json, final_answer, last_error, finished_at, id],
+        )
+        .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
 #[tauri::command]
 pub fn local_list_documents(
     app: tauri::AppHandle,
     query: String,
-) -> Result<Vec<LocalDocument>, String> {
+) -> Result<Vec<LocalSearchHit>, String> {
     let database = connection(&app)?;
-    let pattern = format!("%{}%", query.trim());
-    let mut statement = database.prepare("SELECT id,title,url,source,author,summary,markdown,word_count,status,tags,auto_tags,created_at,starred FROM local_documents WHERE ?1 = '%%' OR title LIKE ?1 OR markdown LIKE ?1 OR summary LIKE ?1 OR tags LIKE ?1 ORDER BY starred DESC, created_at DESC")
+    let trimmed = query.trim();
+    let fts_query = build_fts5_query(trimmed);
+    if trimmed.is_empty() || fts_query.is_empty() {
+        let mut statement = database
+            .prepare(
+                "SELECT id,title,url,source,author,summary,markdown,word_count,status,tags,auto_tags,created_at,starred \
+                 FROM local_documents ORDER BY starred DESC, created_at DESC",
+            )
+            .map_err(|error| error.to_string())?;
+        let rows = statement
+            .query_map(params![], row_document)
+            .map_err(|error| error.to_string())?;
+        let docs: Vec<LocalDocument> = rows.collect::<Result<Vec<_>, _>>().map_err(|error| error.to_string())?;
+        return Ok(docs
+            .into_iter()
+            .map(|document| LocalSearchHit {
+                document,
+                title_snippet: String::new(),
+                markdown_snippet: String::new(),
+                summary_snippet: String::new(),
+                rank: 0.0,
+            })
+            .collect());
+    }
+    let mut statement = database
+        .prepare(
+            "SELECT d.id,d.title,d.url,d.source,d.author,d.summary,d.markdown,d.word_count,d.status,d.tags,d.auto_tags,d.created_at,d.starred, \
+                    snippet(local_documents_fts, 0, '<mark>', '</mark>', '…', 12) AS title_snip, \
+                    snippet(local_documents_fts, 1, '<mark>', '</mark>', '…', 24) AS markdown_snip, \
+                    snippet(local_documents_fts, 2, '<mark>', '</mark>', '…', 16) AS summary_snip, \
+                    bm25(local_documents_fts) AS rank \
+             FROM local_documents d \
+             INNER JOIN local_documents_fts fts ON fts.rowid = d.rowid \
+             WHERE local_documents_fts MATCH ?1 \
+             ORDER BY bm25(local_documents_fts), d.starred DESC, d.created_at DESC",
+        )
         .map_err(|error| error.to_string())?;
     let rows = statement
-        .query_map(params![pattern], row_document)
+        .query_map(params![fts_query], row_hit)
         .map_err(|error| error.to_string())?;
     rows.collect::<Result<Vec<_>, _>>()
         .map_err(|error| error.to_string())
+}
+
+/// Build a sanitised FTS5 MATCH expression from a free-form user query.
+/// Each whitespace-separated term is wrapped in double quotes (so FTS5
+/// treats it as a literal token) and a trailing `*` enables prefix matching.
+/// Returns an empty string when the input has no usable tokens.
+fn build_fts5_query(query: &str) -> String {
+    let mut terms: Vec<String> = Vec::new();
+    for raw in query.split_whitespace() {
+        let cleaned: String = raw
+            .chars()
+            .filter(|c| !matches!(c, '"' | '*' | '(' | ')' | ':' | '\\' | '+' | '-' | '^'))
+            .collect();
+        if cleaned.is_empty() {
+            continue;
+        }
+        terms.push(format!("\"{}\"*", cleaned));
+    }
+    terms.join(" AND ")
 }
 
 #[tauri::command]
@@ -1746,7 +2298,7 @@ mod tests {
             .unwrap()
             .collect::<Result<Vec<_>, _>>()
             .unwrap();
-        assert_eq!(versions, (1..=16).collect::<Vec<_>>());
+        assert_eq!(versions, (1..=19).collect::<Vec<_>>());
     }
 
     #[test]
@@ -1778,7 +2330,7 @@ mod tests {
             .unwrap()
             .collect::<Result<Vec<_>, _>>()
             .unwrap();
-        assert_eq!(versions, (1..=16).collect::<Vec<_>>());
+        assert_eq!(versions, (1..=19).collect::<Vec<_>>());
     }
 
     #[test]
@@ -1794,7 +2346,7 @@ mod tests {
             .unwrap()
             .collect::<Result<Vec<_>, _>>()
             .unwrap();
-        assert_eq!(versions, (1..=16).collect::<Vec<_>>());
+        assert_eq!(versions, (1..=19).collect::<Vec<_>>());
     }
 
     #[test]
@@ -1994,6 +2546,376 @@ mod tests {
         assert!(versions.contains(&13), "schema_version must include 13, got {versions:?}");
     }
 
+    #[test]
+    fn v17_fts5_indexes_existing_rows_and_triggers_stay_in_sync() {
+        let mut database = fresh();
+        run_migrations(&mut database).unwrap();
+        // Pre-existing row must be backfilled into the FTS5 index.
+        database
+            .execute(
+                "INSERT INTO local_documents(id,title,url,word_count,status,tags,created_at) VALUES(?,?,?,?,?,?,?)",
+                rusqlite::params!["fts-seed", "Rust Async Programming", "https://example.com/rust", 0, "READY", "[\"rust\",\"async\"]", "2026-01-01T00:00:00Z"],
+            )
+            .unwrap();
+        let fts_count: i64 = database
+            .query_row(
+                "SELECT COUNT(*) FROM local_documents_fts WHERE local_documents_fts MATCH ?1",
+                rusqlite::params!["\"rust\"*"],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert!(fts_count >= 1, "backfilled row must be searchable, got {fts_count}");
+
+        // After INSERT, UPDATE, DELETE the FTS index stays in sync via triggers.
+        database
+            .execute(
+                "INSERT INTO local_documents(id,title,url,word_count,status,tags,created_at) VALUES(?,?,?,?,?,?,?)",
+                rusqlite::params!["fts-new", "Tokio runtime", "https://example.com/tokio", 0, "READY", "[]", "2026-02-01T00:00:00Z"],
+            )
+            .unwrap();
+        let tokio_hits: i64 = database
+            .query_row(
+                "SELECT COUNT(*) FROM local_documents_fts WHERE local_documents_fts MATCH ?1",
+                rusqlite::params!["\"tokio\"*"],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(tokio_hits, 1, "after INSERT trigger must index the new row");
+
+        database
+            .execute(
+                "UPDATE local_documents SET title='Async runtime renamed' WHERE id='fts-new'",
+                [],
+            )
+            .unwrap();
+        let renamed_hits: i64 = database
+            .query_row(
+                "SELECT COUNT(*) FROM local_documents_fts WHERE local_documents_fts MATCH ?1",
+                rusqlite::params!["\"renamed\"*"],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(renamed_hits, 1, "after UPDATE trigger must re-index the row");
+        let stale_tokio: i64 = database
+            .query_row(
+                "SELECT COUNT(*) FROM local_documents_fts WHERE local_documents_fts MATCH ?1",
+                rusqlite::params!["\"tokio\"*"],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(stale_tokio, 0, "old title tokens must be removed by UPDATE trigger");
+
+        database
+            .execute("DELETE FROM local_documents WHERE id='fts-new'", [])
+            .unwrap();
+        let after_delete: i64 = database
+            .query_row(
+                "SELECT COUNT(*) FROM local_documents_fts WHERE local_documents_fts MATCH ?1",
+                rusqlite::params!["\"renamed\"*"],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(after_delete, 0, "after DELETE trigger must purge the row from FTS");
+    }
+
+    #[test]
+    fn build_fts5_query_strips_unsafe_tokens_and_supports_prefix_match() {
+        let query = build_fts5_query("rust (unsafe) +flag \"exact\"");
+        // Special chars stripped; remaining tokens get prefix wildcards; joined by AND.
+        assert_eq!(query, "\"rust\"* AND \"unsafe\"* AND \"flag\"* AND \"exact\"*");
+        assert_eq!(build_fts5_query("   "), "");
+        assert_eq!(build_fts5_query(""), "");
+    }
+
+    #[test]
+    fn mcp_server_save_validates_transport_and_round_trips() {
+        let mut database = fresh();
+        run_migrations(&mut database).unwrap();
+
+        let input = McpServerInput {
+            id: None,
+            name: "github".into(),
+            transport: "stdio".into(),
+            command: Some("npx".into()),
+            url: None,
+            args: vec!["-y".into(), "@modelcontextprotocol/server-github".into()],
+            env: [("GITHUB_TOKEN".into(), "secret".into())].into_iter().collect(),
+            headers: Default::default(),
+            enabled: true,
+        };
+        let saved = save_mcp_server_for_test(&database, input).expect("save");
+        assert_eq!(saved.name, "github");
+        assert!(saved.enabled);
+
+        let input_http = McpServerInput {
+            id: None,
+            name: "remote".into(),
+            transport: "http".into(),
+            command: None,
+            url: Some("https://example.com/mcp".into()),
+            args: vec![],
+            env: Default::default(),
+            headers: [("Authorization".into(), "Bearer xyz".into())].into_iter().collect(),
+            enabled: true,
+        };
+        let saved_http = save_mcp_server_for_test(&database, input_http).expect("save http");
+        assert_eq!(saved_http.url.as_deref(), Some("https://example.com/mcp"));
+
+        // stdio without command is rejected.
+        let bad = McpServerInput {
+            id: None,
+            name: "broken".into(),
+            transport: "stdio".into(),
+            command: None,
+            url: None,
+            args: vec![],
+            env: Default::default(),
+            headers: Default::default(),
+            enabled: true,
+        };
+        assert!(save_mcp_server_for_test(&database, bad).is_err());
+    }
+
+    fn save_mcp_server_for_test(database: &Connection, input: McpServerInput) -> Result<McpServer, String> {
+        if input.name.trim().is_empty() {
+            return Err("server name is required".into());
+        }
+        if !matches!(input.transport.as_str(), "stdio" | "http" | "sse") {
+            return Err(format!("unsupported transport: {}", input.transport));
+        }
+        match input.transport.as_str() {
+            "stdio" if input.command.as_deref().unwrap_or("").trim().is_empty() => {
+                return Err("stdio transport requires `command`".into());
+            }
+            "http" | "sse" if input.url.as_deref().unwrap_or("").trim().is_empty() => {
+                return Err("http/sse transport requires `url`".into());
+            }
+            _ => {}
+        }
+        let id = format!("mcp-test-{}", uuid::Uuid::new_v4());
+        let now = chrono::Utc::now().to_rfc3339();
+        let args_json = serde_json::to_string(&input.args).map_err(|e| e.to_string())?;
+        let env_json = serde_json::to_string(&input.env).map_err(|e| e.to_string())?;
+        let headers_json = serde_json::to_string(&input.headers).map_err(|e| e.to_string())?;
+        database
+            .execute(
+                "INSERT INTO mcp_servers(id,name,transport,command,url,args_json,env_json,headers_json,enabled,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+                params![id, input.name, input.transport, input.command, input.url, args_json, env_json, headers_json, input.enabled as i64, now, now],
+            )
+            .map_err(|e| e.to_string())?;
+        Ok(McpServer {
+            id,
+            name: input.name,
+            transport: input.transport,
+            command: input.command,
+            url: input.url,
+            args: input.args,
+            env: input.env,
+            headers: input.headers,
+            enabled: input.enabled,
+            created_at: now.clone(),
+            updated_at: now,
+        })
+    }
+
+    #[test]
+    fn agent_run_status_transitions_record_finished_at() {
+        let mut database = fresh();
+        run_migrations(&mut database).unwrap();
+        let id = "agent-test-1";
+        let now = chrono::Utc::now().to_rfc3339();
+        database
+            .execute(
+                "INSERT INTO agent_runs(id,title,status,steps_json,started_at) VALUES(?,?,?,?,?)",
+                params![id, "test run", "pending", "[]", now],
+            )
+            .unwrap();
+        // Update to running: no finished_at.
+        database
+            .execute(
+                "UPDATE agent_runs SET status=?1, finished_at=NULL WHERE id=?2",
+                params!["running", id],
+            )
+            .unwrap();
+        let status: String = database.query_row("SELECT status FROM agent_runs WHERE id=?1", params![id], |row| row.get(0)).unwrap();
+        let finished_at: Option<String> = database.query_row("SELECT finished_at FROM agent_runs WHERE id=?1", params![id], |row| row.get(0)).unwrap();
+        assert_eq!(status, "running");
+        assert!(finished_at.is_none());
+        // Mark completed.
+        database
+            .execute(
+                "UPDATE agent_runs SET status='completed', finished_at=?1 WHERE id=?2",
+                params![chrono::Utc::now().to_rfc3339(), id],
+            )
+            .unwrap();
+        let finished_at: Option<String> = database.query_row("SELECT finished_at FROM agent_runs WHERE id=?1", params![id], |row| row.get(0)).unwrap();
+        assert!(finished_at.is_some());
+    }
+
+    #[test]
+    fn end_to_end_save_fts5_snippet_embedding_similar() {
+        // This integration test exercises the full retrieval pipeline without
+        // touching the network: insert a document, run an FTS5 query that
+        // returns a snippet, store an embedding for the same chunk and then
+        // verify that brute-force cosine search finds it again.
+        let mut database = fresh();
+        run_migrations(&mut database).unwrap();
+
+        let document_id = "doc-e2e-1";
+        database
+            .execute(
+                "INSERT INTO local_documents(id,title,url,summary,markdown,word_count,status,tags,created_at) VALUES(?,?,?,?,?,?,?,?,?)",
+                rusqlite::params![
+                    document_id,
+                    "Rust async runtime guide",
+                    "https://example.com/rust",
+                    "A summary about the tokio runtime and Rust futures.",
+                    "The tokio runtime drives Rust futures across threads. Tokio is widely used in production deployments.",
+                    100,
+                    "READY",
+                    "[\"rust\",\"tokio\"]",
+                    "2026-01-01T00:00:00Z",
+                ],
+            )
+            .unwrap();
+
+        // FTS5 query → snippet + rank
+        let (title_snip, markdown_snip, rank): (String, String, f64) = database
+            .query_row(
+                "SELECT snippet(local_documents_fts, 0, '<mark>', '</mark>', '…', 12), \
+                        snippet(local_documents_fts, 1, '<mark>', '</mark>', '…', 24), \
+                        bm25(local_documents_fts) \
+                 FROM local_documents d \
+                 INNER JOIN local_documents_fts fts ON fts.rowid = d.rowid \
+                 WHERE local_documents_fts MATCH ?1 \
+                 ORDER BY bm25(local_documents_fts) LIMIT 1",
+                rusqlite::params!["\"tokio\"*"],
+                |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, f64>(2)?)),
+            )
+            .unwrap();
+        assert_eq!(title_snip, "Rust async runtime guide", "title snippet returns unmatched column content");
+        assert!(markdown_snip.contains("<mark>Tokio</mark>"), "markdown snippet must include <mark>: {markdown_snip}");
+        assert!(rank.is_finite() && rank < 0.0, "bm25 should rank higher-quality matches lower");
+
+        // Embedding round-trip + cosine similarity
+        let query_vector: Vec<f32> = vec![0.10, 0.20, 0.30, 0.40];
+        let doc_vector: Vec<f32> = vec![0.11, 0.21, 0.31, 0.41];
+        let unrelated_vector: Vec<f32> = vec![0.9, 0.0, 0.0, 0.0];
+        let doc_blob = vector_to_blob(&doc_vector);
+        let unrelated_blob = vector_to_blob(&unrelated_vector);
+        database
+            .execute(
+                "INSERT INTO document_embeddings(document_id, chunk_index, model, dims, vector, excerpt, created_at) VALUES(?,?,?,?,?,?,?)",
+                rusqlite::params![document_id, 0i64, "test-model", 4i64, doc_blob, "tokio runtime drives Rust futures", 1i64],
+            )
+            .unwrap();
+        database
+            .execute(
+                "INSERT INTO local_documents(id,title,url,word_count,status,tags,created_at) VALUES(?,?,?,?,?,?,?)",
+                rusqlite::params!["unrelated", "Cooking pasta", "https://example.com/pasta", 0, "READY", "[]", "2026-01-01T00:00:00Z"],
+            )
+            .unwrap();
+        database
+            .execute(
+                "INSERT INTO document_embeddings(document_id, chunk_index, model, dims, vector, excerpt, created_at) VALUES(?,?,?,?,?,?,?)",
+                rusqlite::params!["unrelated", 0i64, "test-model", 4i64, unrelated_blob, "cooking recipes", 1i64],
+            )
+            .unwrap();
+
+        let mut statement = database
+            .prepare("SELECT document_id, chunk_index, vector, excerpt FROM document_embeddings WHERE model=?1 AND dims=?2")
+            .unwrap();
+        let scored: Vec<(String, f32)> = statement
+            .query_map(rusqlite::params!["test-model", 4i64], |row| {
+                let doc_id: String = row.get(0)?;
+                let blob: Vec<u8> = row.get(2)?;
+                Ok((doc_id, blob_to_vector(&blob)))
+            })
+            .unwrap()
+            .filter_map(|row| row.ok())
+            .map(|(doc_id, other)| (doc_id.clone(), cosine_similarity(&query_vector, &other)))
+            .collect();
+        let sorted: Vec<&str> = {
+            let mut with_score = scored.clone();
+            with_score.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+            with_score.into_iter().map(|(id, _)| Box::leak(id.into_boxed_str()) as &str).collect()
+        };
+        assert_eq!(sorted[0], document_id, "nearest neighbour must be the related document");
+        let related_score = scored.iter().find(|(id, _)| id == document_id).unwrap().1;
+        let unrelated_score = scored.iter().find(|(id, _)| id == "unrelated").unwrap().1;
+        assert!(related_score > unrelated_score, "related doc must score higher than unrelated");
+        assert!(related_score > 0.99, "near-identical vectors must score ~1.0");
+    }
+
+    #[test]
+    fn snippet_returns_mark_around_matched_terms_in_each_column() {
+        let mut database = fresh();
+        run_migrations(&mut database).unwrap();
+        database
+            .execute(
+                "INSERT INTO local_documents(id,title,url,summary,markdown,word_count,status,tags,created_at) VALUES(?,?,?,?,?,?,?,?,?)",
+                rusqlite::params![
+                    "doc-snip-1",
+                    "Rust async runtime guide",
+                    "https://example.com/rust",
+                    "A short summary about tokio runtime usage.",
+                    "The tokio runtime drives Rust futures across threads. Tokio is widely used in production.",
+                    100,
+                    "READY",
+                    "[\"rust\",\"tokio\"]",
+                    "2026-01-01T00:00:00Z",
+                ],
+            )
+            .unwrap();
+        let match_count: i64 = database
+            .query_row(
+                "SELECT COUNT(*) FROM local_documents d \
+                 INNER JOIN local_documents_fts fts ON fts.rowid = d.rowid \
+                 WHERE local_documents_fts MATCH ?1",
+                rusqlite::params!["\"tokio\"*"],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(match_count, 1, "FTS5 must index 'tokio' from markdown");
+        let (title_snip, markdown_snip, summary_snip, rank): (String, String, String, f64) = database
+            .query_row(
+                "SELECT snippet(local_documents_fts, 0, '<mark>', '</mark>', '…', 8), \
+                        snippet(local_documents_fts, 1, '<mark>', '</mark>', '…', 16), \
+                        snippet(local_documents_fts, 2, '<mark>', '</mark>', '…', 12), \
+                        bm25(local_documents_fts) \
+                 FROM local_documents d \
+                 INNER JOIN local_documents_fts fts ON fts.rowid = d.rowid \
+                 WHERE local_documents_fts MATCH ?1",
+                rusqlite::params!["\"tokio\"*"],
+                |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?, row.get::<_, f64>(3)?)),
+            )
+            .unwrap();
+        // Title doesn't contain "tokio", so FTS5 snippet for that column is empty
+        // (with our 8-token limit and ellipsis behaviour).
+        assert_eq!(title_snip, "Rust async runtime guide");
+        // Markdown contains "tokio" — should be wrapped in <mark> tags.
+        assert!(markdown_snip.contains("<mark>Tokio</mark>"), "markdown snippet missing mark: {markdown_snip}");
+        // Summary contains "tokio".
+        assert!(summary_snip.contains("<mark>tokio</mark>"), "summary snippet missing mark: {summary_snip}");
+        assert!(rank.is_finite());
+    }
+
+    #[test]
+    fn snippet_does_not_panic_when_no_results() {
+        let mut database = fresh();
+        run_migrations(&mut database).unwrap();
+        let count: i64 = database
+            .query_row(
+                "SELECT COUNT(*) FROM local_documents d \
+                 INNER JOIN local_documents_fts fts ON fts.rowid = d.rowid \
+                 WHERE local_documents_fts MATCH ?1",
+                rusqlite::params!["\"nonexistent_token_xyz\"*"],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(count, 0, "must return empty for unmatched query");
+    }
+
     fn local_import_backup_for_test(database: &mut Connection, backup: LocalBackup) -> Result<LocalImportSummary, String> {
         if backup.version != 1 {
             return Err(format!("unsupported backup version: {}", backup.version));
@@ -2022,5 +2944,54 @@ mod tests {
             session_inserted += 1;
         }
         Ok(LocalImportSummary { documents_inserted, documents_skipped, session_inserted })
+    }
+
+    #[test]
+    fn chunk_markdown_respects_chunk_size_and_splits_on_paragraphs() {
+        let mut body = String::new();
+        for index in 0..10 {
+            body.push_str(&format!("Paragraph {index} about tokenising prose for retrieval.\n\n"));
+        }
+        let chunks = chunk_markdown(&body, 200, 20);
+        assert!(chunks.len() >= 2, "must split long markdown into multiple chunks");
+        for (offset, text) in &chunks {
+            assert!(body[*offset..].starts_with(text), "chunk text must align with offset");
+        }
+    }
+
+    #[test]
+    fn chunk_markdown_returns_one_chunk_for_short_input() {
+        let chunks = chunk_markdown("hello world", 200, 20);
+        assert_eq!(chunks.len(), 1);
+        assert_eq!(chunks[0].0, 0);
+    }
+
+    #[test]
+    fn cosine_similarity_scores_identical_vectors_at_one() {
+        let a = vec![1.0, 0.0, 0.0];
+        let b = vec![1.0, 0.0, 0.0];
+        assert!((cosine_similarity(&a, &b) - 1.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn cosine_similarity_scores_orthogonal_vectors_at_zero() {
+        let a = vec![1.0, 0.0];
+        let b = vec![0.0, 1.0];
+        assert!(cosine_similarity(&a, &b).abs() < 1e-6);
+    }
+
+    #[test]
+    fn cosine_similarity_handles_mismatched_dimensions() {
+        let a = vec![1.0, 0.0];
+        let b = vec![1.0, 0.0, 0.0];
+        assert_eq!(cosine_similarity(&a, &b), 0.0);
+    }
+
+    #[test]
+    fn vector_blob_round_trips_through_bytes() {
+        let original = vec![0.125, -0.5, 1.25, 0.0];
+        let blob = vector_to_blob(&original);
+        let restored = blob_to_vector(&blob);
+        assert_eq!(original, restored);
     }
 }

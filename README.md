@@ -36,7 +36,7 @@ Arcadia 是一款以浏览器为入口、以本地知识库为核心的桌面阅
 
 内容处理：`@mozilla/readability`、Turndown 和 Markdown。
 
-可选服务端：Go 1.24、SQLite、FTS5 和 REST API。
+检索：桌面内置 SQLite **FTS5**（`local_documents_fts` 虚表 + 自动同步触发器），支持 BM25 排序与前缀匹配。
 
 ## 架构
 
@@ -49,14 +49,15 @@ Arcadia 是一款以浏览器为入口、以本地知识库为核心的桌面阅
 ┌──────────────────────▼───────────────────────┐
 │ Tauri / Rust                                 │
 │ WebView 生命周期、导航、安全边界、本地存储   │
+│ local_documents + local_documents_fts (FTS5)  │
 └──────────────┬───────────────────────────────┘
                │
-        ┌──────▼──────┐       可选
-        │ 本地 SQLite │   ───────────► Go API / AI Provider
+        ┌──────▼──────┐
+        │ AI Provider │   (OpenAI-compatible / Ollama，本地或远端)
         └─────────────┘
 ```
 
-桌面应用采用本地优先设计。文档保存和检索由 Tauri 原生层管理，因此关闭 Go 服务后，浏览器、阅读模式、保存、知识库和本地搜索仍可使用。Go 后端保留给更复杂的异步处理、FTS5、AI 和未来的同步任务。
+桌面应用采用本地优先设计。文档保存、检索和全文搜索全部由 Tauri 原生层管理，不依赖任何外部服务进程。
 
 远程网页运行在独立子 WebView 中。网页内容不能直接调用应用的高权限命令；React UI 通过受控的 Tauri command 完成导航、页面快照和 SQLite 操作。
 
@@ -74,15 +75,10 @@ Arcadia 是一款以浏览器为入口、以本地知识库为核心的桌面阅
 │   │   └── styles/                  # 全局与紧凑布局样式
 │   └── src-tauri/
 │       ├── src/browser/             # URL 规范化
-│       ├── src/local_store.rs       # 桌面 SQLite 文档存储
+│       ├── src/local_store.rs       # 桌面 SQLite + FTS5 文档存储
 │       ├── src/plugins/             # 插件模型与权限占位
 │       └── src/lib.rs               # Tauri commands 与启动逻辑
-├── backend/
-│   ├── cmd/server/                  # 可选 Go 服务入口
-│   ├── internal/document/           # 文档领域与 Repository
-│   ├── internal/httpapi/            # REST API
-│   └── internal/storage/            # 服务端 SQLite
-└── docs/                            # PRD、架构、API 与路线图
+└── docs/                            # PRD、架构与路线图
 ```
 
 ## 环境要求
@@ -92,7 +88,6 @@ Arcadia 是一款以浏览器为入口、以本地知识库为核心的桌面阅
 - Rust stable 与 Cargo
 - Tauri 2 对应的平台编译依赖
 - Windows：Microsoft Edge WebView2 Runtime
-- 可选：Go 1.24（仅在运行独立后端时需要）
 
 平台依赖的安装方式请参考 [Tauri prerequisites](https://v2.tauri.app/start/prerequisites/)。
 

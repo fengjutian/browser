@@ -4,18 +4,19 @@
 
 ```text
 React UI
-  │ typed HTTP / Tauri commands
-Tauri + Rust ── WebView / OS / download / privacy / secure storage
-  │ localhost authenticated HTTP
-Go Backend ── document / reader / knowledge / search / AI / task
-  │
-SQLite + FTS5 ── P1: vector index ── optional remote providers
+  │ typed Tauri commands
+Tauri + Rust ── WebView / OS / download / privacy / secure storage /
+                local_documents + local_documents_fts (FTS5) /
+                collections / tasks / ai_providers / downloads / history /
+                bookmarks / workspaces / reading_activity / saved_credentials
+  │ optional remote providers
+AI Provider (OpenAI-compatible / Ollama，本地或远端)
 ```
 
 - React 只负责交互和显示，不持有 API Key，不直接读写数据库。
-- Rust 管理 WebView、系统权限和安全边界，不承载 RAG 业务。
-- Go 是领域逻辑与异步任务的唯一实现位置。
-- 本地 HTTP 服务仅监听 loopback，并在正式版本使用每次启动生成的 bearer token。
+- Rust 管理 WebView、系统权限、安全边界、所有本地数据与全文检索（FTS5）；不依赖任何本地 HTTP 服务。
+- 桌面应用不暴露 HTTP API。如需多端协作，应在 Rust 端构建独立服务。
+- AI Provider 仅指外部大模型 API（OpenAI-compatible / Ollama 等），所有调用均由 Rust 端直接发出。
 
 ## 前端工程结构
 
@@ -41,15 +42,16 @@ UI 基础设施采用 Ant Design，图标统一来自 `@ant-design/icons`；品�
 ## 保存状态机
 
 ```text
-POST document → PENDING → PROCESSING
-                           ├─ extract
-                           ├─ normalize/markdown
-                           ├─ chunk + FTS index
-                           ├─ async embedding/summary/tag
-                           └─ READY | FAILED
+BrowserPage.save()
+  ├─ browser_snapshot(label) → URL + HTML（≤ 8 MiB）
+  ├─ extractArticle(snapshot) → Markdown + metadata（失败则中止，不写占位）
+  ├─ local_save_document(document)
+  │    ├─ INSERT OR REPLACE INTO local_documents
+  │    └─ AFTER INSERT 触发器同步 local_documents_fts
+  └─ local_get_document(id) → 详情回显
 ```
 
-正文持久化完成即可向用户返回；AI 任务失败不回滚文章。任务应具备幂等键、重试次数和最后错误信息。
+文档保存即 READY（无 PENDING/PROCESSING 中间态）。后续 P1 计划加入后台任务队列（Rust 端 `tasks` 表 + 状态机）以承载 embedding / summary / 自动标签等长任务，失败不回滚已保存的正文。任务应具备幂等键、重试次数和最后错误信息。
 
 ## 搜索演进
 

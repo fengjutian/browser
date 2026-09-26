@@ -6,6 +6,8 @@ pub mod providers;
 pub mod session_lock;
 pub mod webview_compat;
 pub mod certificate_guard;
+pub mod privacy;
+pub mod capabilities;
 pub mod bookmarks;
 pub mod process_memory;
 pub mod permission_guard;
@@ -15,7 +17,7 @@ use serde::{Deserialize, Serialize};
 use rusqlite::params;
 use std::collections::HashMap;
 use std::sync::Mutex;
-use std::time::Duration;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tauri::image::Image;
 use tauri::menu::MenuBuilder;
 use tauri::webview::DownloadEvent;
@@ -159,35 +161,8 @@ struct BrowserCapabilities {
     tauri_runtime_version: Option<&'static str>,
 }
 
-#[tauri::command]
-fn browser_capabilities() -> BrowserCapabilities {
-    // Each flag reflects what the bundled Tauri 2 + wry + platform runtime can
-    // do without extra native crates. See docs/browser-native-capability-matrix.md
-    // for the source-of-truth citations.
-    BrowserCapabilities {
-        download_progress_bytes: true,   // tauri::webview::DownloadEvent::Progress
-        download_pause_resume: false,    // not exposed by Tauri 2 stable; would need reqwest streaming
-        download_cancel: true,           // return false from on_download Requested
-        native_permission_events: cfg!(target_os = "windows"),
-        native_context_menu: false,      // wry has no context-menu integration in stable
-        clear_site_data: cfg!(target_os = "windows"),
-        certificate_error_interceptor: cfg!(target_os = "windows"),
-        webview_backend: Some(webview_backend_label()),
-        tauri_runtime_version: Some(env!("CARGO_PKG_VERSION")),
-    }
-}
-
-#[cfg(target_os = "windows")]
-fn webview_backend_label() -> &'static str { "webview2" }
-
-#[cfg(target_os = "macos")]
-fn webview_backend_label() -> &'static str { "wkwebview" }
-
-#[cfg(target_os = "linux")]
-fn webview_backend_label() -> &'static str { "webkitgtk" }
-
-#[cfg(not(any(target_os = "windows", target_os = "macos", target_os = "linux")))]
-fn webview_backend_label() -> &'static str { "unknown" }
+#[allow(dead_code)]
+type _UnusedCapabilitiesAlias = capabilities::BrowserCapabilities;
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -699,6 +674,7 @@ async fn browser_create(
     // Intercept WebView2 certificate failures and defer the navigation until
     // the user explicitly rejects it or allows this navigation once.
     certificate_guard::attach_certificate_guard(&app, &label);
+    privacy::attach_navigation_guard(&app, &label);
     permission_guard::attach_permission_guard(&app, &label, permissions.unwrap_or_default(), private_mode);
     let navs = app.state::<NavStacks>();
     let mut guard = navs.stacks.lock().map_err(|_| "nav stack poisoned".to_string())?;
@@ -1344,6 +1320,164 @@ async fn ai_chat(
     provider.chat(request).await.map_err(|error| error.to_string())
 }
 
+#[derive(Default)]
+pub struct AiStreamRegistry {
+    inner: std::sync::Mutex<std::collections::HashMap<String, tokio_util::sync::CancellationToken>>,
+}
+
+impl AiStreamRegistry {
+    fn register(&self, id: String, token: tokio_util::sync::CancellationToken) {
+        if let Ok(mut map) = self.inner.lock() {
+            map.insert(id, token);
+        }
+    }
+    fn cancel(&self, id: &str) -> bool {
+        self.inner
+            .lock()
+            .ok()
+            .and_then(|mut map| map.remove(id))
+            .map(|token| { token.cancel(); true })
+            .unwrap_or(false)
+    }
+    fn finish(&self, id: &str) {
+        if let Ok(mut map) = self.inner.lock() {
+            map.remove(id);
+        }
+    }
+}
+
+#[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+struct AiStreamChunkEvent {
+    stream_id: String,
+    delta: String,
+    finish_reason: Option<String>,
+    done: bool,
+    prompt_tokens: Option<u64>,
+    completion_tokens: Option<u64>,
+}
+
+#[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+struct AiStreamErrorEvent {
+    stream_id: String,
+    message: String,
+    retryable: bool,
+}
+
+#[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+struct AiStreamCancelledEvent {
+    stream_id: String,
+}
+
+#[tauri::command]
+async fn ai_chat_stream(
+    app: tauri::AppHandle,
+    registry: tauri::State<'_, AiStreamRegistry>,
+    provider_id: String,
+    request: ChatRequest,
+) -> Result<String, String> {
+    let database = local_store::connection(&app)?;
+    let (provider_type, base_url, model, timeout_seconds): (String, String, String, i64) = database
+        .prepare("SELECT provider_type,base_url,model,timeout_seconds FROM ai_providers WHERE id=?")
+        .map_err(|error| error.to_string())?
+        .query_row(params![provider_id], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)))
+        .map_err(|error| error.to_string())?;
+    let timeout = Duration::from_secs(timeout_seconds.clamp(1, 600) as u64);
+    let api_key = keyring::Entry::new(KEYRING_SERVICE, &provider_id)
+        .ok()
+        .and_then(|entry| entry.get_password().ok())
+        .filter(|value| !value.is_empty());
+    let provider: Box<dyn AiProvider> = match provider_type.as_str() {
+        "openai-compatible" | "deepseek" | "qwen" | "kimi" | "minimax" => Box::new(providers::openai::OpenAICompatibleProvider {
+            base_url,
+            model,
+            api_key: api_key.clone(),
+            timeout,
+        }),
+        "ollama" => Box::new(providers::ollama::OllamaProvider { base_url, model, timeout }),
+        other => return Err(format!("unknown provider type: {other}")),
+    };
+    if provider.type_id() == "openai-compatible" && api_key.is_none() {
+        return Err("missing api key for openai-compatible provider".into());
+    }
+
+    let stream_id = format!("ai-{}-{}", uuid::Uuid::new_v4(), unix_millis());
+    let cancel = tokio_util::sync::CancellationToken::new();
+    registry.register(stream_id.clone(), cancel.clone());
+
+    let (tx, mut rx) = tokio::sync::mpsc::channel::<providers::ChatChunk>(64);
+    let provider_arc: std::sync::Arc<dyn AiProvider> = std::sync::Arc::from(provider);
+
+    let stream_id_for_task = stream_id.clone();
+    let app_for_task = app.clone();
+    let provider_for_task = provider_arc.clone();
+    tokio::spawn(async move {
+        let result = provider_for_task.chat_stream(request, tx, cancel).await;
+        match result {
+            Ok(()) => {
+                let _ = app_for_task.emit("ai://stream-done", AiStreamCancelledEvent { stream_id: stream_id_for_task.clone() });
+            }
+            Err(providers::ProviderError::Cancelled) => {
+                let _ = app_for_task.emit("ai://stream-cancelled", AiStreamCancelledEvent { stream_id: stream_id_for_task.clone() });
+            }
+            Err(error) => {
+                let retryable = is_retryable(&error);
+                let _ = app_for_task.emit(
+                    "ai://stream-error",
+                    AiStreamErrorEvent {
+                        stream_id: stream_id_for_task.clone(),
+                        message: error.to_string(),
+                        retryable,
+                    },
+                );
+            }
+        }
+        if let Some(state) = app_for_task.try_state::<AiStreamRegistry>() {
+            state.finish(&stream_id_for_task);
+        }
+    });
+
+    let stream_id_for_emit = stream_id.clone();
+    let app_for_emit = app.clone();
+    tokio::spawn(async move {
+        while let Some(chunk) = rx.recv().await {
+            let _ = app_for_emit.emit(
+                "ai://stream-chunk",
+                AiStreamChunkEvent {
+                    stream_id: stream_id_for_emit.clone(),
+                    delta: chunk.delta,
+                    finish_reason: chunk.finish_reason,
+                    done: chunk.done,
+                    prompt_tokens: chunk.prompt_tokens,
+                    completion_tokens: chunk.completion_tokens,
+                },
+            );
+        }
+    });
+
+    Ok(stream_id)
+}
+
+fn is_retryable(error: &providers::ProviderError) -> bool {
+    matches!(error,
+        providers::ProviderError::Http(_) | providers::ProviderError::ProviderStatus { status: 408 | 409 | 425 | 429 | 500 | 502 | 503 | 504, .. }
+    )
+}
+
+fn unix_millis() -> i64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or(0)
+}
+
+#[tauri::command]
+fn ai_chat_cancel(registry: tauri::State<'_, AiStreamRegistry>, stream_id: String) -> bool {
+    registry.cancel(&stream_id)
+}
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct ProviderTestResult {
@@ -1417,6 +1551,8 @@ pub fn run() {
         .manage(NavStacks::default())
         .manage(DownloadIndex::default())
         .manage(downloads::DownloadManager::default())
+        .manage(privacy::NavBlockRegistry::default())
+        .manage(AiStreamRegistry::default())
         .manage(PermissionWaiters::default())
         .setup(|app| {
             // Set the runtime window icon explicitly as well as the bundled executable
@@ -1479,7 +1615,7 @@ pub fn run() {
             browser_toolbar_menu,
             browser_toolbar_panel,
             browser_snapshot,
-            browser_capabilities,
+            capabilities::browser_capabilities,
             browser_permission_request,
             browser_permission_respond,
             browser_password_autofill,
@@ -1524,7 +1660,18 @@ pub fn run() {
             local_store::local_get_ai_provider,
             local_store::local_list_ai_providers,
             local_store::local_delete_ai_provider,
+            local_store::local_store_embedding,
+            local_store::local_clear_document_embeddings,
+            local_store::local_search_similar,
+            local_store::local_save_mcp_server,
+            local_store::local_list_mcp_servers,
+            local_store::local_delete_mcp_server,
+            local_store::local_record_agent_run,
+            local_store::local_list_agent_runs,
+            local_store::local_update_agent_run_status,
             ai_chat,
+            ai_chat_stream,
+            ai_chat_cancel,
             ai_test_provider,
             local_store::local_get_session,
             local_store::local_set_session,
@@ -1687,21 +1834,6 @@ mod tests {
         assert!(stack.can_go_forward());
         stack.observe("https://example.com/c".into());
         assert_eq!(stack.index, 2);
-    }
-
-    #[test]
-    fn capability_flags_match_matrix_expectations() {
-        let caps = browser_capabilities();
-        // Reflect docs/browser-native-capability-matrix.md — change in lockstep.
-        assert!(caps.download_progress_bytes, "Tauri 2 DownloadEvent::Progress is observable");
-        assert!(!caps.download_pause_resume, "no pause/resume API in stable");
-        assert!(caps.download_cancel, "Requested handler returning false cancels");
-        assert_eq!(caps.native_permission_events, cfg!(target_os = "windows"));
-        assert!(!caps.native_context_menu, "wry has no context menu integration");
-        assert_eq!(caps.clear_site_data, cfg!(target_os = "windows"));
-        assert_eq!(caps.certificate_error_interceptor, cfg!(target_os = "windows"));
-        assert!(caps.webview_backend.is_some(), "backend label must be set on every target");
-        assert!(caps.tauri_runtime_version.is_some(), "tauri runtime version must be set");
     }
 
     #[test]

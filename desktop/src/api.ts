@@ -189,6 +189,48 @@ export async function aiChat(providerId: string, request: ChatRequest): Promise<
   return invoke<ChatResponse>('ai_chat', { providerId, request })
 }
 
+export interface EmbeddingMatch {
+  documentId: string
+  chunkIndex: number
+  excerpt: string
+  similarity: number
+}
+
+export async function storeDocumentEmbedding(
+  documentId: string,
+  chunkIndex: number,
+  model: string,
+  excerpt: string,
+  vector: number[],
+): Promise<void> {
+  if (!isTauri()) return
+  await invoke('local_store_embedding', { documentId, chunkIndex, model, excerpt, vector })
+}
+
+export async function clearDocumentEmbeddings(documentId: string): Promise<number> {
+  if (!isTauri()) return 0
+  return invoke<number>('local_clear_document_embeddings', { documentId })
+}
+
+export async function searchSimilarEmbeddings(
+  model: string,
+  vector: number[],
+  topK = 8,
+): Promise<EmbeddingMatch[]> {
+  if (!isTauri()) return []
+  return invoke<EmbeddingMatch[]>('local_search_similar', { model, vector, topK })
+}
+
+export async function aiChatStream(providerId: string, request: ChatRequest): Promise<string> {
+  if (!isTauri()) throw new Error('Document unavailable')
+  return invoke<string>('ai_chat_stream', { providerId, request })
+}
+
+export async function aiChatCancel(streamId: string): Promise<boolean> {
+  if (!isTauri()) return false
+  return invoke<boolean>('ai_chat_cancel', { streamId })
+}
+
 export async function aiTestProvider(providerId: string): Promise<ProviderTestResult> {
   if (!isTauri()) throw new Error('Document unavailable')
   return invoke<ProviderTestResult>('ai_test_provider', { providerId })

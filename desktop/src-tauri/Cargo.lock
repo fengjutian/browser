@@ -46,6 +46,7 @@ dependencies = [
  "tauri-plugin-dialog",
  "thiserror 1.0.69",
  "tokio",
+ "tokio-util",
  "url",
  "uuid",
  "webview2-com",
@@ -3951,6 +3952,7 @@ dependencies = [
  "bytes",
  "futures-core",
  "futures-sink",
+ "futures-util",
  "pin-project-lite",
  "tokio",
 ]

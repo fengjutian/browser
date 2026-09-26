@@ -25,9 +25,8 @@ AI Provider、跨文档问答、隐私拦截、同步和完整插件运行时仍
 | 桌面 UI | React 19、TypeScript、Vite 6、Ant Design 6、SCSS | 页面、标签状态、阅读器、知识库和设置界面 |
 | 桌面壳 | Tauri 2、Rust | 子 WebView、受控导航、页面快照、本地 SQLite、应用打包 |
 | 内容处理 | Mozilla Readability、Turndown、React Markdown | 正文识别、HTML 清理、Markdown 转换和展示 |
-| 可选服务 | Go 1.24、`net/http` | REST API、文档领域逻辑、后台处理队列 |
-| 持久化 | `rusqlite`、`modernc.org/sqlite`、SQLite FTS5 | 桌面本地文档；可选服务端文档和全文索引 |
-| 测试 | Vitest、Cargo test、Go test | 前端测试框架、Rust 单元测试、Go API/Repository/Processor 测试 |
+| 持久化 | `rusqlite` + SQLite **FTS5**（`local_documents_fts` 虚表 + 触发器同步） | 桌面本地文档、标签、集合、任务队列、AI Provider、下载、历史、书签、工作区、阅读活动、凭证 |
+| 测试 | Vitest、Cargo test | 前端测试框架、Rust 单元测试 + 集成测试 |
 
 ## 3. 仓库结构
 
@@ -48,15 +47,8 @@ AI Provider、跨文档问答、隐私拦截、同步和完整插件运行时仍
 │       ├── src/browser/             # URL 规范化
 │       ├── src/plugins/             # 插件模型和占位运行时
 │       ├── src/lib.rs               # Tauri commands 与启动入口
-│       └── src/local_store.rs       # 桌面 SQLite
-├── backend/
-│   ├── cmd/server/                  # Go 服务入口
-│   ├── internal/ai/                 # AI 抽象接口
-│   ├── internal/document/           # 文档模型、Repository 和 Processor
-│   ├── internal/httpapi/            # REST API
-│   ├── internal/storage/            # Go SQLite 初始化
-│   └── migrations/                  # 目标数据库结构参考
-├── docs/                            # 产品、架构、API、路线图和本文档
+│       └── src/local_store.rs       # 桌面 SQLite + FTS5
+├── docs/                            # 产品、架构、路线图和本文档
 └── specs/                           # 需求规格、计划和任务拆分
 ```
 
@@ -78,20 +70,7 @@ flowchart LR
 
 桌面应用不依赖 Go 服务即可完成浏览、正文提取、保存、列表、详情、搜索和删除。`desktop/src/api.ts` 通过 Tauri `invoke` 调用 `local_*` commands；纯 Web 开发模式没有原生存储，因此列表为空、网页区域使用预览内容。
 
-### 4.2 可选 Go 服务路径
-
-```mermaid
-flowchart LR
-    C[HTTP Client] --> API[Go HTTP API :8787]
-    API --> R[Repository]
-    R --> S[(Go knowledge.db + FTS5)]
-    API --> Q[Processor Queue]
-    Q --> R
-```
-
-Go 服务提供更完整的领域模型、FTS5 和进程内后台队列，但当前 React 桌面端没有将其作为默认数据源，也没有自动启动 sidecar。桌面 SQLite 和 Go SQLite 是两个独立数据库。
-
-### 4.3 边界原则
+### 4.2 边界原则
 
 - 远程网页运行在独立子 WebView 中，不直接获得 Tauri privileged command 权限。
 - React UI 只通过受控 command 获取网页状态、快照和本地数据。
@@ -114,7 +93,7 @@ main.tsx → App.tsx → AppRouter.tsx → AppLayout.tsx → 页面组件
 | --- | --- | --- |
 | `browser` | `BrowserPage` | 可用 |
 | `library` | `LibraryPage` | 可用 |
-| `search` | `SearchPage` | 可用，桌面端为 SQLite LIKE 搜索 |
+| `search` | `SearchPage` | 可用，桌面端为 SQLite **FTS5** + BM25 排序 + 前缀匹配 |
 | `ai` | `AssistantPage` | 数据源展示可用，问答未接通 |
 | `settings` | `SettingsPage` | 大部分为占位，Provider 表单未持久化 |
 
@@ -204,7 +183,7 @@ sequenceDiagram
 
 | 前端函数 | Tauri command | 行为 |
 | --- | --- | --- |
-| `listDocuments(query)` | `local_list_documents` | 列表和字段模糊匹配，按收藏优先 |
+| `listDocuments(query)` | `local_list_documents` | 列表与 FTS5 全文检索（`bm25()` 排序），空查询按收藏优先 |
 | `saveDocument(input)` | `local_save_document` | 生成本地 ID 后写入 |
 | `getDocument(id)` | `local_get_document` | 读取详情 |
 | `deleteDocument(id)` | `local_delete_document` | 删除文档 |
@@ -230,7 +209,7 @@ sequenceDiagram
 | `browser_history` | `label, delta` | `()` | 只接受 `-1` 或 `1` |
 | `browser_state` | `label` | `BrowserState` | URL、标题、favicon、加载状态 |
 | `browser_snapshot` | `label` | `PageSnapshot` | URL 和完整 HTML，限制 8 MiB |
-| `local_list_documents` | `query` | `LocalDocument[]` | 本地列表/搜索，按 `starred DESC, created_at DESC` |
+| `local_list_documents` | `query` | `LocalDocument[]` | FTS5 `MATCH` 搜索（`bm25()` 排序），空查询按 `starred DESC, created_at DESC` |
 | `local_save_document` | `document` | `LocalDocument` | `INSERT OR REPLACE` |
 | `local_get_document` | `id` | 文档或 `null` | 本地详情 |
 | `local_delete_document` | `id` | `()` | 本地删除 |
@@ -251,7 +230,7 @@ WebView 脚本通过 `eval_with_callback` 执行，等待上限为 5 秒。comma
 
 ```text
 default-src 'self';
-connect-src 'self' http://127.0.0.1:8787;
+connect-src 'self';
 img-src 'self' asset: https: data:;
 style-src 'self' 'unsafe-inline' https://fonts.googleapis.com;
 font-src https://fonts.gstatic.com
@@ -286,133 +265,27 @@ font-src https://fonts.gstatic.com
 
 通用 K/V 表 `local_session (key, value, updated_at)`（v3 迁移加入）支持 `local_get_session` / `local_set_session` commands，用于 BrowserPage 在挂载时恢复 tabs 与 activeTabId，变更后 500ms debounce 落盘。
 
-`local_documents` + `local_session` 全量导出为 JSON（`local_export_backup`），按文档 id 做 upsert 导入（`local_import_backup`），设置页"知识库"标签内提供"导出备份" / "从文件恢复"按钮（基于 Blob 下载 + HTML input file，无需 fs 插件）。备份结构 `version=1`、保留时间戳与两类数据。FTS5、分页仍未引入。
+`local_documents` + `local_session` 全量导出为 JSON（`local_export_backup`），按文档 id 做 upsert 导入（`local_import_backup`），设置页"知识库"标签内提供"导出备份" / "从文件恢复"按钮（基于 Blob 下载 + HTML input file，无需 fs 插件）。备份结构 `version=1`、保留时间戳与两类数据。
 
-### 7.2 Go 服务数据库
+### 7.2 FTS5 全文索引（迁移 #17）
 
-Go 服务默认使用 `backend/data/knowledge.db`，可通过 `AKB_DATA_DIR` 修改。连接启用：
+虚表 `local_documents_fts` 与 `local_documents` 通过 `content='local_documents'` 绑定，使用 `tokenize='unicode61'` 分词器，索引字段：`title`、`markdown`、`summary`、`tags`。迁移在主表 → 虚表之间挂三个触发器保持同步：
 
-- foreign keys
-- WAL journal mode
-- 5000 ms busy timeout
+- `local_documents_ai` AFTER INSERT
+- `local_documents_ad` AFTER DELETE
+- `local_documents_au` AFTER UPDATE
 
-实际运行时由 `internal/storage/sqlite.go` 内嵌 schema 建表，包括：
+查询时通过 `INNER JOIN local_documents_fts fts ON fts.rowid = d.rowid` 关联主表，`WHERE local_documents_fts MATCH ?1` 执行匹配，`ORDER BY bm25(local_documents_fts)` 使用 SQLite 内置 Okapi BM25 排序。用户输入经 `build_fts5_query` 清洗：剥离 `"`、`*`、`(`、`)`、`:`、`\`、`+`、`-`、`^` 等 FTS5 元字符，每个剩余词项用双引号包裹并附加 `*` 前缀通配符，多个词项 `AND` 组合。空查询或全部符号被剥离的查询降级为按 `starred DESC, created_at DESC` 全列表。
 
-- `documents`
-- `tags`
-- `document_tags`
-- `documents_fts`
+`local_documents` 主键是 TEXT，没有显式 INTEGER 主键，因此 FTS5 通过隐式 `rowid` 关联，`content_rowid='rowid'` 在 schema 中显式标注。
 
-`backend/migrations/001_init.sql` 还声明了 collections、chunks、assets，但当前 `storage.Open()` 不读取该迁移文件，因此这些表不会仅因启动服务而创建。开发时应以运行时代码为准，或先统一迁移机制。
+## 8. （已合并到 §7）
 
-### 7.3 双存储差异
+历史版本曾规划独立的 Go 后端提供文档 API、FTS5 和处理队列，但桌面应用从未真正调用该服务；Rust 端 `local_store.rs` 已经承担所有文档持久化与全文检索职责，Go 后端代码（`backend/`）已删除。如需远程同步或多端协作，应在 Rust 端构建独立服务，避免再次出现双存储。
 
-| 能力 | 桌面 SQLite | Go SQLite |
-| --- | --- | --- |
-| 默认被 React 使用 | 是 | 否 |
-| 文档 CRUD | 是 | 是 |
-| 搜索 | SQL `LIKE` | FTS5 |
-| 标签关系表 | 否，JSON 字符串 | 是 |
-| 状态处理队列 | 否，保存即 READY | 是，进程内队列 |
-| 数据同步 | 不支持 | 不支持 |
+## 9. （无独立 HTTP API）
 
-严禁假设两个 `knowledge.db` 是同一个数据库或会自动同步。
-
-## 8. Go 后端
-
-### 8.1 启动生命周期
-
-`backend/cmd/server/main.go`：
-
-1. 监听 `SIGINT`/`SIGTERM`。
-2. 读取监听地址和数据目录。
-3. 打开 SQLite 并执行内嵌迁移。
-4. 创建 `SQLiteRepository`。
-5. 创建容量 128 的 `Processor`。
-6. 启动 Processor goroutine。
-7. 在 loopback 地址启动 HTTP 服务。
-
-环境变量：
-
-| 变量 | 默认值 | 说明 |
-| --- | --- | --- |
-| `AKB_ADDR` | `127.0.0.1:8787` | HTTP 监听地址 |
-| `AKB_DATA_DIR` | `data` | 相对当前工作目录的数据目录 |
-
-### 8.2 Repository
-
-`Repository` 定义 `Create/List/Get/Update/Delete`。实现包括：
-
-- `MemoryRepository`：测试和轻量运行使用，进程退出即丢失。
-- `SQLiteRepository`：生产型 Go 存储，实现事务、标签关系和 FTS5 更新。
-
-SQLite Create/Update/Delete 会在同一事务内维护主表、标签和 FTS 索引。搜索将输入拆成词项，转义双引号后生成 `"term"* AND ...` 查询。
-
-### 8.3 文档状态机
-
-```mermaid
-stateDiagram-v2
-    [*] --> PENDING: Create
-    PENDING --> PROCESSING: Processor 获取任务
-    PROCESSING --> READY: Markdown 或 Content 非空
-    PROCESSING --> FAILED: 无可处理正文
-    READY --> ARCHIVED: 领域枚举已定义，API 未实现归档动作
-```
-
-Processor 使用有界 channel 和 `sync.Map` 去重：
-
-- 相同文档已排队时，重复 `Enqueue` 返回成功但不重复入队。
-- 队列满时返回 false，HTTP 创建接口返回 `503 queue_full`。
-- 队列同时落到 `processor_queue` 表（`SQLiteQueuePersistence`），进程重启时通过 `Processor.RestorePending(ctx)` 重新灌入 channel。
-- 仍然是单进程单 Worker，没有重试调度与多 Worker 协调；没有结构化错误上报。
-
-## 9. HTTP API
-
-Base URL：`http://127.0.0.1:8787/api/v1`
-
-统一错误结构：
-
-```json
-{
-  "error": {
-    "code": "validation_error",
-    "message": "title and url are required"
-  }
-}
-```
-
-请求 JSON 限制为 1 MiB，并拒绝未知字段。
-
-### 9.1 已实现端点
-
-| 方法 | 路径 | 说明 |
-| --- | --- | --- |
-| GET | `/health` | 健康状态和版本 |
-| GET | `/documents?q=` | 文档列表/搜索 |
-| POST | `/documents` | 创建并尝试入处理队列 |
-| GET | `/documents/{id}` | 文档详情 |
-| PUT | `/documents/{id}` | 更新可编辑字段 |
-| DELETE | `/documents/{id}` | 删除文档，成功返回 204 |
-| GET | `/search?q=` | keyword 搜索 |
-| POST | `/search` | `{ "query": "..." }` |
-| POST | `/knowledge/search` | 当前复用 keyword 搜索 |
-| GET | `/knowledge` | 文档、标签、集合数量 |
-| GET | `/plugins` | 返回空列表和 runtime 不可用状态 |
-
-### 9.2 占位端点
-
-以下端点固定返回 `501 provider_not_configured`：
-
-- `POST /ai/chat`
-- `POST /ai/summary`
-- `POST /ai/translate`
-- `POST /agent/run`
-
-AI 包仅定义 `LLM`、`Embedding`、`Reranker` 接口，没有 Provider 实现、配置加载、密钥存储或流式响应。
-
-### 9.3 CORS
-
-当前固定允许来源 `http://localhost:1420`，允许 `GET, POST, PUT, DELETE, OPTIONS`，允许 `Content-Type` 和 `Authorization` 请求头。当前 API 没有实际 bearer token 验证，因此只能视为开发期接口。
+桌面应用不暴露 HTTP API。所有读写均通过 Tauri commands（`local_*` / `browser_*` / `downloads_*` 等）由前端 `invoke` 调用。Rust 端不做入站网络服务。
 
 ## 10. 关键业务流程
 
@@ -425,7 +298,7 @@ sequenceDiagram
     participant T as Tauri
     participant R as Reader
     participant L as local_store
-    participant D as Desktop SQLite
+    participant F as FTS5
 
     U->>B: 保存到知识库
     B->>T: browser_snapshot
@@ -434,34 +307,29 @@ sequenceDiagram
     R-->>B: Markdown + metadata
     B->>L: local_save_document
     L->>D: INSERT OR REPLACE
+    L->>F: AFTER INSERT 触发器同步索引
     D-->>B: READY Document
     B->>L: local_get_document
     L-->>U: 保存成功
 ```
 
-### 10.2 Go API 文档处理
+### 10.2 全文检索
 
 ```mermaid
 sequenceDiagram
-    participant C as Client
-    participant H as HTTP API
-    participant R as Repository
-    participant P as Processor
-    participant F as FTS5
+    participant U as 用户
+    participant UI as SearchPage
+    participant T as Tauri
+    participant L as local_store
+    participant F as local_documents_fts
 
-    C->>H: POST /documents
-    H->>R: Create(PENDING)
-    R->>F: 写入初始索引
-    H->>P: Enqueue(documentId)
-    H-->>C: 201 Document
-    P->>R: status=PROCESSING
-    P->>R: 读取正文
-    alt 正文存在
-        P->>R: Markdown + status=READY
-        R->>F: 重建索引
-    else 正文为空
-        P->>R: status=FAILED
-    end
+    U->>UI: 输入查询（250ms debounce）
+    UI->>T: local_list_documents(query)
+    T->>L: build_fts5_query 清洗输入
+    L->>F: MATCH ?1 + bm25() 排序
+    F-->>L: rowid 列表
+    L->>L: JOIN local_documents 取详情
+    L-->>UI: LocalDocument[]
 ```
 
 ## 11. 本地开发
@@ -473,7 +341,6 @@ sequenceDiagram
 - Rust stable 与 Cargo
 - Tauri 2 对应平台编译依赖
 - Windows：Microsoft Edge WebView2 Runtime
-- 可选：Go 1.24
 
 ### 11.2 安装与启动
 
@@ -491,13 +358,6 @@ npm run dev
 ```
 
 纯 Web 模式只用于 UI 开发，不能验证真实子 WebView、页面快照、Tauri command 或桌面 SQLite。
-
-启动可选 Go API：
-
-```bash
-cd backend
-go run ./cmd/server
-```
 
 ### 11.3 构建
 
@@ -524,17 +384,12 @@ cd desktop/src-tauri
 cargo fmt -- --check
 cargo check
 cargo test
-
-# Go
-cd backend
-go test ./...
 ```
 
 当前测试现状：
 
-- Go：覆盖 health、创建校验、文档生命周期、SQLite 持久化/搜索/删除、Processor READY/FAILED、`SQLiteQueuePersistence` Insert/Complete/重启恢复。
-- Rust：覆盖域名补全、搜索词转换和高权限协议拒绝。
-- 前端：Vitest + happy-dom 已配置；共 80 个用例（`extractArticle` 6、`api.ts` 26、`useDebouncedValue` 5、`saveClassifier` 4、`dedupeHistory` / `parseHistory` 9、`reorderTabs` 7、`shortcuts` 16、`trackDownload` / `parseDownloads` 7），`npm run test` 通过。
+- Rust：覆盖域名补全、搜索词转换、高权限协议拒绝、`local_store` 17 个迁移（含 FTS5 触发器与回填）、下载/书签/会话锁/Provider base URL 校验等。共 49 用例，`cargo test --lib` 通过。
+- 前端：Vitest + happy-dom 已配置；共 384 个用例，`npm run test` 通过。
 - TypeScript 检查和 Vite 生产构建当前通过。
 
 优先补充的前端测试：
@@ -556,12 +411,12 @@ go test ./...
 - Tauri capability 仅授予主窗口必需的 WebView 操作。
 - HTTP JSON 限制为 1 MiB，并拒绝未知字段。
 - SQLite 使用参数绑定，避免直接拼接用户值。
+- 应用 CSP 仅允许 `'self'` 作为 `connect-src`，不再放行任何 loopback 服务地址。
 
 ### 13.2 尚未完成的安全能力
 
-- Go API 没有每次启动生成的 session token。
 - Provider API Key 尚未接入系统密钥环；设置页声明不等于已实现。
-- 隐私面板中的“已拦截请求”是静态展示，不是真实统计。
+- 隐私面板中的"已拦截请求"是静态展示，不是真实网络层统计。
 - 没有网站级权限、下载处理、证书错误策略和外部协议确认。
 - 页面 HTML 会被读取到可信 UI 进程；需持续审查 Reader 清理和渲染链。
 - 日志没有统一的敏感信息清理中间件。
@@ -574,34 +429,33 @@ go test ./...
 
 1. ✅ 桌面保存失败时的占位 Markdown 可能造成伪正文（已在 `BrowserPage.save()` 改为 Reader 失败/空正文时直接报错并取消保存）。
 2. ✅ 桌面数据库没有正式迁移版本（已引入 `schema_version` 表 + `MIGRATIONS` 常量 + `run_migrations` 启动钩子，附 `local_migration_status` command；老库自动打 v1 基线）。
-3. ✅ 前端没有自动化测试（Vitest + happy-dom 已配置；`extractArticle` 6 用例 + `api.ts` 14 用例 + `useDebouncedValue` 5 用例，合计 25 个）。
-4. ✅ Go Processor 队列不持久化（已修）：`processor_queue (document_id, enqueued_at, updated_at)` 表承载 pending 集合，`SQLiteQueuePersistence` 在 `Enqueue` 时 upsert、`process` 完成时 `DELETE`；启动时 `Processor.RestorePending(ctx)` 从表里 drain 重新入内存 channel。旧 `NewProcessor(...)` 仍可用（默认走 `NoopPersistence`）。
+3. ✅ 前端没有自动化测试（Vitest + happy-dom 已配置；共 384 用例，`npm run test` 通过）。
+4. ✅ 桌面搜索停留在 `LIKE`（已升级：迁移 #17 引入 `local_documents_fts` FTS5 虚表 + 触发器同步 + BM25 排序 + 前缀匹配；`build_fts5_query` 清洗用户输入中的 FTS5 元字符）。
 
 ### P1：阻碍架构演进
 
-1. 桌面和 Go 双存储没有统一数据所有权或同步策略。
-2. `migrations/001_init.sql` 与运行时内嵌 schema 不一致。
-3. ✅ 桌面搜索 UI 文案"FTS5 SEARCH"已改为 "LOCAL SEARCH"（仍是 LIKE，等 Go sidecar 决策后再升级 FTS5）。
-4. Go API 未与桌面 sidecar 生命周期、随机端口和认证 token 集成。
-5. HTTP API 没有分页，文档增长后会产生性能问题。
+1. ✅ 桌面和 Go 双存储没有统一数据所有权（已解决：保留 Rust 本地存储，Go sidecar 代码 `backend/` 目录删除；前端不再放行 `127.0.0.1:8787` 到 CSP `connect-src`）。
+2. ✅ `migrations/001_init.sql` 与运行时内嵌 schema 不一致（已解决：随 backend/ 一并删除；所有迁移集中在 `local_store.rs::MIGRATIONS`）。
+3. ✅ 桌面搜索 UI 文案"FTS5 SEARCH" → "LOCAL SEARCH"（已升级：现在真正跑 FTS5 + BM25）。
+4. 桌面应用未自动暴露远程服务：当前不暴露 HTTP API，多端同步需另行设计。
+5. 搜索没有分页，文档增长后 list 端会产生性能问题。
 
 ### P2：功能占位
 
 1. AI 摘要、问答、翻译、自动标签。
 2. Embedding、混合检索、Reranker 和带引用 RAG。
-3. 隐私拦截与真实统计。
+3. 隐私拦截与真实网络层统计。
 4. ✅ 历史、书签、下载、会话恢复和标签拖拽 — 全部完成：`local_documents.starred` + 卡片星标；`local_session` 承载 `browser.tabs` / `browser.history`；HTML5 native drag 实现 tab 重排（`reorderTabs` 纯函数 + 状态机）；导出 Markdown 通过 `DocumentDetailDrawer.onExported` 回调进入 in-memory `downloads` 列表（`trackDownload` 纯函数 + `parseDownloads` 防御性解析），LibraryPage 顶部展示最近 8 条。
 5. 插件 Runtime、集合管理和归档入口。
 
 ## 15. 推荐演进顺序
 
-1. 修复空正文保存：提取失败时明确失败，不写占位数据。
-2. ✅ 桌面 SQLite 版本化迁移已完成；备份/恢复机制已实现（`local_export_backup` / `local_import_backup` + 设置页"知识库"标签，Blob 下载 + 文件 input）。
-3. 决定唯一数据所有权：继续 Rust 本地优先，或正式引入 Go sidecar；在此之前不要同时扩展两套 schema。
-4. ✅ 补齐前端关键路径测试 — 抽出 `interpretShortcut` 纯函数覆盖 §5.2 全部 10 种快捷键（focusAddress / closeTab / nextTab / prevTab / jumpToTab / back / forward / reload / stop / newTab）；累计 73 用例。无需装 `@testing-library/react`。
-5. 如果保留 Go sidecar，先完成 loopback token、随机端口、生命周期监管和统一迁移。
-6. 接入系统密钥环后再实现 OpenAI-compatible/Ollama Provider。
-7. 在稳定全文检索和引用模型后实现 RAG，最后扩展 Agent/Plugin。
+1. ✅ 修复空正文保存：提取失败时明确失败，不写占位数据。
+2. ✅ 桌面 SQLite 版本化迁移 + 备份/恢复已完成。
+3. ✅ 决定唯一数据所有权：保留 Rust 本地优先，Go sidecar 整条删除；新增检索能力（Embedding / Reranker / 引用 RAG）继续在 Rust 端推进。
+4. ✅ 补齐前端关键路径测试 — 384 用例通过。
+5. 接入系统密钥环后再实现 OpenAI-compatible/Ollama Provider。
+6. 在稳定全文检索和引用模型后实现 RAG，最后扩展 Agent/Plugin。
 
 ## 16. 开发约定
 
@@ -612,7 +466,6 @@ go test ./...
 - 不得用演示数据掩盖服务或存储失败。
 - AI 未配置或证据不足时必须返回明确错误，不生成伪结果。
 - 涉及桌面原生能力的改动至少验证 TypeScript build、Cargo check 和相关测试。
-- 涉及 Go API、Repository 或处理状态的改动必须运行 `go test ./...`。
 
 ## 17. 故障排查
 
@@ -626,21 +479,18 @@ go test ./...
 
 ### 知识库为空
 
-先确认页面已实际保存；桌面端不会自动读取 Go API 的数据库。若只启动 Go 服务并通过 REST 创建文档，桌面知识库仍可能为空。
+先确认页面已实际保存。本地存储由 Rust `local_store.rs` 维护；没有外部服务进程可写入。`npm run dev` 纯 Web 模式没有任何持久化层。
 
-### Go API 创建后返回 503
+### 搜索结果为空或顺序奇怪
 
-文档已经保存，但 Processor 队列已满。当前没有自动重试机制；需检查消费 goroutine、日志和队列压力。
-
-### 搜索行为与 FTS5 不一致
-
-确认使用的是哪条路径：桌面 UI 默认使用 `local_documents LIKE`；只有 Go `SQLiteRepository` 使用 FTS5。
+- 检查 `local_documents_fts` 是否已建立（迁移 #17 必跑）。
+- 用户输入含 FTS5 元字符（`"`、`*`、`(` 等）会被剥离，留空时降级为全列表。
+- BM25 排序对常见词项有效；输入全新术语可能返回 0 行，这是预期行为（不是 bug）。
 
 ## 18. 相关文档
 
 - [产品需求](PRD.md)
 - [系统架构](architecture.md)
-- [HTTP API](api.md)
 - [开发路线图](roadmap.md)
 - [项目说明](../README.md)
 
