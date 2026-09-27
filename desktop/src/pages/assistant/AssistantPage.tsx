@@ -125,7 +125,7 @@ export function AssistantPage({ onNavigate }: { onNavigate?: (view: View) => voi
         .filter((turn): turn is UserTurn | AssistantTurn => !('pending' in turn && turn.pending))
         .filter(turn => turn.role === 'user' || (!turn.pending && turn.content.length > 0))
         .map(turn => ({ role: turn.role as 'user' | 'assistant', content: turn.content })), 12_000)
-      const request = buildCrossAskPrompt(documents, trimmed, history, { topK: 8 })
+      const request = buildCrossAskPrompt(documents, trimmed, history.map(entry => ({ role: entry.role as 'user' | 'assistant', content: entry.content })), { topK: 8 })
       const response = await aiChat(providerId, request)
       const parsed = parseCrossAnswer(response.content)
       setTurns(current => current.map(turn => (

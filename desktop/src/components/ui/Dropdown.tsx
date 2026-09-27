@@ -33,7 +33,7 @@ function ContextRows({ items }: { items?: Array<MenuItem | null> }) {
 export function Dropdown({ children, menu, trigger = ['click'], placement = 'bottomLeft', open, onOpenChange }: DropdownProps) {
   if (trigger.includes('contextMenu')) {
     return <ContextMenu.Root onOpenChange={value => onOpenChange?.(value)}>
-      <ContextMenu.Trigger nativeButton={false} render={<span className="ui-floating-trigger"/>}>{children}</ContextMenu.Trigger>
+      <ContextMenu.Trigger render={<span className="ui-floating-trigger"/>}>{children}</ContextMenu.Trigger>
       <ContextMenu.Portal><ContextMenu.Positioner className="ui-dropdown__positioner"><ContextMenu.Popup className="ui-dropdown"><ContextRows items={menu.items}/></ContextMenu.Popup></ContextMenu.Positioner></ContextMenu.Portal>
     </ContextMenu.Root>
   }

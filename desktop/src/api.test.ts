@@ -132,6 +132,18 @@ describe('api', () => {
       expect(invoke).toHaveBeenCalledWith('local_list_documents', { query: 'rust' })
     })
 
+    it('normalizes the flattened shape emitted by serde flatten', async () => {
+      invoke.mockResolvedValueOnce([{
+        id:'flat', title:'Flat', url:'https://example.com', markdown:'Body', tags:[], autoTags:[],
+        wordCount:1, status:'READY', createdAt:'2026-09-27T00:00:00Z', starred:false,
+        titleSnippet:'<mark>Flat</mark>', markdownSnippet:'', summarySnippet:'', rank:-0.5,
+      }])
+      const [hit] = await searchDocuments('flat')
+      expect(hit.id).toBe('flat')
+      expect(hit.wordCount).toBe(1)
+      expect(hit.titleSnippet).toBe('<mark>Flat</mark>')
+    })
+
     it('keeps listDocuments compatible with the native FTS response shape', async () => {
       const document = {
         id: 'local-list', title: 'Document', url: 'https://example.com',
