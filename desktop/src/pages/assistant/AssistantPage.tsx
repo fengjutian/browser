@@ -2,10 +2,13 @@ import { Alert, Avatar, Button, Card, Drawer, Empty, Input, List, message, Space
 import { ArrowRightOutlined, FileTextOutlined, RobotOutlined, SettingOutlined, UserOutlined } from '../../components/ui/icons'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { PageHeader } from '../../shared/components/PageHeader'
-import { aiChat, listAIProviders, listDocuments } from '../../api'
+import { aiChat, getSession, listAIProviders, listDocuments, setSession } from '../../api'
 import { DocumentDetailDrawer } from '../../features/documents/DocumentDetailDrawer'
 import { buildCrossAskPrompt, parseCrossAnswer } from '../../features/ai/crossAsk'
 import type { AIProvider, Document, View } from '../../types'
+import { compactChatHistory, parseStoredConversation } from '../../features/ai/conversation'
+
+const CONVERSATION_KEY = 'ai.conversation.v1'
 
 const SUGGESTED_PROMPTS = [
   '总结我最近保存的内容',
@@ -37,6 +40,7 @@ export function AssistantPage({ onNavigate }: { onNavigate?: (view: View) => voi
   const [question, setQuestion] = useState('')
   const [turns, setTurns] = useState<Turn[]>([])
   const [busy, setBusy] = useState(false)
+  const [conversationHydrated, setConversationHydrated] = useState(false)
   const [selectedDoc, setSelectedDoc] = useState<Document | null>(null)
   const [sourcesOpen, setSourcesOpen] = useState(false)
   const listRef = useRef<HTMLDivElement | null>(null)
@@ -51,7 +55,20 @@ export function AssistantPage({ onNavigate }: { onNavigate?: (view: View) => voi
         setProviderId(prev => prev ?? items[0]?.id ?? null)
       })
       .catch(() => { /* non-Tauri fallback */ })
+    void getSession(CONVERSATION_KEY).then(raw => {
+      setTurns(parseStoredConversation(raw).map(turn => turn.role === 'user'
+        ? { id:turn.id, role:'user', content:turn.content }
+        : { id:turn.id, role:'assistant', content:turn.content, docIds:turn.docIds ?? [], notFound:turn.notFound === true, pending:false, error:turn.error }))
+    }).finally(() => setConversationHydrated(true))
   }, [])
+
+  useEffect(() => {
+    if (!conversationHydrated) return
+    const stored = turns.filter(turn => !('pending' in turn && turn.pending)).map(turn => turn.role === 'user'
+      ? { id:turn.id, role:turn.role, content:turn.content }
+      : { id:turn.id, role:turn.role, content:turn.content, docIds:turn.docIds, notFound:turn.notFound, error:turn.error })
+    void setSession(CONVERSATION_KEY, JSON.stringify(stored))
+  }, [turns, conversationHydrated])
 
   useEffect(() => {
     const node = listRef.current
@@ -104,10 +121,10 @@ export function AssistantPage({ onNavigate }: { onNavigate?: (view: View) => voi
     setBusy(true)
 
     try {
-      const history = turns
+      const history = compactChatHistory(turns
         .filter((turn): turn is UserTurn | AssistantTurn => !('pending' in turn && turn.pending))
         .filter(turn => turn.role === 'user' || (!turn.pending && turn.content.length > 0))
-        .map(turn => ({ role: turn.role as 'user' | 'assistant', content: turn.content }))
+        .map(turn => ({ role: turn.role as 'user' | 'assistant', content: turn.content })), 12_000)
       const request = buildCrossAskPrompt(documents, trimmed, history, { topK: 8 })
       const response = await aiChat(providerId, request)
       const parsed = parseCrossAnswer(response.content)

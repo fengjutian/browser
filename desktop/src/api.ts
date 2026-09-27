@@ -264,6 +264,37 @@ export async function aiTestProvider(providerId: string): Promise<ProviderTestRe
   return invoke<ProviderTestResult>('ai_test_provider', { providerId })
 }
 
+export type McpTransport = 'stdio' | 'http' | 'sse'
+export interface McpServer {
+  id: string
+  name: string
+  transport: McpTransport
+  command?: string
+  url?: string
+  args: string[]
+  env: Record<string, string>
+  headers: Record<string, string>
+  enabled: boolean
+  createdAt: string
+  updatedAt: string
+}
+export interface McpServerInput extends Omit<McpServer, 'id' | 'createdAt' | 'updatedAt'> { id?: string }
+
+export async function saveMcpServer(server: McpServerInput): Promise<McpServer> {
+  if (!isTauri()) throw new Error('MCP configuration requires the desktop app')
+  return invoke<McpServer>('local_save_mcp_server', { server })
+}
+
+export async function listMcpServers(): Promise<McpServer[]> {
+  if (!isTauri()) return []
+  return invoke<McpServer[]>('local_list_mcp_servers')
+}
+
+export async function deleteMcpServer(id: string): Promise<boolean> {
+  if (!isTauri()) return false
+  return invoke<boolean>('local_delete_mcp_server', { id })
+}
+
 export async function findDocumentByUrl(url: string): Promise<Document | null> {
   if (!isTauri()) return null
   return invoke<Document | null>('local_find_document_by_url', { url })

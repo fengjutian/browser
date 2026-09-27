@@ -2,7 +2,7 @@ import { Alert, Button, Card, Descriptions, Form, Input, InputNumber, List, mess
 import { BgColorsOutlined, DeleteOutlined, KeyOutlined, MoonOutlined, SafetyCertificateOutlined, SaveOutlined, SearchOutlined, SunOutlined, ThunderboltOutlined } from '../../components/ui/icons'
 import { useEffect, useMemo, useState } from 'react'
 import { PageHeader } from '../../shared/components/PageHeader'
-import { clearBrowserHistory, clearClosedTabs as clearClosedTabsInDb, clearReadingSnapshots, deleteAIProvider, exportBackup, getAIProvider, getBrowserShortcutsEnabled, getReadingSnapshotStats, importBackup, listAIProviders, listBrowserHistory, purgeReadingSnapshots, replaceSitePermissions, saveAIProvider, aiTestProvider, setBrowserShortcutsEnabled, type AIProviderInput, type ReadingSnapshotStats } from '../../api'
+import { clearBrowserHistory, clearClosedTabs as clearClosedTabsInDb, clearReadingSnapshots, deleteAIProvider, deleteMcpServer, exportBackup, getAIProvider, getBrowserShortcutsEnabled, getReadingSnapshotStats, importBackup, listAIProviders, listBrowserHistory, listMcpServers, purgeReadingSnapshots, replaceSitePermissions, saveAIProvider, saveMcpServer, aiTestProvider, setBrowserShortcutsEnabled, type AIProviderInput, type McpServer, type McpTransport, type ReadingSnapshotStats } from '../../api'
 import type { AIProvider, AIProviderType } from '../../types'
 import { normalizeOrigin, readSitePermissions, writeSitePermissions, type SitePermissionKind, type SitePermissionRule } from '../../features/browser/sitePermissions'
 import { readThemePreference, writeThemePreference, type ThemePreference } from '../../features/settings/theme'
@@ -17,6 +17,7 @@ import { deleteBrowserPassword, listBrowserPasswords, setNativeAdBlocking, type 
 import { PrivacyExportPanel } from '../../features/privacy/PrivacyExportPanel'
 import { getAdBlockStats, onAdBlockStatsChange, resetAdBlockStats, resetSessionAdBlockStats, type AdBlockStatsSnapshot } from '../../features/privacy/adBlockStats'
 import { getBrowserCapabilities, type BrowserCapabilities } from '../../services/browserCapabilities'
+import { formatStringMap, parseArguments, parseStringMap } from '../../features/mcp/config'
 import {
   bindingToDisplay,
   clearShortcutOverride,
@@ -863,6 +864,74 @@ function PluginSettings() {
   </Card>
 }
 
+function McpSettings() {
+  const [messageApi, contextHolder] = message.useMessage()
+  const [servers, setServers] = useState<McpServer[]>([])
+  const [editingId, setEditingId] = useState<string | undefined>()
+  const [name, setName] = useState('')
+  const [transport, setTransport] = useState<McpTransport>('stdio')
+  const [command, setCommand] = useState('')
+  const [url, setUrl] = useState('')
+  const [args, setArgs] = useState('')
+  const [env, setEnv] = useState('')
+  const [headers, setHeaders] = useState('')
+  const [enabled, setEnabled] = useState(true)
+  const [saving, setSaving] = useState(false)
+
+  const reload = () => void listMcpServers().then(setServers).catch(error => messageApi.error(String(error)))
+  useEffect(reload, [])
+
+  function reset() {
+    setEditingId(undefined); setName(''); setTransport('stdio'); setCommand(''); setUrl('')
+    setArgs(''); setEnv(''); setHeaders(''); setEnabled(true)
+  }
+
+  function edit(server: McpServer) {
+    setEditingId(server.id); setName(server.name); setTransport(server.transport)
+    setCommand(server.command ?? ''); setUrl(server.url ?? ''); setArgs(server.args.join('\n'))
+    setEnv(formatStringMap(server.env)); setHeaders(formatStringMap(server.headers)); setEnabled(server.enabled)
+  }
+
+  async function save() {
+    if (!name.trim()) { messageApi.error('请输入 Server 名称'); return }
+    if (transport === 'stdio' && !command.trim()) { messageApi.error('stdio 连接需要启动命令'); return }
+    if (transport !== 'stdio' && !url.trim()) { messageApi.error(`${transport.toUpperCase()} 连接需要 URL`); return }
+    setSaving(true)
+    try {
+      await saveMcpServer({
+        id: editingId, name: name.trim(), transport,
+        command: transport === 'stdio' ? command.trim() : undefined,
+        url: transport === 'stdio' ? undefined : url.trim(),
+        args: parseArguments(args), env: parseStringMap(env, '环境变量'), headers: parseStringMap(headers, '请求头'), enabled,
+      })
+      messageApi.success(editingId ? 'MCP Server 已更新' : 'MCP Server 已保存')
+      reset(); reload()
+    } catch (error) { messageApi.error(error instanceof Error ? error.message : String(error)) }
+    finally { setSaving(false) }
+  }
+
+  async function remove(id: string) {
+    try { await deleteMcpServer(id); if (editingId === id) reset(); reload(); messageApi.success('MCP Server 已删除') }
+    catch (error) { messageApi.error(String(error)) }
+  }
+
+  return <>{contextHolder}<Card title="MCP Server" className="settings-card mcp-settings">
+    <Alert type="info" showIcon message="配置存储已启用" description="当前批次提供 Server 配置管理；连接、工具发现和调用授权将在后续批次接入。环境变量和请求头可能包含密钥，请仅在可信设备上配置。"/>
+    <Space direction="vertical" style={{width:'100%',marginTop:16}}>
+      <Input value={name} onChange={event=>setName(event.target.value)} placeholder="Server 名称"/>
+      <Segmented value={transport} onChange={value=>setTransport(value as McpTransport)} options={[{label:'stdio',value:'stdio'},{label:'HTTP',value:'http'},{label:'SSE',value:'sse'}]}/>
+      {transport === 'stdio'
+        ? <><Input value={command} onChange={event=>setCommand(event.target.value)} placeholder="启动命令，例如 npx"/><Input.TextArea value={args} onChange={event=>setArgs(event.target.value)} autoSize={{minRows:2,maxRows:5}} placeholder={'参数，每行一个\n-y\n@modelcontextprotocol/server-filesystem'}/></>
+        : <Input value={url} onChange={event=>setUrl(event.target.value)} placeholder={transport === 'sse' ? 'https://example.com/sse' : 'https://example.com/mcp'}/>
+      }
+      <Input.TextArea value={env} onChange={event=>setEnv(event.target.value)} autoSize={{minRows:2,maxRows:6}} placeholder={'环境变量 JSON，例如 {"TOKEN":"..."}'}/>
+      <Input.TextArea value={headers} onChange={event=>setHeaders(event.target.value)} autoSize={{minRows:2,maxRows:6}} placeholder={'请求头 JSON，例如 {"Authorization":"Bearer ..."}'}/>
+      <Space><Switch checked={enabled} onChange={setEnabled}/><span>启用</span><Button type="primary" loading={saving} onClick={()=>void save()}>{editingId ? '保存修改' : '添加 Server'}</Button>{editingId&&<Button onClick={reset}>取消编辑</Button>}</Space>
+    </Space>
+    <List style={{marginTop:18}} dataSource={servers} locale={{emptyText:'尚未配置 MCP Server'}} renderItem={server=><List.Item actions={[<Button size="small" onClick={()=>edit(server)}>编辑</Button>,<Popconfirm title="删除这个 MCP Server？" onConfirm={()=>void remove(server.id)}><Button size="small" danger>删除</Button></Popconfirm>]}><List.Item.Meta title={<Space><b>{server.name}</b><Tag>{server.transport}</Tag><Tag color={server.enabled?'green':'default'}>{server.enabled?'启用':'停用'}</Tag></Space>} description={server.transport==='stdio'?[server.command,...server.args].filter(Boolean).join(' '):server.url}/></List.Item>}/>
+  </Card></>
+}
+
 function AdvancedSettingsPanel() {
   const [settings, setSettings] = useState<AdvancedSettings>(readAdvancedSettings)
   const [capabilities, setCapabilities] = useState<BrowserCapabilities | null>(null)
@@ -961,10 +1030,10 @@ function PasswordManagerSettings() {
 }
 
 export function SettingsPage() {
-  const items = ['通用','浏览器','隐私','密码管理器','AI Provider','知识库','插件','高级'].map((label, index) => ({
+  const items = ['通用','浏览器','隐私','密码管理器','AI Provider','知识库','MCP','插件','高级'].map((label, index) => ({
     key: label,
     label,
-    children: index === 0 ? <GeneralSettings/> : index === 1 ? <BrowserSettings/> : index === 2 ? <PrivacySettings/> : index === 3 ? <PasswordManagerSettings/> : index === 4 ? <AIProviderSettings/> : index === 5 ? <KnowledgeBaseSettings/> : index === 6 ? <PluginSettings/> : <AdvancedSettingsPanel/>,
+    children: index === 0 ? <GeneralSettings/> : index === 1 ? <BrowserSettings/> : index === 2 ? <PrivacySettings/> : index === 3 ? <PasswordManagerSettings/> : index === 4 ? <AIProviderSettings/> : index === 5 ? <KnowledgeBaseSettings/> : index === 6 ? <McpSettings/> : index === 7 ? <PluginSettings/> : <AdvancedSettingsPanel/>,
   }))
   return <section className="page"><PageHeader eyebrow="PREFERENCES" title="设置" description="调整浏览器、隐私、AI Provider 与知识库工作流。"/><Tabs tabPosition="left" items={items} defaultActiveKey="通用"/></section>
 }
