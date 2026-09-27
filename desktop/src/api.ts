@@ -295,6 +295,26 @@ export async function deleteMcpServer(id: string): Promise<boolean> {
   return invoke<boolean>('local_delete_mcp_server', { id })
 }
 
+export async function discoverMcpServer(serverId: string): Promise<unknown> {
+  if (!isTauri()) throw new Error('MCP requires the desktop app')
+  return invoke('mcp_discover', { serverId })
+}
+
+export async function listMcpTools(serverId: string): Promise<unknown> {
+  if (!isTauri()) throw new Error('MCP requires the desktop app')
+  return invoke('mcp_list_tools', { serverId })
+}
+
+export async function listMcpResources(serverId: string): Promise<unknown> {
+  if (!isTauri()) throw new Error('MCP requires the desktop app')
+  return invoke('mcp_list_resources', { serverId })
+}
+
+export async function callMcpTool(serverId: string, name: string, args: Record<string, unknown>, approved: boolean): Promise<unknown> {
+  if (!isTauri()) throw new Error('MCP requires the desktop app')
+  return invoke('mcp_call_tool', { serverId, name, arguments: args, approved })
+}
+
 export async function findDocumentByUrl(url: string): Promise<Document | null> {
   if (!isTauri()) return null
   return invoke<Document | null>('local_find_document_by_url', { url })

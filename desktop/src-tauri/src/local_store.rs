@@ -300,6 +300,21 @@ const MIGRATIONS: &[(i64, &str)] = &[
         CREATE INDEX idx_agent_runs_status ON agent_runs(status);
         CREATE INDEX idx_mcp_servers_enabled ON mcp_servers(enabled);",
     ),
+    (
+        20,
+        "CREATE TABLE mcp_audit_log (
+            id TEXT PRIMARY KEY,
+            server_id TEXT NOT NULL,
+            method TEXT NOT NULL,
+            target_name TEXT,
+            approved INTEGER NOT NULL DEFAULT 0,
+            success INTEGER NOT NULL DEFAULT 0,
+            error TEXT,
+            created_at TEXT NOT NULL
+        );
+        CREATE INDEX idx_mcp_audit_created ON mcp_audit_log(created_at DESC);
+        CREATE INDEX idx_mcp_audit_server ON mcp_audit_log(server_id, created_at DESC);",
+    ),
 ];
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -2297,7 +2312,7 @@ mod tests {
             .unwrap()
             .collect::<Result<Vec<_>, _>>()
             .unwrap();
-        assert_eq!(versions, (1..=19).collect::<Vec<_>>());
+        assert_eq!(versions, (1..=20).collect::<Vec<_>>());
     }
 
     #[test]
@@ -2329,7 +2344,7 @@ mod tests {
             .unwrap()
             .collect::<Result<Vec<_>, _>>()
             .unwrap();
-        assert_eq!(versions, (1..=19).collect::<Vec<_>>());
+        assert_eq!(versions, (1..=20).collect::<Vec<_>>());
     }
 
     #[test]
@@ -2345,7 +2360,7 @@ mod tests {
             .unwrap()
             .collect::<Result<Vec<_>, _>>()
             .unwrap();
-        assert_eq!(versions, (1..=19).collect::<Vec<_>>());
+        assert_eq!(versions, (1..=20).collect::<Vec<_>>());
     }
 
     #[test]

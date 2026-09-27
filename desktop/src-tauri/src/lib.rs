@@ -1,6 +1,7 @@
 pub mod browser;
 pub mod downloads;
 pub mod local_store;
+pub mod mcp;
 pub mod plugins;
 pub mod providers;
 pub mod session_lock;
@@ -1670,6 +1671,10 @@ pub fn run() {
             local_store::local_save_mcp_server,
             local_store::local_list_mcp_servers,
             local_store::local_delete_mcp_server,
+            mcp::mcp_discover,
+            mcp::mcp_list_tools,
+            mcp::mcp_list_resources,
+            mcp::mcp_call_tool,
             local_store::local_record_agent_run,
             local_store::local_list_agent_runs,
             local_store::local_update_agent_run_status,
