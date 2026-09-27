@@ -13,7 +13,7 @@ describe('AI conversation persistence', () => {
       { role:'user', content:'old-old' },
       { role:'assistant', content:'middle' },
       { role:'user', content:'latest' },
-    ], 12)
+    ], 11)
     expect(result).toEqual([{ role:'user', content:'latest' }])
   })
 
