@@ -8,13 +8,13 @@ import type { BrowserTab, ReadingActivity } from './types'
 
 const isTauri = () => '__TAURI_INTERNALS__' in window
 
-interface LocalSearchHit {
-  document: Document
+interface LocalSearchMetadata {
   titleSnippet: string
   markdownSnippet: string
   summarySnippet: string
   rank: number
 }
+type LocalSearchHit = (Document & LocalSearchMetadata) | ({ document: Document } & LocalSearchMetadata)
 
 export interface DocumentSearchHit extends Document {
   titleSnippet?: string
@@ -26,13 +26,11 @@ export interface DocumentSearchHit extends Document {
 async function localSearch(query = ''): Promise<DocumentSearchHit[]> {
   if (!isTauri()) return []
   const hits = await invoke<LocalSearchHit[]>('local_list_documents', { query })
-  return hits.map(({ document, titleSnippet, markdownSnippet, summarySnippet, rank }) => ({
-    ...document,
-    titleSnippet: titleSnippet || undefined,
-    markdownSnippet: markdownSnippet || undefined,
-    summarySnippet: summarySnippet || undefined,
-    rank,
-  }))
+  return hits.map(hit => {
+    const { titleSnippet, markdownSnippet, summarySnippet, rank } = hit
+    const document = 'document' in hit ? hit.document : hit
+    return { ...document, titleSnippet: titleSnippet || undefined, markdownSnippet: markdownSnippet || undefined, summarySnippet: summarySnippet || undefined, rank }
+  })
 }
 
 async function localSave(document: Document): Promise<Document> {

@@ -16,7 +16,7 @@ export interface PopoverProps {
 export function Popover({ content, children, title, trigger = 'click', placement = 'top', open, defaultOpen, onOpenChange }: PopoverProps) {
   const { side, align } = splitPlacement(placement)
   return <BasePopover.Root open={open} defaultOpen={defaultOpen} onOpenChange={value => onOpenChange?.(value)}>
-    <BasePopover.Trigger render={<span className="ui-floating-trigger"/>} openOnHover={trigger === 'hover'}>{children}</BasePopover.Trigger>
+    <BasePopover.Trigger nativeButton={false} render={<span className="ui-floating-trigger"/>} openOnHover={trigger === 'hover'}>{children}</BasePopover.Trigger>
     <BasePopover.Portal>
       <BasePopover.Positioner side={side} align={align} sideOffset={7} className="ui-popover__positioner">
         <BasePopover.Popup className="ui-popover">

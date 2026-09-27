@@ -33,13 +33,13 @@ function ContextRows({ items }: { items?: Array<MenuItem | null> }) {
 export function Dropdown({ children, menu, trigger = ['click'], placement = 'bottomLeft', open, onOpenChange }: DropdownProps) {
   if (trigger.includes('contextMenu')) {
     return <ContextMenu.Root onOpenChange={value => onOpenChange?.(value)}>
-      <ContextMenu.Trigger render={<span className="ui-floating-trigger"/>}>{children}</ContextMenu.Trigger>
+      <ContextMenu.Trigger nativeButton={false} render={<span className="ui-floating-trigger"/>}>{children}</ContextMenu.Trigger>
       <ContextMenu.Portal><ContextMenu.Positioner className="ui-dropdown__positioner"><ContextMenu.Popup className="ui-dropdown"><ContextRows items={menu.items}/></ContextMenu.Popup></ContextMenu.Positioner></ContextMenu.Portal>
     </ContextMenu.Root>
   }
   const { side, align } = splitPlacement(placement)
   return <Menu.Root open={open} onOpenChange={value => onOpenChange?.(value)}>
-    <Menu.Trigger render={<span className="ui-floating-trigger"/>}>{children}</Menu.Trigger>
+    <Menu.Trigger nativeButton={false} render={<span className="ui-floating-trigger"/>}>{children}</Menu.Trigger>
     <Menu.Portal><Menu.Positioner side={side} align={align} sideOffset={6} className="ui-dropdown__positioner"><Menu.Popup className="ui-dropdown"><MenuRows items={menu.items}/></Menu.Popup></Menu.Positioner></Menu.Portal>
   </Menu.Root>
 }
