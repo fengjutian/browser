@@ -1989,7 +1989,6 @@ pub fn local_save_workspace(app: tauri::AppHandle, input: LocalWorkspaceSaveInpu
     if input.description.chars().count() > 240 { return Err("workspace description too long (max 240 chars)".into()); }
     let database = connection(&app)?;
     let now = chrono::Utc::now().to_rfc3339();
-    let epoch = unix_seconds();
     let tab_count = count_tabs(&input.payload);
     let payload_str = serde_json::to_string(&input.payload).map_err(|error| error.to_string())?;
     let id = match input.id.as_deref().filter(|value| !value.trim().is_empty()) {

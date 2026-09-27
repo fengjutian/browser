@@ -79,7 +79,7 @@ struct OpenAIStreamDelta {
 }
 
 #[derive(Debug, Clone, Deserialize)]
-struct OpenAIUsage {
+pub(crate) struct OpenAIUsage {
     #[serde(default)]
     prompt_tokens: Option<u64>,
     #[serde(default)]
@@ -168,7 +168,6 @@ impl AiProvider for OpenAICompatibleProvider {
         }
         let mut byte_stream = response.bytes_stream();
         let mut buffer = String::new();
-        let mut emitted_done = false;
         let mut last_usage: Option<OpenAIUsage> = None;
 
         loop {
@@ -186,7 +185,6 @@ impl AiProvider for OpenAICompatibleProvider {
                     buffer.push_str(&String::from_utf8_lossy(&chunk));
                     for chunk in parse_sse_chunk(&mut buffer, &mut last_usage) {
                         if chunk.is_terminal {
-                            emitted_done = true;
                             let _ = sink.send(ChatChunk {
                                 delta: String::new(),
                                 finish_reason: chunk.finish_reason.or(Some("stop".into())),
@@ -210,15 +208,14 @@ impl AiProvider for OpenAICompatibleProvider {
             }
         }
 
-        if !emitted_done {
-            let _ = sink.send(ChatChunk {
-                delta: String::new(),
-                finish_reason: Some("stop".into()),
-                done: true,
-                prompt_tokens: last_usage.as_ref().and_then(|u| u.prompt_tokens),
-                completion_tokens: last_usage.as_ref().and_then(|u| u.completion_tokens),
-            }).await;
-        }
+        // Stream ended without [DONE]: synthesise a terminal chunk.
+        let _ = sink.send(ChatChunk {
+            delta: String::new(),
+            finish_reason: Some("stop".into()),
+            done: true,
+            prompt_tokens: last_usage.as_ref().and_then(|u| u.prompt_tokens),
+            completion_tokens: last_usage.as_ref().and_then(|u| u.completion_tokens),
+        }).await;
         Ok(())
     }
 }
@@ -226,7 +223,7 @@ impl AiProvider for OpenAICompatibleProvider {
 /// One delta extracted from the OpenAI SSE stream. `delta` may be empty when
 /// the chunk only carries `finish_reason` or a usage update.
 #[derive(Debug, PartialEq, Eq)]
-pub struct OpenAiDelta {
+pub(crate) struct OpenAiDelta {
     pub delta: String,
     pub finish_reason: Option<String>,
     pub prompt_tokens: Option<u64>,
@@ -238,7 +235,7 @@ pub struct OpenAiDelta {
 /// starting with `data:` are parsed; `[DONE]` marks the terminal record;
 /// blank lines and unparseable lines are skipped silently. Any incomplete
 /// trailing line stays in `buffer` for the next call.
-pub fn parse_sse_chunk(buffer: &mut String, last_usage: &mut Option<OpenAIUsage>) -> Vec<OpenAiDelta> {
+pub(crate) fn parse_sse_chunk(buffer: &mut String, last_usage: &mut Option<OpenAIUsage>) -> Vec<OpenAiDelta> {
     let mut out: Vec<OpenAiDelta> = Vec::new();
     while let Some(idx) = buffer.find('\n') {
         let line: String = buffer.drain(..=idx).collect();

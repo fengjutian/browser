@@ -140,6 +140,7 @@ impl DownloadIndex {
 
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
+#[allow(dead_code)]
 struct BrowserCapabilities {
     /// True when granular byte-level download progress is observable.
     download_progress_bytes: bool,
@@ -163,6 +164,8 @@ struct BrowserCapabilities {
 
 #[allow(dead_code)]
 type _UnusedCapabilitiesAlias = capabilities::BrowserCapabilities;
+#[allow(dead_code)]
+type _UnusedCapabilitiesAlias2 = capabilities::BrowserCapabilities;
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -981,6 +984,7 @@ fn browser_restore_scroll(app: tauri::AppHandle, label: String, x: f64, y: f64) 
 }
 
 #[tauri::command]
+#[allow(dead_code)]
 fn browser_toolbar_menu_in_page(app: tauri::AppHandle, label: String, open: bool, zoom_percent: u16) -> Result<(), String> {
     validate_browser_label(&label)?;
     let webview = app

@@ -159,6 +159,7 @@ if directory {
     Ok(FilePickResult { paths })
 }
 
+#[allow(dead_code)]
 fn canonicalise_user_path(_path: &PathBuf) -> Result<PathBuf, String> {
     // Reserved for future WebView2 path canonicalisation; not used in batch 9.
     Ok(PathBuf::new())
