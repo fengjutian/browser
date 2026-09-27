@@ -3,26 +3,19 @@ import { FileSearchOutlined, RightOutlined, SearchOutlined } from '../../compone
 import { Fragment, useCallback, useEffect, useMemo, useState } from 'react'
 import { PageHeader } from '../../shared/components/PageHeader'
 import { DocumentDetailDrawer } from '../../features/documents/DocumentDetailDrawer'
-import { deleteReadingSnapshot, listDocuments, listReadingActivity, getSession, setSession } from '../../api'
-import type { Document, ReadingActivity } from '../../types'
+import { deleteReadingSnapshot, searchDocuments, listReadingActivity, getSession, setSession, type DocumentSearchHit } from '../../api'
+import type { ReadingActivity } from '../../types'
 import { useDebouncedValue } from '../../shared/hooks/useDebouncedValue'
 import { renderHighlightedSnippet } from '../../features/search/renderSnippet'
-
-interface SearchHit extends Document {
-  titleSnippet?: string
-  markdownSnippet?: string
-  summarySnippet?: string
-  rank?: number
-}
 
 type SortKey = 'recent' | 'oldest' | 'starred' | 'relevance'
 
 export function SearchPage({ initialQuery = '', onOpenUrl }: { initialQuery?: string; onOpenUrl?: (url: string) => void }) {
   const [query, setQuery] = useState(initialQuery)
   const debouncedQuery = useDebouncedValue(query, 250)
-  const [documents, setDocuments] = useState<SearchHit[]>([])
+  const [documents, setDocuments] = useState<DocumentSearchHit[]>([])
   const [reading, setReading] = useState<ReadingActivity[]>([])
-  const [selected, setSelected] = useState<SearchHit | null>(null)
+  const [selected, setSelected] = useState<DocumentSearchHit | null>(null)
   const [selectedReading, setSelectedReading] = useState<ReadingActivity | null>(null)
   const [loading, setLoading] = useState(false)
   const [unavailable, setUnavailable] = useState(false)
@@ -69,7 +62,7 @@ export function SearchPage({ initialQuery = '', onOpenUrl }: { initialQuery?: st
     let current = true
     setLoading(true)
     const startedAt = performance.now()
-    void Promise.all([listDocuments(debouncedQuery), listReadingActivity()])
+    void Promise.all([searchDocuments(debouncedQuery), listReadingActivity()])
       .then(([items, activity]) => {
         if (!current) return
         setDocuments(items)

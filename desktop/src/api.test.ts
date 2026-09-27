@@ -12,6 +12,7 @@ import {
   getSession,
   importBackup,
   listDocuments,
+  searchDocuments,
   saveDocument,
   setBrowserShortcutsEnabled,
   setSession,
@@ -105,6 +106,43 @@ describe('api', () => {
       invoke.mockResolvedValueOnce([])
       await listDocuments('hello')
       expect(invoke).toHaveBeenCalledWith('local_list_documents', { query: 'hello' })
+    })
+
+    it('normalizes native FTS hits for search consumers', async () => {
+      const document = {
+        id: 'local-hit', title: 'Rust async', url: 'https://example.com/rust',
+        markdown: 'Tokio runtime', tags: ['rust'], autoTags: [], wordCount: 2,
+        status: 'READY', createdAt: '2026-09-27T00:00:00Z', starred: false,
+      }
+      invoke.mockResolvedValueOnce([{
+        document,
+        titleSnippet: '<mark>Rust</mark> async',
+        markdownSnippet: '<mark>Tokio</mark> runtime',
+        summarySnippet: '',
+        rank: -1.25,
+      }])
+
+      await expect(searchDocuments('rust')).resolves.toEqual([{
+        ...document,
+        titleSnippet: '<mark>Rust</mark> async',
+        markdownSnippet: '<mark>Tokio</mark> runtime',
+        summarySnippet: undefined,
+        rank: -1.25,
+      }])
+      expect(invoke).toHaveBeenCalledWith('local_list_documents', { query: 'rust' })
+    })
+
+    it('keeps listDocuments compatible with the native FTS response shape', async () => {
+      const document = {
+        id: 'local-list', title: 'Document', url: 'https://example.com',
+        markdown: 'Body', tags: [], autoTags: [], wordCount: 1,
+        status: 'READY', createdAt: '2026-09-27T00:00:00Z', starred: false,
+      }
+      invoke.mockResolvedValueOnce([{
+        document, titleSnippet: '', markdownSnippet: '', summarySnippet: '', rank: 0,
+      }])
+
+      await expect(listDocuments()).resolves.toEqual([document])
     })
 
     it('saveDocument forwards the document to invoke and returns invoke response', async () => {

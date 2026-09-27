@@ -8,8 +8,31 @@ import type { BrowserTab, ReadingActivity } from './types'
 
 const isTauri = () => '__TAURI_INTERNALS__' in window
 
-async function localList(query = ''): Promise<Document[]> {
-  return isTauri() ? invoke<Document[]>('local_list_documents', { query }) : []
+interface LocalSearchHit {
+  document: Document
+  titleSnippet: string
+  markdownSnippet: string
+  summarySnippet: string
+  rank: number
+}
+
+export interface DocumentSearchHit extends Document {
+  titleSnippet?: string
+  markdownSnippet?: string
+  summarySnippet?: string
+  rank?: number
+}
+
+async function localSearch(query = ''): Promise<DocumentSearchHit[]> {
+  if (!isTauri()) return []
+  const hits = await invoke<LocalSearchHit[]>('local_list_documents', { query })
+  return hits.map(({ document, titleSnippet, markdownSnippet, summarySnippet, rank }) => ({
+    ...document,
+    titleSnippet: titleSnippet || undefined,
+    markdownSnippet: markdownSnippet || undefined,
+    summarySnippet: summarySnippet || undefined,
+    rank,
+  }))
 }
 
 async function localSave(document: Document): Promise<Document> {
@@ -17,7 +40,12 @@ async function localSave(document: Document): Promise<Document> {
 }
 
 export async function listDocuments(query = ''): Promise<Document[]> {
-  return localList(query)
+  const hits = await localSearch(query)
+  return hits.map(({ titleSnippet: _title, markdownSnippet: _markdown, summarySnippet: _summary, rank: _rank, ...document }) => document)
+}
+
+export async function searchDocuments(query: string): Promise<DocumentSearchHit[]> {
+  return localSearch(query)
 }
 
 export async function saveDocument(input: { title: string; url: string; markdown: string; tags: string[] }): Promise<Document> {
