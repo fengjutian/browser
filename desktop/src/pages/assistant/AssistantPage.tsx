@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { PageHeader } from '../../shared/components/PageHeader'
 import { aiChat, aiEmbed, getSession, listAIProviders, listDocuments, searchDocuments, searchSimilarEmbeddings, setSession, storeDocumentEmbedding } from '../../api'
 import { DocumentDetailDrawer } from '../../features/documents/DocumentDetailDrawer'
-import { buildCrossAskPrompt, parseCrossAnswer } from '../../features/ai/crossAsk'
+import { buildCrossAskPrompt, citationIdsInRequest, parseCrossAnswer } from '../../features/ai/crossAsk'
 import type { AIProvider, Document, View } from '../../types'
 import { compactChatHistory, parseStoredConversation } from '../../features/ai/conversation'
 import { reciprocalRankFusion, validateAnswerCitations } from '../../features/ai/rag'
@@ -143,7 +143,7 @@ export function AssistantPage({ onNavigate }: { onNavigate?: (view: View) => voi
       const request = buildCrossAskPrompt(documents, trimmed, history.map(entry => ({ role: entry.role as 'user' | 'assistant', content: entry.content })), { topK: 8, rankedDocumentIds })
       const response = await aiChat(providerId, request)
       const parsed = parseCrossAnswer(response.content)
-      const validation = validateAnswerCitations(parsed.answer,parsed.docIds)
+      const validation = validateAnswerCitations(parsed.answer,citationIdsInRequest(request))
       if (!parsed.notFound && !validation.valid) throw new Error('模型回答未通过引用校验，请重试')
       setTurns(current => current.map(turn => (
         turn.id === pendingTurn.id

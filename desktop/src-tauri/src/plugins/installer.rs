@@ -172,6 +172,8 @@ pub fn list_plugins(app: tauri::AppHandle) -> Result<Vec<InstalledPlugin>, Strin
         .map_err(|e| e.to_string())?;
     ids.iter().map(|id| read_plugin(&db, id)).collect()
 }
+
+pub(crate) fn restore_enabled_plugins(app:&tauri::AppHandle){let runtime=app.state::<WasmRuntime>();runtime.attach_app(app.clone());let Ok(db)=crate::local_store::connection(app) else{return};let Ok(mut stmt)=db.prepare("SELECT id,manifest_json,component_path FROM plugins WHERE enabled=1 AND status='ENABLED'") else{return};let Ok(rows)=stmt.query_map([],|r|Ok((r.get::<_,String>(0)?,r.get::<_,String>(1)?,r.get::<_,String>(2)?))) else{return};let plugins=rows.filter_map(Result::ok).collect::<Vec<_>>();drop(stmt);for (id,raw,path) in plugins{let result=(||{let manifest:PluginManifest=serde_json::from_str(&raw).map_err(|e|e.to_string())?;let current=read_plugin(&db,&id)?;runtime.start(&manifest,Path::new(&path),PluginContext::new(&id,current.grants))})();if let Err(error)=&result{let _=db.execute("UPDATE plugins SET enabled=0,status='FAILED',last_error=?,updated_at=? WHERE id=?",params![error,chrono::Utc::now().timestamp(),id]);}audit(&db,&id,"restore",None,&result);}}
 #[tauri::command]
 pub fn list_plugin_audit(
     app: tauri::AppHandle,
@@ -256,6 +258,7 @@ pub fn set_plugin_enabled(
 #[tauri::command]
 pub fn set_plugin_permission(
     app: tauri::AppHandle,
+    runtime: tauri::State<'_,WasmRuntime>,
     id: String,
     permission: PluginPermission,
     granted: bool,
@@ -274,7 +277,8 @@ pub fn set_plugin_permission(
     if !manifest.permissions.contains(&permission) {
         return Err("permission was not declared by the plugin".into());
     }
-    let result=db.execute("INSERT INTO plugin_grants(plugin_id,permission,granted,updated_at) VALUES(?,?,?,?) ON CONFLICT(plugin_id,permission) DO UPDATE SET granted=excluded.granted,updated_at=excluded.updated_at",params![id,name,granted as i64,chrono::Utc::now().timestamp()]).map(|_|()).map_err(|e|e.to_string());
+    runtime.attach_app(app.clone());let was_enabled:bool=db.query_row("SELECT enabled FROM plugins WHERE id=?",[&id],|r|Ok(r.get::<_,i64>(0)?!=0)).map_err(|e|e.to_string())?;if was_enabled{let _=runtime.stop(&id);}
+    let result=(||{db.execute("INSERT INTO plugin_grants(plugin_id,permission,granted,updated_at) VALUES(?,?,?,?) ON CONFLICT(plugin_id,permission) DO UPDATE SET granted=excluded.granted,updated_at=excluded.updated_at",params![id,name,granted as i64,chrono::Utc::now().timestamp()]).map_err(|e|e.to_string())?;if was_enabled{db.execute("UPDATE plugins SET enabled=0,status='DISABLED',last_error=NULL,updated_at=? WHERE id=?",params![chrono::Utc::now().timestamp(),id]).map_err(|e|e.to_string())?;}Ok(())})();
     audit(&db, &id, "permission", Some(&name), &result);
     result
 }

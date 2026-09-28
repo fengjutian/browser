@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { MAX_CHARS_PER_DOC, buildCrossAskPrompt, parseCrossAnswer } from './crossAsk'
+import { MAX_CHARS_PER_DOC, buildCrossAskPrompt, citationIdsInRequest, parseCrossAnswer } from './crossAsk'
 import type { Document } from '../../types'
 
 function makeDoc(partial: Partial<Document>): Document {
@@ -34,6 +34,7 @@ describe('crossAsk helpers', () => {
     expect(user).toContain('https://b')
     expect(user).toContain('alpha body')
     expect(user).toContain('beta body')
+    expect(citationIdsInRequest(request)).toEqual([1,2])
   })
 
   it('truncates long markdown excerpts to MAX_CHARS_PER_DOC', () => {

@@ -113,3 +113,6 @@ export function parseCrossAnswer(raw: string): CrossAskParse {
   ))
   return { answer: trimmed, docIds, notFound: false }
 }
+
+/** Exact citation IDs exposed in the generated context, used as the answer allow-list. */
+export function citationIdsInRequest(request:ChatRequest):number[]{const user=[...request.messages].reverse().find(message=>message.role==='user');if(!user)return[];return Array.from(new Set(Array.from(user.content.matchAll(/^\[doc-(\d+)\]\s/mg),match=>Number(match[1])).filter(value=>Number.isInteger(value)&&value>0)))}

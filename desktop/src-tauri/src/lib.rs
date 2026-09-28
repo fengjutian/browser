@@ -1967,6 +1967,7 @@ pub fn run() {
                     eprintln!("session_lock: write_lock failed: {error}");
                 }
             }
+            plugins::installer::restore_enabled_plugins(app.handle());
             Ok(())
         })
         .on_menu_event(|app, event| {
