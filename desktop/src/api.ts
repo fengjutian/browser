@@ -318,6 +318,16 @@ export async function callMcpTool(serverId: string, name: string, args: Record<s
   return invoke('mcp_call_tool', { serverId, name, arguments: args, approved })
 }
 
+export type PluginPermission = 'page_read'|'page_write'|'tab_read'|'tab_create'|'tab_close'|'history_read'|'bookmark_read'|'bookmark_write'|'knowledge_read'|'knowledge_write'|'ai_chat'|'ai_embedding'|'network_request'|'filesystem_read'|'filesystem_write'
+export interface PluginManifest { schemaVersion:number;id:string;name:string;version:string;description?:string;author?:string;component:string;sha256:string;permissions:PluginPermission[];networkAllowlist:string[];events:string[] }
+export interface InstalledPlugin { id:string;name:string;version:string;status:'INSTALLING'|'DISABLED'|'ENABLED'|'FAILED'|'QUARANTINED';enabled:boolean;lastError?:string;manifest:PluginManifest }
+export async function installPlugin(archivePath:string):Promise<InstalledPlugin>{return invoke('install_plugin',{archivePath})}
+export async function listPlugins():Promise<InstalledPlugin[]>{return isTauri()?invoke('list_plugins'):[]}
+export async function setPluginEnabled(id:string,enabled:boolean):Promise<void>{await invoke('set_plugin_enabled',{id,enabled})}
+export async function setPluginPermission(id:string,permission:PluginPermission,granted:boolean):Promise<void>{await invoke('set_plugin_permission',{id,permission,granted})}
+export async function uninstallPlugin(id:string):Promise<void>{await invoke('uninstall_plugin',{id})}
+export async function dispatchPluginEvent(id:string,kind:string,payloadJson:string):Promise<string>{return invoke('dispatch_plugin_event',{id,kind,payloadJson})}
+
 export async function findDocumentByUrl(url: string): Promise<Document | null> {
   if (!isTauri()) return null
   return invoke<Document | null>('local_find_document_by_url', { url })

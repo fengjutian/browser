@@ -2,7 +2,7 @@ import { Alert, Button, Card, Descriptions, Drawer, Form, Input, InputNumber, Li
 import { BgColorsOutlined, DeleteOutlined, KeyOutlined, MoonOutlined, SafetyCertificateOutlined, SaveOutlined, SearchOutlined, SunOutlined, ThunderboltOutlined } from '../../components/ui/icons'
 import { useEffect, useMemo, useState } from 'react'
 import { PageHeader } from '../../shared/components/PageHeader'
-import { callMcpTool, clearBrowserHistory, clearClosedTabs as clearClosedTabsInDb, clearReadingSnapshots, deleteAIProvider, deleteMcpServer, discoverMcpServer, exportBackup, getAIProvider, getBrowserShortcutsEnabled, getReadingSnapshotStats, importBackup, listAIProviders, listBrowserHistory, listMcpResources, listMcpServers, listMcpTools, purgeReadingSnapshots, replaceSitePermissions, saveAIProvider, saveMcpServer, aiTestProvider, setBrowserShortcutsEnabled, type AIProviderInput, type McpServer, type McpTransport, type ReadingSnapshotStats } from '../../api'
+import { callMcpTool, clearBrowserHistory, clearClosedTabs as clearClosedTabsInDb, clearReadingSnapshots, deleteAIProvider, deleteMcpServer, discoverMcpServer, exportBackup, getAIProvider, getBrowserShortcutsEnabled, getReadingSnapshotStats, importBackup, installPlugin, listAIProviders, listBrowserHistory, listMcpResources, listMcpServers, listMcpTools, listPlugins, purgeReadingSnapshots, replaceSitePermissions, saveAIProvider, saveMcpServer, aiTestProvider, setBrowserShortcutsEnabled, setPluginEnabled, setPluginPermission, uninstallPlugin, type AIProviderInput, type InstalledPlugin, type McpServer, type McpTransport, type PluginPermission, type ReadingSnapshotStats } from '../../api'
 import type { AIProvider, AIProviderType } from '../../types'
 import { normalizeOrigin, readSitePermissions, writeSitePermissions, type SitePermissionKind, type SitePermissionRule } from '../../features/browser/sitePermissions'
 import { readThemePreference, writeThemePreference, type ThemePreference } from '../../features/settings/theme'
@@ -14,6 +14,7 @@ import { DEFAULT_ADVANCED_SETTINGS, readAdvancedSettings, writeAdvancedSettings,
 import { isTrackingCleanerEnabled, setTrackingCleanerEnabled } from '../../features/plugins/trackingCleaner'
 import { isAdBlockerEnabled, setAdBlockerEnabled } from '../../features/plugins/adBlocker'
 import { deleteBrowserPassword, listBrowserPasswords, setNativeAdBlocking, type SavedCredential } from '../../services/nativeBrowser'
+import { pickFiles } from '../../services/webviewCompat'
 import { PrivacyExportPanel } from '../../features/privacy/PrivacyExportPanel'
 import { getAdBlockStats, onAdBlockStatsChange, resetAdBlockStats, resetSessionAdBlockStats, type AdBlockStatsSnapshot } from '../../features/privacy/adBlockStats'
 import { getBrowserCapabilities, type BrowserCapabilities } from '../../services/browserCapabilities'
@@ -843,8 +844,17 @@ function cutoffForScope(scope: 'hour' | 'day' | 'week'): number {
 }
 
 function PluginSettings() {
+  const [messageApi, contextHolder] = message.useMessage()
   const [enabled, setEnabled] = useState(isTrackingCleanerEnabled)
   const [adBlockEnabled, setAdBlockEnabledState] = useState(isAdBlockerEnabled)
+  const [installed, setInstalled] = useState<InstalledPlugin[]>([])
+  const [busy, setBusy] = useState(false)
+  const reloadPlugins=()=>void listPlugins().then(setInstalled).catch(error=>messageApi.error(String(error)))
+  useEffect(reloadPlugins,[])
+
+  async function addPlugin(){const picked=await pickFiles({title:'安装 Arcadia 插件',filters:[{label:'Arcadia 插件',extensions:['arcadia-plugin','zip']}]});if(!picked.paths[0])return;setBusy(true);try{await installPlugin(picked.paths[0]);messageApi.success('插件已安装，默认保持停用');reloadPlugins()}catch(error){messageApi.error(`安装失败：${String(error)}`)}finally{setBusy(false)}}
+  async function grant(plugin:InstalledPlugin,permission:PluginPermission,value:boolean){try{if(plugin.enabled)await setPluginEnabled(plugin.id,false);await setPluginPermission(plugin.id,permission,value);messageApi.success('权限已更新；插件保持停用，需重新启用');reloadPlugins()}catch(error){messageApi.error(String(error))}}
+  async function toggleThirdParty(plugin:InstalledPlugin,value:boolean){setBusy(true);try{await setPluginEnabled(plugin.id,value);reloadPlugins()}catch(error){messageApi.error(`插件启动失败：${String(error)}`)}finally{setBusy(false)}}
 
   function toggle(next: boolean) {
     setEnabled(next)
@@ -857,11 +867,14 @@ function PluginSettings() {
     void setNativeAdBlocking(next).catch(() => undefined)
   }
 
-  return <Card title="插件" className="settings-card plugin-settings">
+  return <>{contextHolder}<Card title="插件" extra={<Button type="primary" loading={busy} onClick={()=>void addPlugin()}>安装插件</Button>} className="settings-card plugin-settings">
     <Alert type="info" showIcon message="内置示例插件" description="该插件用于演示插件的状态、权限和启停流程；开关会真实影响浏览器导航。"/>
     <List className="plugin-list" itemLayout="horizontal" dataSource={[{ id: 'com.arcadia.tracking-cleaner', name: '链接净化器', version: '0.1.0' }]} renderItem={plugin => <List.Item actions={[<Switch key="enabled" checked={enabled} onChange={toggle}/>]}><List.Item.Meta title={<Space><Typography.Text strong>{plugin.name}</Typography.Text><Tag color="blue">示例</Tag><Tag>{enabled ? '已启用' : '已停用'}</Tag></Space>} description={<div className="plugin-description"><Typography.Paragraph>打开网页前自动移除 utm_*、fbclid、gclid 等常见跟踪参数，同时保留页面正常查询参数。</Typography.Paragraph><Space wrap><Typography.Text type="secondary">{plugin.id} · v{plugin.version}</Typography.Text><Tag>读取导航地址</Tag><Tag>修改导航地址</Tag></Space></div>}/></List.Item>}/>
     <List className="plugin-list" itemLayout="horizontal" dataSource={[{ id: 'com.arcadia.ad-blocker', name: '广告过滤器', version: '0.1.0' }]} renderItem={plugin => <List.Item actions={[<Switch key="enabled" checked={adBlockEnabled} onChange={toggleAdBlock}/>]}><List.Item.Meta title={<Space><Typography.Text strong>{plugin.name}</Typography.Text><Tag color="green">内置</Tag><Tag>{adBlockEnabled ? '已启用' : '已停用'}</Tag></Space>} description={<div className="plugin-description"><Typography.Paragraph>过滤常见广告域名和广告元素；工具栏盾牌显示当前会话实际过滤数量。关闭后立即停止页面过滤。</Typography.Paragraph><Space wrap><Typography.Text type="secondary">{plugin.id} · v{plugin.version}</Typography.Text><Tag>读取页面资源</Tag><Tag>隐藏广告元素</Tag></Space></div>}/></List.Item>}/>
-  </Card>
+    <Typography.Title level={5} style={{marginTop:24}}>第三方 WASM 插件</Typography.Title>
+    <Alert type="warning" showIcon message="默认零权限" description="安装不会自动启用插件。请逐项授权后再启用；修改权限会立即停用插件。"/>
+    <List loading={busy} dataSource={installed} locale={{emptyText:'尚未安装第三方插件'}} renderItem={plugin=><List.Item actions={[<Switch checked={plugin.enabled} onChange={value=>void toggleThirdParty(plugin,value)}/>,<Popconfirm title="卸载这个插件？" onConfirm={()=>void uninstallPlugin(plugin.id).then(reloadPlugins)}><Button danger>卸载</Button></Popconfirm>]}><List.Item.Meta title={<Space><b>{plugin.name}</b><Tag>{plugin.version}</Tag><Tag color={plugin.enabled?'green':'default'}>{plugin.status}</Tag></Space>} description={<Space direction="vertical"><Typography.Text type="secondary">{plugin.manifest.description??plugin.id}</Typography.Text><Space wrap>{plugin.manifest.permissions.map(permission=><Switch key={permission} checkedChildren={permission} unCheckedChildren={permission} onChange={value=>void grant(plugin,permission,value)}/>)}</Space>{plugin.lastError&&<Alert type="error" message={plugin.lastError}/>}</Space>}/></List.Item>}/>
+  </Card></>
 }
 
 function McpSettings() {
