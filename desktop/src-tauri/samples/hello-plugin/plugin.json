@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 1,
+  "id": "com.arcadia.hello",
+  "name": "Hello lifecycle plugin",
+  "version": "1.0.0",
+  "description": "Minimal initialize/event/shutdown validation plugin",
+  "author": "Arcadia",
+  "component": "plugin.wasm",
+  "sha256": "6af2dc46dca5d45bc141f621f6740beb0b9b2f9e18a60b44f82621336e788747",
+  "permissions": [],
+  "networkAllowlist": [],
+  "events": ["test", "document.saved", "ui.command"],
+  "uiContributions": [
+    { "id": "hello", "label": "Run Hello", "location": "settings" }
+  ]
+}
