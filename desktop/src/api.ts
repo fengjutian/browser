@@ -320,7 +320,7 @@ export async function callMcpTool(serverId: string, name: string, args: Record<s
 
 export type PluginPermission = 'page_read'|'page_write'|'tab_read'|'tab_create'|'tab_close'|'history_read'|'bookmark_read'|'bookmark_write'|'knowledge_read'|'knowledge_write'|'ai_chat'|'ai_embedding'|'network_request'|'filesystem_read'|'filesystem_write'
 export interface PluginManifest { schemaVersion:number;id:string;name:string;version:string;description?:string;author?:string;component:string;sha256:string;permissions:PluginPermission[];networkAllowlist:string[];events:string[] }
-export interface InstalledPlugin { id:string;name:string;version:string;status:'INSTALLING'|'DISABLED'|'ENABLED'|'FAILED'|'QUARANTINED';enabled:boolean;lastError?:string;manifest:PluginManifest }
+export interface InstalledPlugin { id:string;name:string;version:string;status:'INSTALLING'|'DISABLED'|'ENABLED'|'FAILED'|'QUARANTINED';enabled:boolean;lastError?:string;manifest:PluginManifest;grants:PluginPermission[] }
 export async function installPlugin(archivePath:string):Promise<InstalledPlugin>{return invoke('install_plugin',{archivePath})}
 export async function listPlugins():Promise<InstalledPlugin[]>{return isTauri()?invoke('list_plugins'):[]}
 export async function setPluginEnabled(id:string,enabled:boolean):Promise<void>{await invoke('set_plugin_enabled',{id,enabled})}
