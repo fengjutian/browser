@@ -1,6 +1,6 @@
 use super::{PluginContext, PluginManifest, PluginPermission};
 use std::{collections::HashMap, path::Path, sync::Mutex, time::Duration};
-use wasmtime::{component::{Component, Linker}, Config, Engine, Store, StoreLimits, StoreLimitsBuilder};
+use wasmtime::{component::{Component, HasSelf, Linker}, Config, Engine, Store, StoreLimits, StoreLimitsBuilder};
 
 mod bindings { wasmtime::component::bindgen!({ path: "wit", world: "arcadia-plugin" }); }
 
@@ -11,11 +11,11 @@ const TIMEOUT: Duration = Duration::from_secs(5);
 struct HostState { context: PluginContext, limits: StoreLimits }
 
 impl bindings::arcadia::plugin::host::Host for HostState {
-    fn log(&mut self, level:String, message:String)->wasmtime::Result<Result<(),String>> { if message.len()>16*1024{return Ok(Err("log message exceeds 16 KiB".into()))}eprintln!("plugin[{}] {level}: {message}",self.context.plugin_id());Ok(Ok(())) }
-    fn knowledge_search(&mut self,_query:String,_limit:u32)->wasmtime::Result<Result<String,String>> { Ok(self.context.require(PluginPermission::KnowledgeRead).map(|_|"[]".into())) }
-    fn knowledge_get(&mut self,_id:String)->wasmtime::Result<Result<String,String>> { Ok(self.context.require(PluginPermission::KnowledgeRead).map(|_|"null".into())) }
-    fn ai_chat(&mut self,_request_json:String)->wasmtime::Result<Result<String,String>> { Ok(self.context.require(PluginPermission::AiChat).map(|_|"{}".into())) }
-    fn http_fetch(&mut self,_request_json:String)->wasmtime::Result<Result<String,String>> { Ok(self.context.require(PluginPermission::NetworkRequest).map(|_|"{}".into())) }
+    fn log(&mut self, level:String, message:String)->Result<(),String> { if message.len()>16*1024{return Err("log message exceeds 16 KiB".into())}eprintln!("plugin[{}] {level}: {message}",self.context.plugin_id());Ok(()) }
+    fn knowledge_search(&mut self,_query:String,_limit:u32)->Result<String,String> { self.context.require(PluginPermission::KnowledgeRead).map(|_|"[]".into()) }
+    fn knowledge_get(&mut self,_id:String)->Result<String,String> { self.context.require(PluginPermission::KnowledgeRead).map(|_|"null".into()) }
+    fn ai_chat(&mut self,_request_json:String)->Result<String,String> { self.context.require(PluginPermission::AiChat).map(|_|"{}".into()) }
+    fn http_fetch(&mut self,_request_json:String)->Result<String,String> { self.context.require(PluginPermission::NetworkRequest).map(|_|"{}".into()) }
 }
 
 pub trait PluginRuntime: Send+Sync {
@@ -37,9 +37,9 @@ impl WasmRuntime {
 impl PluginRuntime for WasmRuntime {
     fn start(&self,manifest:&PluginManifest,component_path:&Path,context:PluginContext)->Result<(),String>{
         manifest.validate().map_err(str::to_string)?;let engine=Self::engine()?;let component=Component::from_file(&engine,component_path).map_err(|e|format!("component compile failed: {e}"))?;
-        let mut linker=Linker::<HostState>::new(&engine);bindings::ArcadiaPlugin::add_to_linker(&mut linker,|state|state).map_err(|e|e.to_string())?;
+        let mut linker=Linker::<HostState>::new(&engine);bindings::ArcadiaPlugin::add_to_linker::<_,HasSelf<_>>(&mut linker,|state|state).map_err(|e|e.to_string())?;
         let limits=StoreLimitsBuilder::new().memory_size(MEMORY_BYTES).instances(1).tables(8).build();let mut store=Store::new(&engine,HostState{context,limits});store.limiter(|state|&mut state.limits);Self::prepare(&mut store,&engine)?;
-        let (guest,_)=bindings::ArcadiaPlugin::instantiate(&mut store,&component,&linker).map_err(|e|format!("component instantiate failed: {e}"))?;
+        let guest=bindings::ArcadiaPlugin::instantiate(&mut store,&component,&linker).map_err(|e|format!("component instantiate failed: {e}"))?;
         guest.arcadia_plugin_guest().call_initialize(&mut store,"{}").map_err(|e|format!("initialize trapped: {e}"))?.map_err(|e|format!("initialize failed: {e}"))?;
         self.instances.lock().map_err(|_|"plugin runtime lock poisoned")?.insert(manifest.id.clone(),RunningInstance{engine,store,guest});Ok(())
     }

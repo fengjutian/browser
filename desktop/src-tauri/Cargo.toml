@@ -31,6 +31,10 @@ sha2 = "0.10"
 zip = { version = "4", default-features = false, features = ["deflate"] }
 wasmtime = { version = "49", features = ["component-model", "cranelift", "runtime"], default-features = false }
 
+[dev-dependencies]
+wit-component = "0.258"
+wat = "1"
+
 [target.x86_64-pc-windows-msvc.dependencies]
 webview2-com = "0.38.2"
 windows = "0.61"
