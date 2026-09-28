@@ -215,6 +215,11 @@ export async function aiChat(providerId: string, request: ChatRequest): Promise<
   return invoke<ChatResponse>('ai_chat', { providerId, request })
 }
 
+export async function aiEmbed(providerId: string, inputs: string[]): Promise<number[][]> {
+  if (!isTauri()) throw new Error('Embedding requires the desktop app')
+  return invoke<number[][]>('ai_embed', { providerId, inputs })
+}
+
 export interface EmbeddingMatch {
   documentId: string
   chunkIndex: number

@@ -32,6 +32,7 @@ export interface CrossAskParse {
 export interface CrossAskOptions {
   topK?: number
   maxCharsPerDoc?: number
+  rankedDocumentIds?: readonly string[]
 }
 
 function excerptFor(doc: Document, maxChars: number): string {
@@ -49,7 +50,10 @@ export function buildCrossAskPrompt(
   const maxChars = options?.maxCharsPerDoc ?? MAX_CHARS_PER_DOC
 
   let chosen: { document: Document; originalIndex: number }[]
-  if (documents.length <= topK) {
+  if (options?.rankedDocumentIds?.length) {
+    const rank = new Map(options.rankedDocumentIds.map((id,index)=>[id,index]))
+    chosen = documents.map((document,originalIndex)=>({document,originalIndex})).filter(item=>rank.has(item.document.id)).sort((a,b)=>rank.get(a.document.id)!-rank.get(b.document.id)!).slice(0,topK)
+  } else if (documents.length <= topK) {
     chosen = documents.map((doc, index) => ({ document: doc, originalIndex: index }))
   } else {
     chosen = rankByBm25(question, documents, doc => `${doc.title}\n${excerptFor(doc, maxChars)}`)

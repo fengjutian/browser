@@ -2,11 +2,12 @@ import { Alert, Avatar, Button, Card, Drawer, Empty, Input, List, message, Space
 import { ArrowRightOutlined, FileTextOutlined, RobotOutlined, SettingOutlined, UserOutlined } from '../../components/ui/icons'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { PageHeader } from '../../shared/components/PageHeader'
-import { aiChat, getSession, listAIProviders, listDocuments, setSession } from '../../api'
+import { aiChat, aiEmbed, getSession, listAIProviders, listDocuments, searchDocuments, searchSimilarEmbeddings, setSession, storeDocumentEmbedding } from '../../api'
 import { DocumentDetailDrawer } from '../../features/documents/DocumentDetailDrawer'
 import { buildCrossAskPrompt, parseCrossAnswer } from '../../features/ai/crossAsk'
 import type { AIProvider, Document, View } from '../../types'
 import { compactChatHistory, parseStoredConversation } from '../../features/ai/conversation'
+import { reciprocalRankFusion, validateAnswerCitations } from '../../features/ai/rag'
 
 const CONVERSATION_KEY = 'ai.conversation.v1'
 
@@ -125,9 +126,25 @@ export function AssistantPage({ onNavigate }: { onNavigate?: (view: View) => voi
         .filter((turn): turn is UserTurn | AssistantTurn => !('pending' in turn && turn.pending))
         .filter(turn => turn.role === 'user' || (!turn.pending && turn.content.length > 0))
         .map(turn => ({ role: turn.role as 'user' | 'assistant', content: turn.content })), 12_000)
-      const request = buildCrossAskPrompt(documents, trimmed, history.map(entry => ({ role: entry.role as 'user' | 'assistant', content: entry.content })), { topK: 8 })
+      const provider = providers.find(item=>item.id===providerId)
+      let rankedDocumentIds: string[] | undefined
+      if (provider?.embeddingModel) {
+        const candidates = documents.slice(0,64).map(doc=>({doc,text:(doc.markdown||doc.summary||doc.title).slice(0,1800)})).filter(item=>item.text.trim())
+        const vectors = await aiEmbed(providerId,candidates.map(item=>item.text))
+        await Promise.all(candidates.map((item,index)=>storeDocumentEmbedding(item.doc.id,0,provider.embeddingModel!,item.text,vectors[index])))
+        const [queryVector] = await aiEmbed(providerId,[trimmed])
+        const [keyword, vector] = await Promise.all([searchDocuments(trimmed),searchSimilarEmbeddings(provider.embeddingModel,queryVector,16)])
+        rankedDocumentIds = reciprocalRankFusion(
+          keyword.map((item,index)=>({documentId:item.id,chunkIndex:0,excerpt:item.markdownSnippet??item.summary??'',score:1/(index+1)})),
+          vector.map(item=>({documentId:item.documentId,chunkIndex:item.chunkIndex,excerpt:item.excerpt,score:item.similarity})),
+          {limit:8,maxChunksPerDocument:1},
+        ).map(item=>item.documentId)
+      }
+      const request = buildCrossAskPrompt(documents, trimmed, history.map(entry => ({ role: entry.role as 'user' | 'assistant', content: entry.content })), { topK: 8, rankedDocumentIds })
       const response = await aiChat(providerId, request)
       const parsed = parseCrossAnswer(response.content)
+      const validation = validateAnswerCitations(parsed.answer,parsed.docIds)
+      if (!parsed.notFound && !validation.valid) throw new Error('模型回答未通过引用校验，请重试')
       setTurns(current => current.map(turn => (
         turn.id === pendingTurn.id
           ? { ...turn, content: parsed.answer, docIds: parsed.docIds, notFound: parsed.notFound, pending: false }
