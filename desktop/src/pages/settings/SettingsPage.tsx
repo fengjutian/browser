@@ -1,8 +1,8 @@
-import { Alert, Button, Card, Descriptions, Form, Input, InputNumber, List, message, Popconfirm, Segmented, Select, Space, Statistic, Switch, Tabs, Tag, Typography } from '../../components/ui'
+import { Alert, Button, Card, Descriptions, Drawer, Form, Input, InputNumber, List, message, Popconfirm, Segmented, Select, Space, Spin, Statistic, Switch, Tabs, Tag, Typography } from '../../components/ui'
 import { BgColorsOutlined, DeleteOutlined, KeyOutlined, MoonOutlined, SafetyCertificateOutlined, SaveOutlined, SearchOutlined, SunOutlined, ThunderboltOutlined } from '../../components/ui/icons'
 import { useEffect, useMemo, useState } from 'react'
 import { PageHeader } from '../../shared/components/PageHeader'
-import { clearBrowserHistory, clearClosedTabs as clearClosedTabsInDb, clearReadingSnapshots, deleteAIProvider, deleteMcpServer, exportBackup, getAIProvider, getBrowserShortcutsEnabled, getReadingSnapshotStats, importBackup, listAIProviders, listBrowserHistory, listMcpServers, purgeReadingSnapshots, replaceSitePermissions, saveAIProvider, saveMcpServer, aiTestProvider, setBrowserShortcutsEnabled, type AIProviderInput, type McpServer, type McpTransport, type ReadingSnapshotStats } from '../../api'
+import { callMcpTool, clearBrowserHistory, clearClosedTabs as clearClosedTabsInDb, clearReadingSnapshots, deleteAIProvider, deleteMcpServer, discoverMcpServer, exportBackup, getAIProvider, getBrowserShortcutsEnabled, getReadingSnapshotStats, importBackup, listAIProviders, listBrowserHistory, listMcpResources, listMcpServers, listMcpTools, purgeReadingSnapshots, replaceSitePermissions, saveAIProvider, saveMcpServer, aiTestProvider, setBrowserShortcutsEnabled, type AIProviderInput, type McpServer, type McpTransport, type ReadingSnapshotStats } from '../../api'
 import type { AIProvider, AIProviderType } from '../../types'
 import { normalizeOrigin, readSitePermissions, writeSitePermissions, type SitePermissionKind, type SitePermissionRule } from '../../features/browser/sitePermissions'
 import { readThemePreference, writeThemePreference, type ThemePreference } from '../../features/settings/theme'
@@ -877,6 +877,12 @@ function McpSettings() {
   const [headers, setHeaders] = useState('')
   const [enabled, setEnabled] = useState(true)
   const [saving, setSaving] = useState(false)
+  const [inspecting, setInspecting] = useState<McpServer | null>(null)
+  const [mcpBusy, setMcpBusy] = useState(false)
+  const [tools, setTools] = useState<Array<{name:string;description?:string;inputSchema?:unknown}>>([])
+  const [resources, setResources] = useState<Array<{uri?:string;name?:string;description?:string}>>([])
+  const [toolArgs, setToolArgs] = useState<Record<string,string>>({})
+  const [toolResult, setToolResult] = useState<unknown>(null)
 
   const reload = () => void listMcpServers().then(setServers).catch(error => messageApi.error(String(error)))
   useEffect(reload, [])
@@ -915,8 +921,31 @@ function McpSettings() {
     catch (error) { messageApi.error(String(error)) }
   }
 
+  async function inspect(server: McpServer) {
+    setInspecting(server); setMcpBusy(true); setTools([]); setResources([]); setToolResult(null)
+    try {
+      await discoverMcpServer(server.id).catch(() => undefined)
+      const [toolResponse, resourceResponse] = await Promise.all([listMcpTools(server.id), listMcpResources(server.id)])
+      setTools((toolResponse as {tools?: typeof tools}).tools ?? [])
+      setResources((resourceResponse as {resources?: typeof resources}).resources ?? [])
+    } catch (error) { messageApi.error(`MCP 连接失败：${String(error)}`) }
+    finally { setMcpBusy(false) }
+  }
+
+  async function invokeTool(toolName: string) {
+    if (!inspecting) return
+    let parsed: Record<string, unknown>
+    try { parsed = JSON.parse(toolArgs[toolName] || '{}') as Record<string, unknown> }
+    catch { messageApi.error('工具参数必须是 JSON 对象'); return }
+    if (!window.confirm(`允许本次调用工具 ${toolName}？\n\n${JSON.stringify(parsed,null,2)}`)) return
+    setMcpBusy(true)
+    try { setToolResult(await callMcpTool(inspecting.id, toolName, parsed, true)) }
+    catch (error) { messageApi.error(`调用失败：${String(error)}`) }
+    finally { setMcpBusy(false) }
+  }
+
   return <>{contextHolder}<Card title="MCP Server" className="settings-card mcp-settings">
-    <Alert type="info" showIcon message="配置存储已启用" description="当前批次提供 Server 配置管理；连接、工具发现和调用授权将在后续批次接入。环境变量和请求头可能包含密钥，请仅在可信设备上配置。"/>
+    <Alert type="info" showIcon message="MCP 连接已启用" description="支持本地 stdio、Streamable HTTP 与 SSE 响应。每次工具调用都会显示参数并要求明确授权。"/>
     <Space direction="vertical" style={{width:'100%',marginTop:16}}>
       <Input value={name} onChange={event=>setName(event.target.value)} placeholder="Server 名称"/>
       <Segmented value={transport} onChange={value=>setTransport(value as McpTransport)} options={[{label:'stdio',value:'stdio'},{label:'HTTP',value:'http'},{label:'SSE',value:'sse'}]}/>
@@ -928,7 +957,13 @@ function McpSettings() {
       <Input.TextArea value={headers} onChange={event=>setHeaders(event.target.value)} autoSize={{minRows:2,maxRows:6}} placeholder={'请求头 JSON，例如 {"Authorization":"Bearer ..."}'}/>
       <Space><Switch checked={enabled} onChange={setEnabled}/><span>启用</span><Button type="primary" loading={saving} onClick={()=>void save()}>{editingId ? '保存修改' : '添加 Server'}</Button>{editingId&&<Button onClick={reset}>取消编辑</Button>}</Space>
     </Space>
-    <List style={{marginTop:18}} dataSource={servers} locale={{emptyText:'尚未配置 MCP Server'}} renderItem={server=><List.Item actions={[<Button size="small" onClick={()=>edit(server)}>编辑</Button>,<Popconfirm title="删除这个 MCP Server？" onConfirm={()=>void remove(server.id)}><Button size="small" danger>删除</Button></Popconfirm>]}><List.Item.Meta title={<Space><b>{server.name}</b><Tag>{server.transport}</Tag><Tag color={server.enabled?'green':'default'}>{server.enabled?'启用':'停用'}</Tag></Space>} description={server.transport==='stdio'?[server.command,...server.args].filter(Boolean).join(' '):server.url}/></List.Item>}/>
+    <List style={{marginTop:18}} dataSource={servers} locale={{emptyText:'尚未配置 MCP Server'}} renderItem={server=><List.Item actions={[<Button size="small" disabled={!server.enabled} onClick={()=>void inspect(server)}>连接</Button>,<Button size="small" onClick={()=>edit(server)}>编辑</Button>,<Popconfirm title="删除这个 MCP Server？" onConfirm={()=>void remove(server.id)}><Button size="small" danger>删除</Button></Popconfirm>]}><List.Item.Meta title={<Space><b>{server.name}</b><Tag>{server.transport}</Tag><Tag color={server.enabled?'green':'default'}>{server.enabled?'启用':'停用'}</Tag></Space>} description={server.transport==='stdio'?[server.command,...server.args].filter(Boolean).join(' '):server.url}/></List.Item>}/>
+    <Drawer title={inspecting ? `MCP · ${inspecting.name}` : 'MCP'} width={560} open={Boolean(inspecting)} onClose={()=>setInspecting(null)}>
+      {mcpBusy && <Spin/>}<Typography.Title level={5}>工具</Typography.Title>
+      <List dataSource={tools} locale={{emptyText:'服务未返回工具'}} renderItem={tool=><List.Item><Space direction="vertical" style={{width:'100%'}}><b>{tool.name}</b><Typography.Text type="secondary">{tool.description??'无描述'}</Typography.Text><Input.TextArea value={toolArgs[tool.name]??'{}'} onChange={event=>setToolArgs(current=>({...current,[tool.name]:event.target.value}))} autoSize={{minRows:2,maxRows:8}}/><Button type="primary" disabled={mcpBusy} onClick={()=>void invokeTool(tool.name)}>审核并调用</Button></Space></List.Item>}/>
+      <Typography.Title level={5} style={{marginTop:20}}>资源</Typography.Title><List dataSource={resources} locale={{emptyText:'服务未返回资源'}} renderItem={resource=><List.Item><List.Item.Meta title={resource.name??resource.uri} description={resource.description??resource.uri}/></List.Item>}/>
+      {toolResult!=null&&<><Typography.Title level={5} style={{marginTop:20}}>调用结果</Typography.Title><pre style={{whiteSpace:'pre-wrap',overflow:'auto'}}>{JSON.stringify(toolResult,null,2)}</pre></>}
+    </Drawer>
   </Card></>
 }
 
