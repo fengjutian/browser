@@ -1590,6 +1590,7 @@ pub fn run() {
         .manage(downloads::DownloadManager::default())
         .manage(privacy::NavBlockRegistry::default())
         .manage(AiStreamRegistry::default())
+        .manage(plugins::WasmRuntime::default())
         .manage(PermissionWaiters::default())
         .setup(|app| {
             // Set the runtime window icon explicitly as well as the bundled executable
@@ -1710,6 +1711,8 @@ pub fn run() {
             plugins::install_plugin,
             plugins::list_plugins,
             plugins::set_plugin_enabled,
+            plugins::set_plugin_permission,
+            plugins::dispatch_plugin_event,
             plugins::uninstall_plugin,
             local_store::local_record_agent_run,
             local_store::local_list_agent_runs,

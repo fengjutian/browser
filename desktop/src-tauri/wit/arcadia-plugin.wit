@@ -1,0 +1,16 @@
+package arcadia:plugin@1.0.0;
+interface host {
+  record event { kind: string, payload-json: string }
+  log: func(level: string, message: string) -> result<_, string>;
+  knowledge-search: func(query: string, limit: u32) -> result<string, string>;
+  knowledge-get: func(id: string) -> result<string, string>;
+  ai-chat: func(request-json: string) -> result<string, string>;
+  http-fetch: func(request-json: string) -> result<string, string>;
+}
+interface guest {
+  use host.{event};
+  initialize: func(config-json: string) -> result<_, string>;
+  handle-event: func(value: event) -> result<string, string>;
+  shutdown: func();
+}
+world arcadia-plugin { import host; export guest; }
