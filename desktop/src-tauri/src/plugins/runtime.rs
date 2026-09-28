@@ -56,3 +56,37 @@ impl PluginRuntime for DisabledRuntime {
     fn handle_event(&self,_plugin_id:&str,_kind:&str,_payload_json:&str)->Result<String,String>{Err("plugin runtime is disabled".into())}
     fn stop(&self,_plugin_id:&str)->Result<(),String>{Ok(())}
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use wasmtime::{Instance, Module};
+
+    fn manifest() -> PluginManifest { PluginManifest { schema_version:1,id:"com.arcadia.hello".into(),name:"Hello".into(),version:"1.0.0".into(),description:None,author:None,component:"plugin.wasm".into(),sha256:"0".repeat(64),permissions:vec![],network_allowlist:vec![],events:vec!["test".into()] } }
+
+    #[test]
+    fn component_lifecycle_round_trip() {
+        let path=std::env::temp_dir().join(format!("arcadia-plugin-{}.wasm",uuid::Uuid::new_v4()));
+        std::fs::write(&path,include_bytes!("../../samples/hello-plugin/plugin.wasm")).unwrap();
+        let runtime=WasmRuntime::default();
+        runtime.start(&manifest(),&path,PluginContext::new("com.arcadia.hello",[])).unwrap();
+        assert_eq!(runtime.handle_event("com.arcadia.hello","test",r#"{"ok":true}"#).unwrap(),r#"handled:test:{"ok":true}"#);
+        runtime.stop("com.arcadia.hello").unwrap();
+        assert!(runtime.handle_event("com.arcadia.hello","test","{}").is_err());
+        let _=std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn fuel_interrupts_infinite_loop() {
+        let mut config=Config::new();config.consume_fuel(true);let engine=Engine::new(&config).unwrap();
+        let module=Module::new(&engine,"(module (func (export \"run\") (loop br 0)))").unwrap();let mut store=Store::new(&engine,());store.set_fuel(10_000).unwrap();let instance=Instance::new(&mut store,&module,&[]).unwrap();
+        let error=instance.get_typed_func::<(),()>(&mut store,"run").unwrap().call(&mut store,()).unwrap_err();assert!(error.to_string().contains("fuel"));
+    }
+
+    #[test]
+    fn memory_growth_is_limited() {
+        let engine=Engine::default();let module=Module::new(&engine,"(module (memory 1 100000) (func (export \"grow\") (result i32) i32.const 100000 memory.grow))").unwrap();
+        let limits=StoreLimitsBuilder::new().memory_size(64*1024*1024).build();struct State(StoreLimits);let mut store=Store::new(&engine,State(limits));store.limiter(|state|&mut state.0);let instance=Instance::new(&mut store,&module,&[]).unwrap();
+        assert_eq!(instance.get_typed_func::<(),i32>(&mut store,"grow").unwrap().call(&mut store,()).unwrap(),-1);
+    }
+}
