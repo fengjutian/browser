@@ -3,7 +3,7 @@ mod manager;
 mod manifest;
 mod permission;
 mod runtime;
-mod installer;
+pub(crate) mod installer;
 
 pub use context::PluginContext;
 pub use manager::PluginManager;

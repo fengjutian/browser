@@ -2,7 +2,7 @@ use super::{PluginContext, PluginManifest, PluginPermission};
 use std::{collections::HashMap, path::Path, sync::Mutex, time::Duration};
 use wasmtime::{component::{Component, Linker}, Config, Engine, Store, StoreLimits, StoreLimitsBuilder};
 
-mod bindings { wasmtime::component::bindgen!({ path: "wit", world: "arcadia-plugin", async: false }); }
+mod bindings { wasmtime::component::bindgen!({ path: "wit", world: "arcadia-plugin" }); }
 
 const FUEL: u64 = 10_000_000;
 const MEMORY_BYTES: usize = 64 * 1024 * 1024;
