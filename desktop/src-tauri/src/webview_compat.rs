@@ -57,13 +57,22 @@ fn is_allowed_custom_scheme(scheme: &str) -> bool {
 pub fn shell_open(_app: AppHandle, url: String) -> Result<(), String> {
     let parsed = url::Url::parse(&url).map_err(|error| format!("invalid url: {error}"))?;
     if matches!(parsed.scheme(), "http" | "https") {
-        return Err(format!("refusing to open {} via system shell", parsed.scheme()));
+        return Err(format!(
+            "refusing to open {} via system shell",
+            parsed.scheme()
+        ));
     }
     if is_dangerous_custom_scheme(parsed.scheme()) {
-        return Err(format!("refusing to open dangerous scheme: {}", parsed.scheme()));
+        return Err(format!(
+            "refusing to open dangerous scheme: {}",
+            parsed.scheme()
+        ));
     }
     if !is_allowed_custom_scheme(parsed.scheme()) {
-        return Err(format!("custom scheme is not allowlisted: {}", parsed.scheme()));
+        return Err(format!(
+            "custom scheme is not allowlisted: {}",
+            parsed.scheme()
+        ));
     }
     #[cfg(target_os = "windows")]
     {
@@ -127,14 +136,14 @@ pub fn pick_files(app: AppHandle, options: FilePickOptions) -> Result<FilePickRe
         builder = builder.set_title(title);
     }
     fn file_path_to_string(path: tauri_plugin_dialog::FilePath) -> String {
-    use tauri_plugin_dialog::FilePath;
-    match path {
-        FilePath::Path(buf) => buf.to_string_lossy().into_owned(),
-        FilePath::Url(url) => url.to_string(),
+        use tauri_plugin_dialog::FilePath;
+        match path {
+            FilePath::Path(buf) => buf.to_string_lossy().into_owned(),
+            FilePath::Url(url) => url.to_string(),
+        }
     }
-}
 
-if directory {
+    if directory {
         builder.pick_folder(move |path| {
             let _ = tx.send(path.map(|p| vec![file_path_to_string(p)]));
         });

@@ -88,13 +88,14 @@ pub(crate) struct OpenAIUsage {
 
 #[async_trait]
 impl AiProvider for OpenAICompatibleProvider {
-    fn type_id(&self) -> &'static str { "openai-compatible" }
+    fn type_id(&self) -> &'static str {
+        "openai-compatible"
+    }
 
     async fn chat(&self, request: ChatRequest) -> Result<ChatResponse, ProviderError> {
-        let client = reqwest::Client::builder()
-            .timeout(self.timeout)
-            .build()?;
-        let messages: Vec<OpenAIMessage> = request.messages.into_iter().map(message_to_wire).collect();
+        let client = reqwest::Client::builder().timeout(self.timeout).build()?;
+        let messages: Vec<OpenAIMessage> =
+            request.messages.into_iter().map(message_to_wire).collect();
         let body = OpenAIRequest {
             model: self.model.clone(),
             messages,
@@ -114,9 +115,14 @@ impl AiProvider for OpenAICompatibleProvider {
         let status = response.status();
         let text = response.text().await?;
         if !status.is_success() {
-            return Err(ProviderError::ProviderStatus { status: status.as_u16(), body: sanitize_body(&text) });
+            return Err(ProviderError::ProviderStatus {
+                status: status.as_u16(),
+                body: sanitize_body(&text),
+            });
         }
-        let parsed: OpenAIResponse = serde_json::from_str(&text).map_err(|error| ProviderError::InvalidResponse(format!("{error}: {}", sanitize_body(&text))))?;
+        let parsed: OpenAIResponse = serde_json::from_str(&text).map_err(|error| {
+            ProviderError::InvalidResponse(format!("{error}: {}", sanitize_body(&text)))
+        })?;
         let content = parsed
             .choices
             .into_iter()
@@ -126,7 +132,9 @@ impl AiProvider for OpenAICompatibleProvider {
             .trim()
             .to_string();
         if content.is_empty() {
-            return Err(ProviderError::InvalidResponse("empty assistant content".into()));
+            return Err(ProviderError::InvalidResponse(
+                "empty assistant content".into(),
+            ));
         }
         Ok(ChatResponse {
             content,
@@ -141,17 +149,18 @@ impl AiProvider for OpenAICompatibleProvider {
         sink: mpsc::Sender<ChatChunk>,
         cancel: CancellationToken,
     ) -> Result<(), ProviderError> {
-        let client = reqwest::Client::builder()
-            .timeout(self.timeout)
-            .build()?;
-        let messages: Vec<OpenAIMessage> = request.messages.into_iter().map(message_to_wire).collect();
+        let client = reqwest::Client::builder().timeout(self.timeout).build()?;
+        let messages: Vec<OpenAIMessage> =
+            request.messages.into_iter().map(message_to_wire).collect();
         let body = OpenAIRequest {
             model: self.model.clone(),
             messages,
             temperature: request.temperature,
             max_tokens: request.max_tokens,
             stream: true,
-            stream_options: Some(StreamOptions { include_usage: true }),
+            stream_options: Some(StreamOptions {
+                include_usage: true,
+            }),
         };
         let url = format!("{}/chat/completions", self.base_url.trim_end_matches('/'));
         let mut request_builder = client.post(url).json(&body);
@@ -164,7 +173,10 @@ impl AiProvider for OpenAICompatibleProvider {
         let status = response.status();
         if !status.is_success() {
             let body = response.text().await.unwrap_or_default();
-            return Err(ProviderError::ProviderStatus { status: status.as_u16(), body: sanitize_body(&body) });
+            return Err(ProviderError::ProviderStatus {
+                status: status.as_u16(),
+                body: sanitize_body(&body),
+            });
         }
         let mut byte_stream = response.bytes_stream();
         let mut buffer = String::new();
@@ -209,13 +221,15 @@ impl AiProvider for OpenAICompatibleProvider {
         }
 
         // Stream ended without [DONE]: synthesise a terminal chunk.
-        let _ = sink.send(ChatChunk {
-            delta: String::new(),
-            finish_reason: Some("stop".into()),
-            done: true,
-            prompt_tokens: last_usage.as_ref().and_then(|u| u.prompt_tokens),
-            completion_tokens: last_usage.as_ref().and_then(|u| u.completion_tokens),
-        }).await;
+        let _ = sink
+            .send(ChatChunk {
+                delta: String::new(),
+                finish_reason: Some("stop".into()),
+                done: true,
+                prompt_tokens: last_usage.as_ref().and_then(|u| u.prompt_tokens),
+                completion_tokens: last_usage.as_ref().and_then(|u| u.completion_tokens),
+            })
+            .await;
         Ok(())
     }
 }
@@ -235,7 +249,10 @@ pub(crate) struct OpenAiDelta {
 /// starting with `data:` are parsed; `[DONE]` marks the terminal record;
 /// blank lines and unparseable lines are skipped silently. Any incomplete
 /// trailing line stays in `buffer` for the next call.
-pub(crate) fn parse_sse_chunk(buffer: &mut String, last_usage: &mut Option<OpenAIUsage>) -> Vec<OpenAiDelta> {
+pub(crate) fn parse_sse_chunk(
+    buffer: &mut String,
+    last_usage: &mut Option<OpenAIUsage>,
+) -> Vec<OpenAiDelta> {
     let mut out: Vec<OpenAiDelta> = Vec::new();
     while let Some(idx) = buffer.find('\n') {
         let line: String = buffer.drain(..=idx).collect();
@@ -298,7 +315,10 @@ pub(crate) fn parse_sse_chunk(buffer: &mut String, last_usage: &mut Option<OpenA
 }
 
 fn message_to_wire(message: ChatMessage) -> OpenAIMessage {
-    OpenAIMessage { role: message.role, content: message.content }
+    OpenAIMessage {
+        role: message.role,
+        content: message.content,
+    }
 }
 
 fn sanitize_body(body: &str) -> String {
@@ -354,7 +374,9 @@ mod tests {
     fn sse_extracts_usage_when_choices_empty() {
         let mut buf = String::new();
         let mut usage = None;
-        buf.push_str("data: {\"choices\":[],\"usage\":{\"prompt_tokens\":11,\"completion_tokens\":7}}\n");
+        buf.push_str(
+            "data: {\"choices\":[],\"usage\":{\"prompt_tokens\":11,\"completion_tokens\":7}}\n",
+        );
         let out = parse_sse_chunk(&mut buf, &mut usage);
         assert_eq!(out.len(), 1);
         assert_eq!(out[0].prompt_tokens, Some(11));
@@ -366,7 +388,9 @@ mod tests {
     fn sse_keeps_trailing_partial_line_in_buffer() {
         let mut buf = String::new();
         let mut usage = None;
-        buf.push_str("data: {\"choices\":[{\"delta\":{\"content\":\"Hel\"}}]}\ndata: {\"choices\":");
+        buf.push_str(
+            "data: {\"choices\":[{\"delta\":{\"content\":\"Hel\"}}]}\ndata: {\"choices\":",
+        );
         let out = parse_sse_chunk(&mut buf, &mut usage);
         assert_eq!(out.len(), 1);
         assert_eq!(out[0].delta, "Hel");

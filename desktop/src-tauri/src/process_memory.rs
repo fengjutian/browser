@@ -27,13 +27,7 @@ mod imp {
     pub fn sample() -> Option<ProcessMemory> {
         let mut counters: PROCESS_MEMORY_COUNTERS = unsafe { std::mem::zeroed() };
         let out_size = std::mem::size_of::<PROCESS_MEMORY_COUNTERS>() as u32;
-        let ok = unsafe {
-            K32GetProcessMemoryInfo(
-                GetCurrentProcess(),
-                &mut counters,
-                out_size,
-            )
-        };
+        let ok = unsafe { K32GetProcessMemoryInfo(GetCurrentProcess(), &mut counters, out_size) };
         if ok == 0 {
             return None;
         }

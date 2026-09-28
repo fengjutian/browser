@@ -156,7 +156,10 @@ mod tests {
         clear_lock(&conn, 1_500).unwrap();
         write_lock(&conn, 2_000).unwrap();
         let state = detect(&conn).unwrap();
-        assert!(state.crashed, "the second write after clear means we are still alive");
+        assert!(
+            state.crashed,
+            "the second write after clear means we are still alive"
+        );
     }
 
     #[test]

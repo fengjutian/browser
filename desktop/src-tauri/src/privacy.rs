@@ -133,7 +133,7 @@ fn handle_navigation<R: Runtime>(
 mod win {
     use tauri::Manager;
     use webview2_com::Microsoft::Web::WebView2::Win32::{
-        ICoreWebView2_2, ICoreWebView2NavigationStartingEventArgs,
+        ICoreWebView2NavigationStartingEventArgs, ICoreWebView2_2,
     };
     use windows::core::{Interface, PWSTR};
 
@@ -150,10 +150,12 @@ mod win {
             let Ok(core2) = core.cast::<ICoreWebView2_2>() else {
                 return;
             };
-            let handler = webview2_com::NavigationStartingEventHandler::create(Box::new(move |_sender, args| {
-                let Some(args) = args else { return Ok(()) };
-                super::handle_navigation(&event_app, &event_label, &args)
-            }));
+            let handler = webview2_com::NavigationStartingEventHandler::create(Box::new(
+                move |_sender, args| {
+                    let Some(args) = args else { return Ok(()) };
+                    super::handle_navigation(&event_app, &event_label, &args)
+                },
+            ));
             let mut token = 0;
             let _ = unsafe { core2.add_NavigationStarting(&handler, &mut token) };
         });
@@ -174,7 +176,11 @@ mod win {
                     .ok()
                     .and_then(|u| u.host_str().map(|s| s.to_ascii_lowercase()));
                 if let Some(host) = host {
-                    if reg.snapshot_hosts().iter().any(|h| h == &host || host.ends_with(&format!(".{h}"))) {
+                    if reg
+                        .snapshot_hosts()
+                        .iter()
+                        .any(|h| h == &host || host.ends_with(&format!(".{h}")))
+                    {
                         return super::cancel_with_event(app, label, &url, "custom-blocklist");
                     }
                 }
@@ -214,7 +220,9 @@ mod tests {
     fn baseline_hosts_match_subdomain_and_bare() {
         assert!(is_blocked_host("https://doubleclick.net/foo"));
         assert!(is_blocked_host("https://ad.doubleclick.net/x"));
-        assert!(is_blocked_host("https://pagead2.googlesyndication.com/pagead/show_ads.js"));
+        assert!(is_blocked_host(
+            "https://pagead2.googlesyndication.com/pagead/show_ads.js"
+        ));
     }
 
     #[test]

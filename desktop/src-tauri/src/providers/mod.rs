@@ -1,5 +1,5 @@
-pub mod openai;
 pub mod ollama;
+pub mod openai;
 
 use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc;
@@ -55,7 +55,9 @@ pub enum ProviderError {
 }
 
 impl From<reqwest::Error> for ProviderError {
-    fn from(value: reqwest::Error) -> Self { ProviderError::Http(value.to_string()) }
+    fn from(value: reqwest::Error) -> Self {
+        ProviderError::Http(value.to_string())
+    }
 }
 
 #[async_trait::async_trait]
@@ -76,5 +78,7 @@ pub trait AiProvider: Send + Sync {
 
 pub mod cancel {
     use tokio_util::sync::CancellationToken;
-    pub fn new() -> CancellationToken { CancellationToken::new() }
+    pub fn new() -> CancellationToken {
+        CancellationToken::new()
+    }
 }

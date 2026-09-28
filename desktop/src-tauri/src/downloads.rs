@@ -101,17 +101,29 @@ fn validate_download_file_name(file_name: &str) -> Result<(), String> {
     if trimmed.is_empty() || trimmed.len() > 255 || trimmed == "." || trimmed == ".." {
         return Err("invalid download file name".into());
     }
-    if trimmed.ends_with('.') || trimmed.chars().any(|ch| ch.is_control() || matches!(ch, '<' | '>' | ':' | '"' | '/' | '\\' | '|' | '?' | '*')) {
+    if trimmed.ends_with('.')
+        || trimmed.chars().any(|ch| {
+            ch.is_control() || matches!(ch, '<' | '>' | ':' | '"' | '/' | '\\' | '|' | '?' | '*')
+        })
+    {
         return Err("download file name contains unsafe characters".into());
     }
-    if Path::new(trimmed).file_name().and_then(|name| name.to_str()) != Some(trimmed) {
+    if Path::new(trimmed)
+        .file_name()
+        .and_then(|name| name.to_str())
+        != Some(trimmed)
+    {
         return Err("download file name must not contain a path".into());
     }
     Ok(())
 }
 
 fn danger_from_file_name(file_name: &str) -> DangerType {
-    let extension = Path::new(file_name).extension().and_then(|value| value.to_str()).unwrap_or("").to_ascii_lowercase();
+    let extension = Path::new(file_name)
+        .extension()
+        .and_then(|value| value.to_str())
+        .unwrap_or("")
+        .to_ascii_lowercase();
     match extension.as_str() {
         "exe" | "msi" | "com" | "scr" | "app" | "dmg" => DangerType::Executable,
         "js" | "mjs" | "vbs" | "ps1" | "bat" | "cmd" | "sh" => DangerType::Script,
@@ -174,13 +186,18 @@ pub fn insert_download(
         return Err("download id, url and file_name are required".into());
     }
     validate_download_file_name(&input.file_name)?;
-    let parsed_url = url::Url::parse(&input.url).map_err(|error| format!("invalid download url: {error}"))?;
+    let parsed_url =
+        url::Url::parse(&input.url).map_err(|error| format!("invalid download url: {error}"))?;
     if !matches!(parsed_url.scheme(), "http" | "https") {
         return Err("download url must use http or https".into());
     }
     let now = chrono::Utc::now().to_rfc3339();
     let derived_danger = danger_from_file_name(&input.file_name);
-    let danger = if derived_danger == DangerType::None { input.danger_type.unwrap_or(DangerType::None) } else { derived_danger };
+    let danger = if derived_danger == DangerType::None {
+        input.danger_type.unwrap_or(DangerType::None)
+    } else {
+        derived_danger
+    };
     let status = if input.private {
         // Private downloads are not persisted at all — the caller should drop
         // the record. We still allow the path to be set transiently for the
@@ -216,17 +233,17 @@ pub fn insert_download(
     get_download(database, &input.id)?.ok_or_else(|| "download record vanished".into())
 }
 
-pub fn update_progress(
-    database: &Connection,
-    input: DownloadProgressInput,
-) -> Result<(), String> {
+pub fn update_progress(database: &Connection, input: DownloadProgressInput) -> Result<(), String> {
     if input.id.is_empty() {
         return Err("download id is required".into());
     }
     let now = chrono::Utc::now().to_rfc3339();
     let finished = matches!(
         input.status,
-        DownloadStatus::Completed | DownloadStatus::Failed | DownloadStatus::Cancelled | DownloadStatus::Blocked
+        DownloadStatus::Completed
+            | DownloadStatus::Failed
+            | DownloadStatus::Cancelled
+            | DownloadStatus::Blocked
     );
     if finished {
         database
@@ -274,7 +291,8 @@ pub fn list_downloads(
     let rows = stmt
         .query_map([], row_download)
         .map_err(|error| error.to_string())?;
-    rows.collect::<Result<Vec<_>, _>>().map_err(|error| error.to_string())
+    rows.collect::<Result<Vec<_>, _>>()
+        .map_err(|error| error.to_string())
 }
 
 pub fn get_download(database: &Connection, id: &str) -> Result<Option<DownloadRecord>, String> {
@@ -283,9 +301,7 @@ pub fn get_download(database: &Connection, id: &str) -> Result<Option<DownloadRe
             "SELECT id, url, file_name, target_path, mime_type, received_bytes, total_bytes, status, danger_type, error_message, source_origin, source_tab_label, private, started_at, updated_at, finished_at FROM downloads WHERE id=?",
         )
         .map_err(|error| error.to_string())?;
-    let mut rows = stmt
-        .query(params![id])
-        .map_err(|error| error.to_string())?;
+    let mut rows = stmt.query(params![id]).map_err(|error| error.to_string())?;
     match rows.next().map_err(|error| error.to_string())? {
         Some(row) => Ok(Some(row_download(row).map_err(|error| error.to_string())?)),
         None => Ok(None),
@@ -312,10 +328,18 @@ fn row_download(row: &Row<'_>) -> rusqlite::Result<DownloadRecord> {
         received_bytes: row.get(5)?,
         total_bytes: row.get(6)?,
         status: DownloadStatus::parse(&status).map_err(|error| {
-            rusqlite::Error::FromSqlConversionFailure(0, rusqlite::types::Type::Text, Box::new(std::io::Error::new(std::io::ErrorKind::InvalidData, error)))
+            rusqlite::Error::FromSqlConversionFailure(
+                0,
+                rusqlite::types::Type::Text,
+                Box::new(std::io::Error::new(std::io::ErrorKind::InvalidData, error)),
+            )
         })?,
         danger_type: DangerType::parse(&danger).map_err(|error| {
-            rusqlite::Error::FromSqlConversionFailure(0, rusqlite::types::Type::Text, Box::new(std::io::Error::new(std::io::ErrorKind::InvalidData, error)))
+            rusqlite::Error::FromSqlConversionFailure(
+                0,
+                rusqlite::types::Type::Text,
+                Box::new(std::io::Error::new(std::io::ErrorKind::InvalidData, error)),
+            )
         })?,
         error_message: row.get(9)?,
         source_origin: row.get(10)?,
@@ -335,8 +359,8 @@ fn row_download(row: &Row<'_>) -> rusqlite::Result<DownloadRecord> {
 /// 3. The path must not start with the Windows device namespace prefix
 ///    (`\\.\` or `\\?\`), which can alias block devices on legacy Windows.
 fn validate_user_path(path: &Path) -> Result<(), String> {
-    let metadata = std::fs::metadata(path)
-        .map_err(|error| format!("path is not accessible: {error}"))?;
+    let metadata =
+        std::fs::metadata(path).map_err(|error| format!("path is not accessible: {error}"))?;
     if !metadata.is_file() {
         return Err("path is not a regular file".into());
     }
@@ -359,10 +383,7 @@ pub fn download_list(
 }
 
 #[tauri::command]
-pub fn download_get(
-    app: tauri::AppHandle,
-    id: String,
-) -> Result<Option<DownloadRecord>, String> {
+pub fn download_get(app: tauri::AppHandle, id: String) -> Result<Option<DownloadRecord>, String> {
     let database = local_store::connection(&app)?;
     get_download(&database, &id)
 }
@@ -391,8 +412,8 @@ pub fn download_remove_record(
 #[tauri::command]
 pub fn download_open_file(app: tauri::AppHandle, id: String) -> Result<(), String> {
     let database = local_store::connection(&app)?;
-    let record = get_download(&database, &id)?
-        .ok_or_else(|| "download record not found".to_string())?;
+    let record =
+        get_download(&database, &id)?.ok_or_else(|| "download record not found".to_string())?;
     let path = record
         .target_path
         .ok_or_else(|| "download has no saved file yet".to_string())?;
@@ -404,8 +425,8 @@ pub fn download_open_file(app: tauri::AppHandle, id: String) -> Result<(), Strin
 #[tauri::command]
 pub fn download_show_in_folder(app: tauri::AppHandle, id: String) -> Result<(), String> {
     let database = local_store::connection(&app)?;
-    let record = get_download(&database, &id)?
-        .ok_or_else(|| "download record not found".to_string())?;
+    let record =
+        get_download(&database, &id)?.ok_or_else(|| "download record not found".to_string())?;
     let path = record
         .target_path
         .ok_or_else(|| "download has no saved file yet".to_string())?;
@@ -513,7 +534,10 @@ pub struct DownloadManager {
 
 impl DownloadManager {
     fn cancel_flag(&self, id: &str) -> Option<std::sync::Arc<AtomicBool>> {
-        self.jobs.lock().ok().and_then(|guard| guard.get(id).map(|job| job.cancel.clone()))
+        self.jobs
+            .lock()
+            .ok()
+            .and_then(|guard| guard.get(id).map(|job| job.cancel.clone()))
     }
 
     fn remember(&self, id: &str, cancel: std::sync::Arc<AtomicBool>) {
@@ -576,11 +600,17 @@ fn emit_progress(app: &AppHandle, payload: DownloadProgressPayload) {
 }
 
 fn source_origin_from_url(url: &str) -> Option<String> {
-    url::Url::parse(url).ok().map(|u| u.origin().ascii_serialization()).filter(|s| s != "null")
+    url::Url::parse(url)
+        .ok()
+        .map(|u| u.origin().ascii_serialization())
+        .filter(|s| s != "null")
 }
 
 fn downloads_root(app: &AppHandle) -> Result<PathBuf, String> {
-    let dir = app.path().app_data_dir().map_err(|error| error.to_string())?;
+    let dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|error| error.to_string())?;
     let root = dir.join(DOWNLOADS_SUBDIR);
     std::fs::create_dir_all(&root).map_err(|error| error.to_string())?;
     Ok(root)
@@ -591,8 +621,14 @@ fn unique_destination(root: &Path, file_name: &str) -> PathBuf {
     if !candidate.exists() {
         return candidate;
     }
-    let stem = Path::new(file_name).file_stem().and_then(|s| s.to_str()).unwrap_or(file_name);
-    let ext = Path::new(file_name).extension().and_then(|s| s.to_str()).unwrap_or("");
+    let stem = Path::new(file_name)
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or(file_name);
+    let ext = Path::new(file_name)
+        .extension()
+        .and_then(|s| s.to_str())
+        .unwrap_or("");
     for index in 1..1000 {
         let name = if ext.is_empty() {
             format!("{stem} ({index})")
@@ -627,7 +663,10 @@ pub async fn download_start_reqwest(
     validate_download_file_name(&input.file_name)?;
     let url = url::Url::parse(&input.url).map_err(|error| error.to_string())?;
     if !matches!(url.scheme(), "http" | "https") {
-        return Err(format!("unsupported scheme for reqwest download: {}", url.scheme()));
+        return Err(format!(
+            "unsupported scheme for reqwest download: {}",
+            url.scheme()
+        ));
     }
     let root = downloads_root(&app)?;
     let final_path = unique_destination(&root, &input.file_name);
@@ -672,7 +711,8 @@ pub async fn download_start_reqwest(
     );
 
     let cancel = std::sync::Arc::new(AtomicBool::new(false));
-    app.state::<DownloadManager>().remember(&input.id, cancel.clone());
+    app.state::<DownloadManager>()
+        .remember(&input.id, cancel.clone());
 
     let id_for_return = input.id.clone();
     tauri::async_runtime::spawn(async move {
@@ -685,7 +725,9 @@ pub async fn download_start_reqwest(
 #[tauri::command]
 pub fn download_pause(app: AppHandle, id: String) -> Result<(), String> {
     let manager = app.state::<DownloadManager>();
-    let cancel = manager.cancel_flag(&id).ok_or_else(|| "no active download".to_string())?;
+    let cancel = manager
+        .cancel_flag(&id)
+        .ok_or_else(|| "no active download".to_string())?;
     cancel.store(true, Ordering::SeqCst);
     let database = local_store::connection(&app)?;
     update_progress(
@@ -787,8 +829,8 @@ pub fn download_cancel(app: AppHandle, id: String) -> Result<(), String> {
 #[tauri::command]
 pub async fn download_retry(app: AppHandle, id: String) -> Result<String, String> {
     let database = local_store::connection(&app)?;
-    let record = get_download(&database, &id)?
-        .ok_or_else(|| "download record not found".to_string())?;
+    let record =
+        get_download(&database, &id)?.ok_or_else(|| "download record not found".to_string())?;
     let input = StartDownloadInput {
         id: record.id.clone(),
         url: record.url.clone(),
@@ -844,14 +886,25 @@ async fn run_download(
     {
         Ok(client) => client,
         Err(error) => {
-            finish_failure(&app, &id, &url, &file_name, &source_tab_label, source_origin.clone(), danger, error.to_string());
+            finish_failure(
+                &app,
+                &id,
+                &url,
+                &file_name,
+                &source_tab_label,
+                source_origin.clone(),
+                danger,
+                error.to_string(),
+            );
             return;
         }
     };
 
     // If a partial file exists from a previous pause, send Range.
     let existing = if part_path.exists() {
-        std::fs::metadata(&part_path).map(|m| m.len() as i64).unwrap_or(0)
+        std::fs::metadata(&part_path)
+            .map(|m| m.len() as i64)
+            .unwrap_or(0)
     } else {
         0
     };
@@ -863,15 +916,23 @@ async fn run_download(
     let response = match request.send().await {
         Ok(response) => response,
         Err(error) => {
-            finish_failure(&app, &id, &url, &file_name, &source_tab_label, source_origin.clone(), danger, error.to_string());
+            finish_failure(
+                &app,
+                &id,
+                &url,
+                &file_name,
+                &source_tab_label,
+                source_origin.clone(),
+                danger,
+                error.to_string(),
+            );
             return;
         }
     };
 
     let status = response.status();
     let accept_range = existing > 0
-        && (status == reqwest::StatusCode::PARTIAL_CONTENT
-            || status == reqwest::StatusCode::OK);
+        && (status == reqwest::StatusCode::PARTIAL_CONTENT || status == reqwest::StatusCode::OK);
 
     // 416 = Range Not Satisfiable: server says our partial is bigger than the
     // current file. Wipe and retry from scratch.
@@ -882,16 +943,59 @@ async fn run_download(
         let retry = match follow.send().await {
             Ok(value) => value,
             Err(error) => {
-                finish_failure(&app, &id, &url, &file_name, &source_tab_label, source_origin.clone(), danger, error.to_string());
+                finish_failure(
+                    &app,
+                    &id,
+                    &url,
+                    &file_name,
+                    &source_tab_label,
+                    source_origin.clone(),
+                    danger,
+                    error.to_string(),
+                );
                 return;
             }
         };
         let _ = std::fs::write(&part_path, &[]);
-        if let Err(error) = stream_into_file(&app, &id, &url, &file_name, &source_tab_label, source_origin.clone(), danger, retry, part_path.clone(), final_path.clone(), cancel.clone(), &mut 0, None).await {
-            finish_failure(&app, &id, &url, &file_name, &source_tab_label, source_origin.clone(), danger, error);
+        if let Err(error) = stream_into_file(
+            &app,
+            &id,
+            &url,
+            &file_name,
+            &source_tab_label,
+            source_origin.clone(),
+            danger,
+            retry,
+            part_path.clone(),
+            final_path.clone(),
+            cancel.clone(),
+            &mut 0,
+            None,
+        )
+        .await
+        {
+            finish_failure(
+                &app,
+                &id,
+                &url,
+                &file_name,
+                &source_tab_label,
+                source_origin.clone(),
+                danger,
+                error,
+            );
             return;
         }
-        finalize_success(&app, &id, &url, &file_name, &source_tab_label, source_origin, danger, final_path);
+        finalize_success(
+            &app,
+            &id,
+            &url,
+            &file_name,
+            &source_tab_label,
+            source_origin,
+            danger,
+            final_path,
+        );
         return;
     }
 
@@ -909,15 +1013,18 @@ async fn run_download(
         return;
     }
 
-    let total = response.content_length().map(|value| value as i64).map(|value| {
-        if accept_range && status == reqwest::StatusCode::OK {
-            value
-        } else if accept_range {
-            value + existing
-        } else {
-            value
-        }
-    });
+    let total = response
+        .content_length()
+        .map(|value| value as i64)
+        .map(|value| {
+            if accept_range && status == reqwest::StatusCode::OK {
+                value
+            } else if accept_range {
+                value + existing
+            } else {
+                value
+            }
+        });
 
     let mut received = if accept_range && status == reqwest::StatusCode::PARTIAL_CONTENT {
         existing
@@ -942,12 +1049,31 @@ async fn run_download(
         &mut received,
         total,
     )
-    .await {
-        finish_failure(&app, &id, &url, &file_name, &source_tab_label, source_origin, danger, error);
+    .await
+    {
+        finish_failure(
+            &app,
+            &id,
+            &url,
+            &file_name,
+            &source_tab_label,
+            source_origin,
+            danger,
+            error,
+        );
         return;
     }
 
-    finalize_success(&app, &id, &url, &file_name, &source_tab_label, source_origin, danger, final_path);
+    finalize_success(
+        &app,
+        &id,
+        &url,
+        &file_name,
+        &source_tab_label,
+        source_origin,
+        danger,
+        final_path,
+    );
 }
 
 async fn stream_into_file(
@@ -987,7 +1113,9 @@ async fn stream_into_file(
             return Err("cancelled".into());
         }
         let chunk = chunk.map_err(|error| format!("stream error: {error}"))?;
-        file.write_all(&chunk).await.map_err(|error| format!("write error: {error}"))?;
+        file.write_all(&chunk)
+            .await
+            .map_err(|error| format!("write error: {error}"))?;
         *received += chunk.len() as i64;
         if last_emit.elapsed() >= std::time::Duration::from_millis(200) {
             emit_progress(
@@ -1027,7 +1155,9 @@ async fn stream_into_file(
             last_emit = std::time::Instant::now();
         }
     }
-    file.flush().await.map_err(|error| format!("flush error: {error}"))?;
+    file.flush()
+        .await
+        .map_err(|error| format!("flush error: {error}"))?;
     drop(file);
     // Atomically rename .part -> final.
     tokio::fs::rename(&part_path, &final_path)
@@ -1053,22 +1183,46 @@ fn finalize_success(
             return;
         }
     };
-    let metadata = std::fs::metadata(&final_path).map(|m| m.len() as i64).unwrap_or(0);
+    let metadata = std::fs::metadata(&final_path)
+        .map(|m| m.len() as i64)
+        .unwrap_or(0);
     if let Err(scan_error) = scan_download_file(&final_path) {
-        let _ = update_progress(&database, DownloadProgressInput {
-            id: id.to_string(), received_bytes: metadata, total_bytes: Some(metadata),
-            status: DownloadStatus::Blocked, error_message: Some(scan_error.clone()),
-        });
-        let _ = database.execute("UPDATE downloads SET target_path=? WHERE id=?", rusqlite::params![final_path.to_string_lossy(), id]);
+        let _ = update_progress(
+            &database,
+            DownloadProgressInput {
+                id: id.to_string(),
+                received_bytes: metadata,
+                total_bytes: Some(metadata),
+                status: DownloadStatus::Blocked,
+                error_message: Some(scan_error.clone()),
+            },
+        );
+        let _ = database.execute(
+            "UPDATE downloads SET target_path=? WHERE id=?",
+            rusqlite::params![final_path.to_string_lossy(), id],
+        );
         app.state::<DownloadManager>().forget(id);
-        emit_progress(app, DownloadProgressPayload {
-            version: STREAMING_PAYLOAD_VERSION, kind: STREAMING_KIND_BLOCKED.into(), id: id.to_string(),
-            tab_label: tab_label.to_string(), url: url.to_string(), file_name: file_name.to_string(),
-            target_path: Some(final_path.to_string_lossy().into_owned()), mime_type: None,
-            received_bytes: metadata, total_bytes: Some(metadata), progress_known: true,
-            status: "blocked".into(), danger_type: danger.as_str().into(), error_message: Some(scan_error),
-            private: false, source_origin,
-        });
+        emit_progress(
+            app,
+            DownloadProgressPayload {
+                version: STREAMING_PAYLOAD_VERSION,
+                kind: STREAMING_KIND_BLOCKED.into(),
+                id: id.to_string(),
+                tab_label: tab_label.to_string(),
+                url: url.to_string(),
+                file_name: file_name.to_string(),
+                target_path: Some(final_path.to_string_lossy().into_owned()),
+                mime_type: None,
+                received_bytes: metadata,
+                total_bytes: Some(metadata),
+                progress_known: true,
+                status: "blocked".into(),
+                danger_type: danger.as_str().into(),
+                error_message: Some(scan_error),
+                private: false,
+                source_origin,
+            },
+        );
         return;
     }
     let _ = update_progress(
@@ -1113,16 +1267,26 @@ fn finalize_success(
 pub(crate) fn scan_download_file(path: &Path) -> Result<(), String> {
     let program_files = std::env::var_os("ProgramFiles")
         .ok_or_else(|| "Windows Defender 扫描不可用：ProgramFiles 未设置".to_string())?;
-    let scanner = PathBuf::from(program_files).join("Windows Defender").join("MpCmdRun.exe");
-    if !scanner.is_file() { return Err("Windows Defender 扫描程序不可用".into()); }
+    let scanner = PathBuf::from(program_files)
+        .join("Windows Defender")
+        .join("MpCmdRun.exe");
+    if !scanner.is_file() {
+        return Err("Windows Defender 扫描程序不可用".into());
+    }
     let output = std::process::Command::new(scanner)
         .args(["-Scan", "-ScanType", "3", "-File"])
         .arg(path)
         .output()
         .map_err(|error| format!("无法启动 Windows Defender：{error}"))?;
-    if output.status.success() { Ok(()) } else {
+    if output.status.success() {
+        Ok(())
+    } else {
         let detail = String::from_utf8_lossy(&output.stderr).trim().to_string();
-        Err(if detail.is_empty() { "Windows Defender 检测到威胁或扫描失败".into() } else { format!("Windows Defender：{detail}") })
+        Err(if detail.is_empty() {
+            "Windows Defender 检测到威胁或扫描失败".into()
+        } else {
+            format!("Windows Defender：{detail}")
+        })
     }
 }
 
@@ -1379,8 +1543,17 @@ mod tests {
 
     #[test]
     fn rejects_path_traversal_and_unsafe_file_names() {
-        for name in ["../escape.exe", "folder/file.txt", "folder\\file.txt", "bad:name.txt", ".."] {
-            assert!(validate_download_file_name(name).is_err(), "accepted {name}");
+        for name in [
+            "../escape.exe",
+            "folder/file.txt",
+            "folder\\file.txt",
+            "bad:name.txt",
+            "..",
+        ] {
+            assert!(
+                validate_download_file_name(name).is_err(),
+                "accepted {name}"
+            );
         }
         assert!(validate_download_file_name("report 2026.pdf").is_ok());
     }

@@ -107,7 +107,10 @@ pub fn insert_bookmark(conn: &Connection, input: BookmarkInput) -> Result<Bookma
     get_bookmark(conn, &input.id)?.ok_or_else(|| "bookmark insert returned no row".into())
 }
 
-pub fn list_bookmarks(conn: &Connection, folder: Option<String>) -> Result<Vec<BookmarkRecord>, String> {
+pub fn list_bookmarks(
+    conn: &Connection,
+    folder: Option<String>,
+) -> Result<Vec<BookmarkRecord>, String> {
     let mut sql = String::from(
         "SELECT id, url, title, favicon, folder, note, position, created_at, updated_at FROM bookmarks",
     );
@@ -152,14 +155,27 @@ pub fn delete_bookmark(conn: &Connection, id: &str) -> Result<bool, String> {
     Ok(affected > 0)
 }
 
-pub fn update_bookmark(conn: &Connection, id: &str, patch: BookmarkPatch) -> Result<BookmarkRecord, String> {
-    let mut record = get_bookmark(conn, id)?
-        .ok_or_else(|| format!("bookmark '{id}' not found"))?;
-    if let Some(value) = patch.title { record.title = value; }
-    if let Some(value) = patch.folder { record.folder = value; }
-    if let Some(value) = patch.note { record.note = value; }
-    if let Some(value) = patch.position { record.position = value; }
-    if let Some(value) = patch.favicon { record.favicon = Some(value); }
+pub fn update_bookmark(
+    conn: &Connection,
+    id: &str,
+    patch: BookmarkPatch,
+) -> Result<BookmarkRecord, String> {
+    let mut record = get_bookmark(conn, id)?.ok_or_else(|| format!("bookmark '{id}' not found"))?;
+    if let Some(value) = patch.title {
+        record.title = value;
+    }
+    if let Some(value) = patch.folder {
+        record.folder = value;
+    }
+    if let Some(value) = patch.note {
+        record.note = value;
+    }
+    if let Some(value) = patch.position {
+        record.position = value;
+    }
+    if let Some(value) = patch.favicon {
+        record.favicon = Some(value);
+    }
     record.updated_at = now_iso();
     conn.execute(
         "UPDATE bookmarks SET title = ?1, folder = ?2, note = ?4, position = ?5, favicon = ?6, updated_at = ?7 WHERE id = ?3",
@@ -169,7 +185,12 @@ pub fn update_bookmark(conn: &Connection, id: &str, patch: BookmarkPatch) -> Res
     Ok(record)
 }
 
-pub fn move_bookmark(conn: &Connection, id: &str, folder: &str, position: i64) -> Result<(), String> {
+pub fn move_bookmark(
+    conn: &Connection,
+    id: &str,
+    folder: &str,
+    position: i64,
+) -> Result<(), String> {
     let updated = conn
         .execute(
             "UPDATE bookmarks SET folder = ?1, position = ?2, updated_at = ?3 WHERE id = ?4",
@@ -192,10 +213,7 @@ pub fn bookmark_list(
 }
 
 #[tauri::command]
-pub fn bookmark_add(
-    app: tauri::AppHandle,
-    input: BookmarkInput,
-) -> Result<BookmarkRecord, String> {
+pub fn bookmark_add(app: tauri::AppHandle, input: BookmarkInput) -> Result<BookmarkRecord, String> {
     let mut database = crate::local_store::connection(&app)?;
     let tx = database.transaction().map_err(|error| error.to_string())?;
     let result = insert_bookmark(&tx, input)?;
@@ -204,19 +222,13 @@ pub fn bookmark_add(
 }
 
 #[tauri::command]
-pub fn bookmark_get(
-    app: tauri::AppHandle,
-    id: String,
-) -> Result<Option<BookmarkRecord>, String> {
+pub fn bookmark_get(app: tauri::AppHandle, id: String) -> Result<Option<BookmarkRecord>, String> {
     let database = crate::local_store::connection(&app)?;
     get_bookmark(&database, &id)
 }
 
 #[tauri::command]
-pub fn bookmark_remove(
-    app: tauri::AppHandle,
-    id: String,
-) -> Result<bool, String> {
+pub fn bookmark_remove(app: tauri::AppHandle, id: String) -> Result<bool, String> {
     let mut database = crate::local_store::connection(&app)?;
     let tx = database.transaction().map_err(|error| error.to_string())?;
     let result = delete_bookmark(&tx, &id)?;
@@ -285,7 +297,11 @@ mod tests {
     #[test]
     fn insert_and_get_round_trips() {
         let conn = fresh_db();
-        let record = insert_bookmark(&conn, sample_input("bm-1", "https://example.com", "Example")).expect("insert");
+        let record = insert_bookmark(
+            &conn,
+            sample_input("bm-1", "https://example.com", "Example"),
+        )
+        .expect("insert");
         assert_eq!(record.position, 1);
         let fetched = get_bookmark(&conn, "bm-1").expect("get").expect("present");
         assert_eq!(fetched.url, "https://example.com");
@@ -299,7 +315,10 @@ mod tests {
         insert_bookmark(&conn, sample_input("bm-b", "https://b.com", "B")).expect("insert b");
         insert_bookmark(&conn, sample_input("bm-c", "https://c.com", "C")).expect("insert c");
         let list = list_bookmarks(&conn, None).expect("list");
-        assert_eq!(list.iter().map(|r| r.id.as_str()).collect::<Vec<_>>(), vec!["bm-a", "bm-b", "bm-c"]);
+        assert_eq!(
+            list.iter().map(|r| r.id.as_str()).collect::<Vec<_>>(),
+            vec!["bm-a", "bm-b", "bm-c"]
+        );
     }
 
     #[test]

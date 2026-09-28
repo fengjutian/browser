@@ -2,7 +2,11 @@ use super::{PluginContext, PluginManifest, PluginPermission, PluginRuntime, Wasm
 use rusqlite::params;
 use serde::Serialize;
 use sha2::{Digest, Sha256};
-use std::{fs, io::{Read, Write}, path::{Path, PathBuf}};
+use std::{
+    fs,
+    io::{Read, Write},
+    path::{Path, PathBuf},
+};
 use tauri::Manager;
 
 const MAX_ARCHIVE: u64 = 20 * 1024 * 1024;
@@ -10,43 +14,349 @@ const MAX_EXPANDED: u64 = 50 * 1024 * 1024;
 const MAX_FILES: usize = 256;
 
 #[derive(Debug, Serialize)]
-#[serde(rename_all="camelCase")]
-pub struct InstalledPlugin { pub id:String,pub name:String,pub version:String,pub status:String,pub enabled:bool,pub last_error:Option<String>,pub manifest:PluginManifest,pub grants:Vec<PluginPermission> }
-
-#[derive(Debug, Serialize)]
-#[serde(rename_all="camelCase")]
-pub struct PluginAuditEntry { pub id:String,pub plugin_id:String,pub action:String,pub permission:Option<String>,pub success:bool,pub error:Option<String>,pub created_at:i64 }
-
-fn audit(db:&rusqlite::Connection,plugin_id:&str,action:&str,permission:Option<&str>,result:&Result<(),String>){let _=db.execute("INSERT INTO plugin_audit_log(id,plugin_id,action,permission,success,error,created_at) VALUES(?,?,?,?,?,?,?)",params![uuid::Uuid::new_v4().to_string(),plugin_id,action,permission,result.is_ok() as i64,result.as_ref().err().map(|e|e.chars().take(500).collect::<String>()),chrono::Utc::now().timestamp()]);}
-
-fn plugin_root(app:&tauri::AppHandle)->Result<PathBuf,String>{let root=app.path().app_data_dir().map_err(|e|e.to_string())?.join("plugins");fs::create_dir_all(&root).map_err(|e|e.to_string())?;Ok(root)}
-
-#[tauri::command]
-pub fn install_plugin(app:tauri::AppHandle,archive_path:String)->Result<InstalledPlugin,String>{
-    let source=Path::new(&archive_path);
-    let meta=fs::metadata(source).map_err(|e|e.to_string())?;
-    if !meta.is_file()||meta.len()>MAX_ARCHIVE{return Err("plugin archive exceeds 20 MiB or is not a file".into())}
-    let file=fs::File::open(source).map_err(|e|e.to_string())?;
-    let mut archive=zip::ZipArchive::new(file).map_err(|e|e.to_string())?;
-    if archive.len()>MAX_FILES{return Err("plugin archive contains too many files".into())}
-    let mut manifest_bytes=Vec::new();archive.by_name("plugin.json").map_err(|_|"plugin.json is missing")?.take(1024*1024).read_to_end(&mut manifest_bytes).map_err(|e|e.to_string())?;
-    let manifest:PluginManifest=serde_json::from_slice(&manifest_bytes).map_err(|e|format!("invalid plugin manifest: {e}"))?;manifest.validate().map_err(str::to_string)?;
-    let root=plugin_root(&app)?;let staging=root.join(format!(".staging-{}",uuid::Uuid::new_v4()));fs::create_dir(&staging).map_err(|e|e.to_string())?;
-    let result=(||->Result<(),String>{let mut expanded=0u64;for index in 0..archive.len(){let mut item=archive.by_index(index).map_err(|e|e.to_string())?;if item.is_dir(){continue}let enclosed=item.enclosed_name().ok_or("unsafe path in plugin archive")?.to_path_buf();expanded=expanded.saturating_add(item.size());if expanded>MAX_EXPANDED{return Err("expanded plugin exceeds 50 MiB".into())}let target=staging.join(enclosed);if let Some(parent)=target.parent(){fs::create_dir_all(parent).map_err(|e|e.to_string())?}let mut out=fs::File::create(target).map_err(|e|e.to_string())?;std::io::copy(&mut item,&mut out).map_err(|e|e.to_string())?;out.flush().map_err(|e|e.to_string())?}let component=fs::read(staging.join("plugin.wasm")).map_err(|_|"plugin.wasm is missing")?;let digest=format!("{:x}",Sha256::digest(&component));if !digest.eq_ignore_ascii_case(&manifest.sha256){return Err("plugin.wasm sha256 mismatch".into())}let mut config=wasmtime::Config::new();config.wasm_component_model(true).consume_fuel(true).epoch_interruption(true);let engine=wasmtime::Engine::new(&config).map_err(|e|e.to_string())?;wasmtime::component::Component::from_binary(&engine,&component).map_err(|e|format!("invalid WebAssembly component: {e}"))?;Ok(())})();
-    if let Err(error)=result{let _=fs::remove_dir_all(&staging);return Err(error)}
-    let target=root.join(&manifest.id).join(&manifest.version);fs::create_dir_all(target.parent().unwrap()).map_err(|e|e.to_string())?;if target.exists(){let _=fs::remove_dir_all(&staging);return Err("plugin version is already installed".into())}fs::rename(&staging,&target).map_err(|e|e.to_string())?;
-    let now=chrono::Utc::now().timestamp();let json=serde_json::to_string(&manifest).map_err(|e|e.to_string())?;let db=crate::local_store::connection(&app)?;db.execute("INSERT INTO plugins(id,name,version,manifest_json,component_path,sha256,status,enabled,installed_at,updated_at) VALUES(?,?,?,?,?,?,'DISABLED',0,?,?) ON CONFLICT(id) DO UPDATE SET name=excluded.name,version=excluded.version,manifest_json=excluded.manifest_json,component_path=excluded.component_path,sha256=excluded.sha256,status='DISABLED',enabled=0,last_error=NULL,updated_at=excluded.updated_at",params![manifest.id,manifest.name,manifest.version,json,target.join("plugin.wasm").to_string_lossy(),manifest.sha256,now,now]).map_err(|e|e.to_string())?;
-    let installed=read_plugin(&db,&manifest.id)?;audit(&db,&manifest.id,"install",None,&Ok(()));Ok(installed)
+#[serde(rename_all = "camelCase")]
+pub struct InstalledPlugin {
+    pub id: String,
+    pub name: String,
+    pub version: String,
+    pub status: String,
+    pub enabled: bool,
+    pub last_error: Option<String>,
+    pub manifest: PluginManifest,
+    pub grants: Vec<PluginPermission>,
 }
 
-fn read_plugin(db:&rusqlite::Connection,id:&str)->Result<InstalledPlugin,String>{let mut value=db.query_row("SELECT id,name,version,status,enabled,last_error,manifest_json FROM plugins WHERE id=?",[id],|r|{let raw:String=r.get(6)?;let manifest=serde_json::from_str(&raw).map_err(|e|rusqlite::Error::FromSqlConversionFailure(6,rusqlite::types::Type::Text,Box::new(e)))?;Ok(InstalledPlugin{id:r.get(0)?,name:r.get(1)?,version:r.get(2)?,status:r.get(3)?,enabled:r.get::<_,i64>(4)?!=0,last_error:r.get(5)?,manifest,grants:vec![]})}).map_err(|e|e.to_string())?;let mut stmt=db.prepare("SELECT permission FROM plugin_grants WHERE plugin_id=? AND granted=1").map_err(|e|e.to_string())?;value.grants=stmt.query_map([id],|r|r.get::<_,String>(0)).map_err(|e|e.to_string())?.filter_map(Result::ok).filter_map(|name|serde_json::from_str(&format!("\"{name}\"")).ok()).collect();Ok(value)}
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PluginAuditEntry {
+    pub id: String,
+    pub plugin_id: String,
+    pub action: String,
+    pub permission: Option<String>,
+    pub success: bool,
+    pub error: Option<String>,
+    pub created_at: i64,
+}
 
-#[tauri::command] pub fn list_plugins(app:tauri::AppHandle)->Result<Vec<InstalledPlugin>,String>{let db=crate::local_store::connection(&app)?;let mut stmt=db.prepare("SELECT id FROM plugins ORDER BY name").map_err(|e|e.to_string())?;let ids=stmt.query_map([],|r|r.get::<_,String>(0)).map_err(|e|e.to_string())?.collect::<Result<Vec<_>,_>>().map_err(|e|e.to_string())?;ids.iter().map(|id|read_plugin(&db,id)).collect()}
-#[tauri::command] pub fn list_plugin_audit(app:tauri::AppHandle,plugin_id:Option<String>,limit:Option<u32>)->Result<Vec<PluginAuditEntry>,String>{let db=crate::local_store::connection(&app)?;let limit=limit.unwrap_or(100).clamp(1,500);let mut stmt=db.prepare("SELECT id,plugin_id,action,permission,success,error,created_at FROM plugin_audit_log WHERE (?1 IS NULL OR plugin_id=?1) ORDER BY created_at DESC LIMIT ?2").map_err(|e|e.to_string())?;let rows=stmt.query_map(params![plugin_id,limit],|r|Ok(PluginAuditEntry{id:r.get(0)?,plugin_id:r.get(1)?,action:r.get(2)?,permission:r.get(3)?,success:r.get::<_,i64>(4)?!=0,error:r.get(5)?,created_at:r.get(6)?})).map_err(|e|e.to_string())?.collect::<Result<Vec<_>,_>>().map_err(|e|e.to_string())?;Ok(rows)}
-#[tauri::command] pub fn set_plugin_enabled(app:tauri::AppHandle,runtime:tauri::State<'_,WasmRuntime>,id:String,enabled:bool)->Result<(),String>{runtime.attach_app(app.clone());let db=crate::local_store::connection(&app)?;let operation=(||{let (raw,path):(String,String)=db.query_row("SELECT manifest_json,component_path FROM plugins WHERE id=?",[&id],|r|Ok((r.get(0)?,r.get(1)?))).map_err(|_|"plugin not found")?;if enabled{let manifest:PluginManifest=serde_json::from_str(&raw).map_err(|e|e.to_string())?;let current=read_plugin(&db,&id)?;runtime.start(&manifest,Path::new(&path),PluginContext::new(&id,current.grants))?;}else{runtime.stop(&id)?;}db.execute("UPDATE plugins SET enabled=?,status=?,last_error=NULL,updated_at=? WHERE id=?",params![enabled as i64,if enabled{"ENABLED"}else{"DISABLED"},chrono::Utc::now().timestamp(),id]).map_err(|e|e.to_string())?;Ok(())})();if let Err(error)=&operation{let _=db.execute("UPDATE plugins SET enabled=0,status='FAILED',last_error=?,updated_at=? WHERE id=?",params![error,chrono::Utc::now().timestamp(),id]);}audit(&db,&id,if enabled{"enable"}else{"disable"},None,&operation);operation}
-#[tauri::command] pub fn set_plugin_permission(app:tauri::AppHandle,id:String,permission:PluginPermission,granted:bool)->Result<(),String>{let db=crate::local_store::connection(&app)?;let name=serde_json::to_string(&permission).map_err(|e|e.to_string())?.trim_matches('"').to_string();let manifest:String=db.query_row("SELECT manifest_json FROM plugins WHERE id=?",[&id],|r|r.get(0)).map_err(|_|"plugin not found")?;let manifest:PluginManifest=serde_json::from_str(&manifest).map_err(|e|e.to_string())?;if !manifest.permissions.contains(&permission){return Err("permission was not declared by the plugin".into())}let result=db.execute("INSERT INTO plugin_grants(plugin_id,permission,granted,updated_at) VALUES(?,?,?,?) ON CONFLICT(plugin_id,permission) DO UPDATE SET granted=excluded.granted,updated_at=excluded.updated_at",params![id,name,granted as i64,chrono::Utc::now().timestamp()]).map(|_|()).map_err(|e|e.to_string());audit(&db,&id,"permission",Some(&name),&result);result}
-#[tauri::command] pub fn dispatch_plugin_event(runtime:tauri::State<'_,WasmRuntime>,id:String,kind:String,payload_json:String)->Result<String,String>{runtime.handle_event(&id,&kind,&payload_json)}
+fn audit(
+    db: &rusqlite::Connection,
+    plugin_id: &str,
+    action: &str,
+    permission: Option<&str>,
+    result: &Result<(), String>,
+) {
+    let _=db.execute("INSERT INTO plugin_audit_log(id,plugin_id,action,permission,success,error,created_at) VALUES(?,?,?,?,?,?,?)",params![uuid::Uuid::new_v4().to_string(),plugin_id,action,permission,result.is_ok() as i64,result.as_ref().err().map(|e|e.chars().take(500).collect::<String>()),chrono::Utc::now().timestamp()]);
+}
 
-pub(crate) fn dispatch_subscribed(app:&tauri::AppHandle,kind:&str,payload_json:&str){let Some(runtime)=app.try_state::<WasmRuntime>() else{return};runtime.attach_app(app.clone());let Ok(db)=crate::local_store::connection(app) else{return};let Ok(mut stmt)=db.prepare("SELECT id,manifest_json FROM plugins WHERE enabled=1 AND status='ENABLED'") else{return};let Ok(rows)=stmt.query_map([],|r|Ok((r.get::<_,String>(0)?,r.get::<_,String>(1)?))) else{return};let candidates=rows.filter_map(Result::ok).collect::<Vec<_>>();drop(stmt);for (id,raw) in candidates{let subscribed=serde_json::from_str::<PluginManifest>(&raw).map(|m|m.events.iter().any(|event|event==kind)).unwrap_or(false);if !subscribed{continue}let result=runtime.handle_event(&id,kind,payload_json).map(|_|());if let Err(error)=&result{let _=db.execute("UPDATE plugins SET last_error=?,updated_at=? WHERE id=?",params![error,chrono::Utc::now().timestamp(),id]);}audit(&db,&id,&format!("event:{kind}"),None,&result);}}
+fn plugin_root(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    let root = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| e.to_string())?
+        .join("plugins");
+    fs::create_dir_all(&root).map_err(|e| e.to_string())?;
+    Ok(root)
+}
 
-#[tauri::command] pub fn uninstall_plugin(app:tauri::AppHandle,runtime:tauri::State<'_,WasmRuntime>,id:String)->Result<(),String>{let db=crate::local_store::connection(&app)?;let path:String=db.query_row("SELECT component_path FROM plugins WHERE id=?",[&id],|r|r.get(0)).map_err(|_|"plugin not found")?;runtime.stop(&id)?;audit(&db,&id,"uninstall",None,&Ok(()));db.execute("DELETE FROM plugins WHERE id=?",[&id]).map_err(|e|e.to_string())?;if let Some(version)=Path::new(&path).parent(){let _=fs::remove_dir_all(version);}Ok(())}
+#[tauri::command]
+pub fn install_plugin(
+    app: tauri::AppHandle,
+    archive_path: String,
+) -> Result<InstalledPlugin, String> {
+    let source = Path::new(&archive_path);
+    let meta = fs::metadata(source).map_err(|e| e.to_string())?;
+    if !meta.is_file() || meta.len() > MAX_ARCHIVE {
+        return Err("plugin archive exceeds 20 MiB or is not a file".into());
+    }
+    let file = fs::File::open(source).map_err(|e| e.to_string())?;
+    let mut archive = zip::ZipArchive::new(file).map_err(|e| e.to_string())?;
+    if archive.len() > MAX_FILES {
+        return Err("plugin archive contains too many files".into());
+    }
+    let mut manifest_bytes = Vec::new();
+    archive
+        .by_name("plugin.json")
+        .map_err(|_| "plugin.json is missing")?
+        .take(1024 * 1024)
+        .read_to_end(&mut manifest_bytes)
+        .map_err(|e| e.to_string())?;
+    let manifest: PluginManifest = serde_json::from_slice(&manifest_bytes)
+        .map_err(|e| format!("invalid plugin manifest: {e}"))?;
+    manifest.validate().map_err(str::to_string)?;
+    let root = plugin_root(&app)?;
+    let staging = root.join(format!(".staging-{}", uuid::Uuid::new_v4()));
+    fs::create_dir(&staging).map_err(|e| e.to_string())?;
+    let result = (|| -> Result<(), String> {
+        let mut expanded = 0u64;
+        for index in 0..archive.len() {
+            let mut item = archive.by_index(index).map_err(|e| e.to_string())?;
+            if item.is_dir() {
+                continue;
+            }
+            let enclosed = item
+                .enclosed_name()
+                .ok_or("unsafe path in plugin archive")?
+                .to_path_buf();
+            expanded = expanded.saturating_add(item.size());
+            if expanded > MAX_EXPANDED {
+                return Err("expanded plugin exceeds 50 MiB".into());
+            }
+            let target = staging.join(enclosed);
+            if let Some(parent) = target.parent() {
+                fs::create_dir_all(parent).map_err(|e| e.to_string())?
+            }
+            let mut out = fs::File::create(target).map_err(|e| e.to_string())?;
+            std::io::copy(&mut item, &mut out).map_err(|e| e.to_string())?;
+            out.flush().map_err(|e| e.to_string())?
+        }
+        let component =
+            fs::read(staging.join("plugin.wasm")).map_err(|_| "plugin.wasm is missing")?;
+        let digest = format!("{:x}", Sha256::digest(&component));
+        if !digest.eq_ignore_ascii_case(&manifest.sha256) {
+            return Err("plugin.wasm sha256 mismatch".into());
+        }
+        let mut config = wasmtime::Config::new();
+        config
+            .wasm_component_model(true)
+            .consume_fuel(true)
+            .epoch_interruption(true);
+        let engine = wasmtime::Engine::new(&config).map_err(|e| e.to_string())?;
+        wasmtime::component::Component::from_binary(&engine, &component)
+            .map_err(|e| format!("invalid WebAssembly component: {e}"))?;
+        Ok(())
+    })();
+    if let Err(error) = result {
+        let _ = fs::remove_dir_all(&staging);
+        return Err(error);
+    }
+    let target = root.join(&manifest.id).join(&manifest.version);
+    fs::create_dir_all(target.parent().unwrap()).map_err(|e| e.to_string())?;
+    if target.exists() {
+        let _ = fs::remove_dir_all(&staging);
+        return Err("plugin version is already installed".into());
+    }
+    fs::rename(&staging, &target).map_err(|e| e.to_string())?;
+    let now = chrono::Utc::now().timestamp();
+    let json = serde_json::to_string(&manifest).map_err(|e| e.to_string())?;
+    let db = crate::local_store::connection(&app)?;
+    db.execute("INSERT INTO plugins(id,name,version,manifest_json,component_path,sha256,status,enabled,installed_at,updated_at) VALUES(?,?,?,?,?,?,'DISABLED',0,?,?) ON CONFLICT(id) DO UPDATE SET name=excluded.name,version=excluded.version,manifest_json=excluded.manifest_json,component_path=excluded.component_path,sha256=excluded.sha256,status='DISABLED',enabled=0,last_error=NULL,updated_at=excluded.updated_at",params![manifest.id,manifest.name,manifest.version,json,target.join("plugin.wasm").to_string_lossy(),manifest.sha256,now,now]).map_err(|e|e.to_string())?;
+    let installed = read_plugin(&db, &manifest.id)?;
+    audit(&db, &manifest.id, "install", None, &Ok(()));
+    Ok(installed)
+}
+
+fn read_plugin(db: &rusqlite::Connection, id: &str) -> Result<InstalledPlugin, String> {
+    let mut value=db.query_row("SELECT id,name,version,status,enabled,last_error,manifest_json FROM plugins WHERE id=?",[id],|r|{let raw:String=r.get(6)?;let manifest=serde_json::from_str(&raw).map_err(|e|rusqlite::Error::FromSqlConversionFailure(6,rusqlite::types::Type::Text,Box::new(e)))?;Ok(InstalledPlugin{id:r.get(0)?,name:r.get(1)?,version:r.get(2)?,status:r.get(3)?,enabled:r.get::<_,i64>(4)?!=0,last_error:r.get(5)?,manifest,grants:vec![]})}).map_err(|e|e.to_string())?;
+    let mut stmt = db
+        .prepare("SELECT permission FROM plugin_grants WHERE plugin_id=? AND granted=1")
+        .map_err(|e| e.to_string())?;
+    value.grants = stmt
+        .query_map([id], |r| r.get::<_, String>(0))
+        .map_err(|e| e.to_string())?
+        .filter_map(Result::ok)
+        .filter_map(|name| serde_json::from_str(&format!("\"{name}\"")).ok())
+        .collect();
+    Ok(value)
+}
+
+#[tauri::command]
+pub fn list_plugins(app: tauri::AppHandle) -> Result<Vec<InstalledPlugin>, String> {
+    let db = crate::local_store::connection(&app)?;
+    let mut stmt = db
+        .prepare("SELECT id FROM plugins ORDER BY name")
+        .map_err(|e| e.to_string())?;
+    let ids = stmt
+        .query_map([], |r| r.get::<_, String>(0))
+        .map_err(|e| e.to_string())?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())?;
+    ids.iter().map(|id| read_plugin(&db, id)).collect()
+}
+#[tauri::command]
+pub fn list_plugin_audit(
+    app: tauri::AppHandle,
+    plugin_id: Option<String>,
+    limit: Option<u32>,
+) -> Result<Vec<PluginAuditEntry>, String> {
+    let db = crate::local_store::connection(&app)?;
+    let limit = limit.unwrap_or(100).clamp(1, 500);
+    let mut stmt=db.prepare("SELECT id,plugin_id,action,permission,success,error,created_at FROM plugin_audit_log WHERE (?1 IS NULL OR plugin_id=?1) ORDER BY created_at DESC LIMIT ?2").map_err(|e|e.to_string())?;
+    let rows = stmt
+        .query_map(params![plugin_id, limit], |r| {
+            Ok(PluginAuditEntry {
+                id: r.get(0)?,
+                plugin_id: r.get(1)?,
+                action: r.get(2)?,
+                permission: r.get(3)?,
+                success: r.get::<_, i64>(4)? != 0,
+                error: r.get(5)?,
+                created_at: r.get(6)?,
+            })
+        })
+        .map_err(|e| e.to_string())?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())?;
+    Ok(rows)
+}
+#[tauri::command]
+pub fn set_plugin_enabled(
+    app: tauri::AppHandle,
+    runtime: tauri::State<'_, WasmRuntime>,
+    id: String,
+    enabled: bool,
+) -> Result<(), String> {
+    runtime.attach_app(app.clone());
+    let db = crate::local_store::connection(&app)?;
+    let operation = (|| {
+        let (raw, path): (String, String) = db
+            .query_row(
+                "SELECT manifest_json,component_path FROM plugins WHERE id=?",
+                [&id],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .map_err(|_| "plugin not found")?;
+        if enabled {
+            let manifest: PluginManifest = serde_json::from_str(&raw).map_err(|e| e.to_string())?;
+            let current = read_plugin(&db, &id)?;
+            runtime.start(
+                &manifest,
+                Path::new(&path),
+                PluginContext::new(&id, current.grants),
+            )?;
+        } else {
+            runtime.stop(&id)?;
+        }
+        db.execute(
+            "UPDATE plugins SET enabled=?,status=?,last_error=NULL,updated_at=? WHERE id=?",
+            params![
+                enabled as i64,
+                if enabled { "ENABLED" } else { "DISABLED" },
+                chrono::Utc::now().timestamp(),
+                id
+            ],
+        )
+        .map_err(|e| e.to_string())?;
+        Ok(())
+    })();
+    if let Err(error) = &operation {
+        let _ = db.execute(
+            "UPDATE plugins SET enabled=0,status='FAILED',last_error=?,updated_at=? WHERE id=?",
+            params![error, chrono::Utc::now().timestamp(), id],
+        );
+    }
+    audit(
+        &db,
+        &id,
+        if enabled { "enable" } else { "disable" },
+        None,
+        &operation,
+    );
+    operation
+}
+#[tauri::command]
+pub fn set_plugin_permission(
+    app: tauri::AppHandle,
+    id: String,
+    permission: PluginPermission,
+    granted: bool,
+) -> Result<(), String> {
+    let db = crate::local_store::connection(&app)?;
+    let name = serde_json::to_string(&permission)
+        .map_err(|e| e.to_string())?
+        .trim_matches('"')
+        .to_string();
+    let manifest: String = db
+        .query_row("SELECT manifest_json FROM plugins WHERE id=?", [&id], |r| {
+            r.get(0)
+        })
+        .map_err(|_| "plugin not found")?;
+    let manifest: PluginManifest = serde_json::from_str(&manifest).map_err(|e| e.to_string())?;
+    if !manifest.permissions.contains(&permission) {
+        return Err("permission was not declared by the plugin".into());
+    }
+    let result=db.execute("INSERT INTO plugin_grants(plugin_id,permission,granted,updated_at) VALUES(?,?,?,?) ON CONFLICT(plugin_id,permission) DO UPDATE SET granted=excluded.granted,updated_at=excluded.updated_at",params![id,name,granted as i64,chrono::Utc::now().timestamp()]).map(|_|()).map_err(|e|e.to_string());
+    audit(&db, &id, "permission", Some(&name), &result);
+    result
+}
+#[tauri::command]
+pub fn dispatch_plugin_event(
+    app: tauri::AppHandle,
+    runtime: tauri::State<'_, WasmRuntime>,
+    id: String,
+    kind: String,
+    payload_json: String,
+) -> Result<String, String> {
+    runtime.attach_app(app.clone());
+    let result = runtime.handle_event(&id, &kind, &payload_json);
+    if let Ok(db) = crate::local_store::connection(&app) {
+        audit(
+            &db,
+            &id,
+            &format!("event:{kind}"),
+            None,
+            &result.as_ref().map(|_| ()).map_err(Clone::clone),
+        );
+    }
+    result
+}
+
+pub(crate) fn dispatch_subscribed(app: &tauri::AppHandle, kind: &str, payload_json: &str) {
+    let Some(runtime) = app.try_state::<WasmRuntime>() else {
+        return;
+    };
+    runtime.attach_app(app.clone());
+    let Ok(db) = crate::local_store::connection(app) else {
+        return;
+    };
+    let Ok(mut stmt) =
+        db.prepare("SELECT id,manifest_json FROM plugins WHERE enabled=1 AND status='ENABLED'")
+    else {
+        return;
+    };
+    let Ok(rows) = stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))
+    else {
+        return;
+    };
+    let candidates = rows.filter_map(Result::ok).collect::<Vec<_>>();
+    drop(stmt);
+    for (id, raw) in candidates {
+        let subscribed = serde_json::from_str::<PluginManifest>(&raw)
+            .map(|m| m.events.iter().any(|event| event == kind))
+            .unwrap_or(false);
+        if !subscribed {
+            continue;
+        }
+        let result = runtime.handle_event(&id, kind, payload_json).map(|_| ());
+        if let Err(error) = &result {
+            let _ = db.execute(
+                "UPDATE plugins SET last_error=?,updated_at=? WHERE id=?",
+                params![error, chrono::Utc::now().timestamp(), id],
+            );
+        }
+        audit(&db, &id, &format!("event:{kind}"), None, &result);
+    }
+}
+
+#[tauri::command]
+pub fn uninstall_plugin(
+    app: tauri::AppHandle,
+    runtime: tauri::State<'_, WasmRuntime>,
+    id: String,
+) -> Result<(), String> {
+    let db = crate::local_store::connection(&app)?;
+    let path: String = db
+        .query_row(
+            "SELECT component_path FROM plugins WHERE id=?",
+            [&id],
+            |r| r.get(0),
+        )
+        .map_err(|_| "plugin not found")?;
+    runtime.stop(&id)?;
+    audit(&db, &id, "uninstall", None, &Ok(()));
+    db.execute("DELETE FROM plugins WHERE id=?", [&id])
+        .map_err(|e| e.to_string())?;
+    if let Some(version) = Path::new(&path).parent() {
+        let _ = fs::remove_dir_all(version);
+    }
+    Ok(())
+}

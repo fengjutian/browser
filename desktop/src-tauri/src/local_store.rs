@@ -417,7 +417,10 @@ pub struct LocalReadingActivity {
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct ReadingSnapshotStats { count: i64, bytes: i64 }
+pub struct ReadingSnapshotStats {
+    count: i64,
+    bytes: i64,
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -626,7 +629,8 @@ fn validate_history_entry(entry: &LocalHistoryEntry) -> Result<(), String> {
     if entry.url.len() > 8192 || entry.title.len() > 2048 || entry.visited_at <= 0 {
         return Err("invalid browser history entry".into());
     }
-    let parsed = url::Url::parse(&entry.url).map_err(|error| format!("invalid history url: {error}"))?;
+    let parsed =
+        url::Url::parse(&entry.url).map_err(|error| format!("invalid history url: {error}"))?;
     if !matches!(parsed.scheme(), "http" | "https") {
         return Err("history url must use http or https".into());
     }
@@ -634,7 +638,11 @@ fn validate_history_entry(entry: &LocalHistoryEntry) -> Result<(), String> {
 }
 
 fn migrate_legacy_browser_state(database: &Connection) -> Result<(), String> {
-    if let Ok(raw) = database.query_row("SELECT value FROM local_session WHERE key='browser.tabs'", [], |row| row.get::<_, String>(0)) {
+    if let Ok(raw) = database.query_row(
+        "SELECT value FROM local_session WHERE key='browser.tabs'",
+        [],
+        |row| row.get::<_, String>(0),
+    ) {
         if let Ok(workspace) = serde_json::from_str::<LocalBrowserWorkspace>(&raw) {
             database.execute("INSERT OR REPLACE INTO browser_sessions(id,active_tab_id,updated_at) VALUES('main',?,?)", params![workspace.active_tab_id, unix_seconds()]).map_err(|error| error.to_string())?;
             for (position, tab) in workspace.tabs.into_iter().enumerate() {
@@ -644,7 +652,11 @@ fn migrate_legacy_browser_state(database: &Connection) -> Result<(), String> {
             }
         }
     }
-    if let Ok(raw) = database.query_row("SELECT value FROM local_session WHERE key='browser.closed'", [], |row| row.get::<_, String>(0)) {
+    if let Ok(raw) = database.query_row(
+        "SELECT value FROM local_session WHERE key='browser.closed'",
+        [],
+        |row| row.get::<_, String>(0),
+    ) {
         if let Ok(tabs) = serde_json::from_str::<Vec<LocalClosedTab>>(&raw) {
             for tab in tabs.into_iter().take(20) {
                 database.execute("INSERT OR REPLACE INTO closed_tabs(id,url,title,favicon,closed_at) VALUES(?,?,?,?,?)", params![tab.id, tab.url, tab.title, tab.favicon, tab.closed_at]).map_err(|error| error.to_string())?;
@@ -817,7 +829,10 @@ pub fn local_clear_document_embeddings(
 ) -> Result<i64, String> {
     let database = connection(&app)?;
     let removed = database
-        .execute("DELETE FROM document_embeddings WHERE document_id=?", params![document_id])
+        .execute(
+            "DELETE FROM document_embeddings WHERE document_id=?",
+            params![document_id],
+        )
         .map_err(|error| error.to_string())?;
     Ok(removed as i64)
 }
@@ -865,7 +880,12 @@ pub fn local_search_similar(
             }
         })
         .collect();
-    scored.sort_by(|left, right| right.similarity.partial_cmp(&left.similarity).unwrap_or(std::cmp::Ordering::Equal));
+    scored.sort_by(|left, right| {
+        right
+            .similarity
+            .partial_cmp(&left.similarity)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
     scored.truncate(top_k);
     Ok(scored)
 }
@@ -904,10 +924,15 @@ pub struct McpServerInput {
     enabled: bool,
 }
 
-fn default_true() -> bool { true }
+fn default_true() -> bool {
+    true
+}
 
 #[tauri::command]
-pub fn local_save_mcp_server(app: tauri::AppHandle, server: McpServerInput) -> Result<McpServer, String> {
+pub fn local_save_mcp_server(
+    app: tauri::AppHandle,
+    server: McpServerInput,
+) -> Result<McpServer, String> {
     if server.name.trim().is_empty() {
         return Err("server name is required".into());
     }
@@ -934,7 +959,11 @@ pub fn local_save_mcp_server(app: tauri::AppHandle, server: McpServerInput) -> R
     let env_json = serde_json::to_string(&server.env).map_err(|e| e.to_string())?;
     let headers_json = serde_json::to_string(&server.headers).map_err(|e| e.to_string())?;
     let existing: Option<(String, String)> = database
-        .query_row("SELECT id, created_at FROM mcp_servers WHERE name=?1", params![server.name], |row| Ok((row.get(0)?, row.get(1)?)))
+        .query_row(
+            "SELECT id, created_at FROM mcp_servers WHERE name=?1",
+            params![server.name],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
         .optional()
         .map_err(|e| e.to_string())?;
     let (final_id, created_at) = match existing {
@@ -1006,7 +1035,8 @@ pub fn local_list_mcp_servers(app: tauri::AppHandle) -> Result<Vec<McpServer>, S
     let rows = statement
         .query_map(params![], row_mcp_server)
         .map_err(|e| e.to_string())?;
-    rows.collect::<Result<Vec<_>, _>>().map_err(|e| e.to_string())
+    rows.collect::<Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -1038,7 +1068,10 @@ pub struct AgentRunRecord {
 }
 
 #[tauri::command]
-pub fn local_record_agent_run(app: tauri::AppHandle, input: AgentRunInput) -> Result<AgentRunRecord, String> {
+pub fn local_record_agent_run(
+    app: tauri::AppHandle,
+    input: AgentRunInput,
+) -> Result<AgentRunRecord, String> {
     if input.title.trim().is_empty() {
         return Err("agent run title is required".into());
     }
@@ -1077,7 +1110,10 @@ fn row_agent_run(row: &rusqlite::Row<'_>) -> rusqlite::Result<AgentRunRecord> {
 }
 
 #[tauri::command]
-pub fn local_list_agent_runs(app: tauri::AppHandle, limit: Option<i64>) -> Result<Vec<AgentRunRecord>, String> {
+pub fn local_list_agent_runs(
+    app: tauri::AppHandle,
+    limit: Option<i64>,
+) -> Result<Vec<AgentRunRecord>, String> {
     let database = connection(&app)?;
     let limit = limit.unwrap_or(50).clamp(1, 200);
     let mut statement = database
@@ -1086,7 +1122,8 @@ pub fn local_list_agent_runs(app: tauri::AppHandle, limit: Option<i64>) -> Resul
     let rows = statement
         .query_map(params![limit], row_agent_run)
         .map_err(|e| e.to_string())?;
-    rows.collect::<Result<Vec<_>, _>>().map_err(|e| e.to_string())
+    rows.collect::<Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -1098,15 +1135,19 @@ pub fn local_update_agent_run_status(
     final_answer: Option<String>,
     last_error: Option<String>,
 ) -> Result<(), String> {
-    if !matches!(status.as_str(), "pending" | "running" | "awaiting_approval" | "completed" | "failed" | "cancelled") {
+    if !matches!(
+        status.as_str(),
+        "pending" | "running" | "awaiting_approval" | "completed" | "failed" | "cancelled"
+    ) {
         return Err(format!("invalid agent status: {status}"));
     }
     let database = connection(&app)?;
-    let finished_at: Option<String> = if matches!(status.as_str(), "completed" | "failed" | "cancelled") {
-        Some(chrono::Utc::now().to_rfc3339())
-    } else {
-        None
-    };
+    let finished_at: Option<String> =
+        if matches!(status.as_str(), "completed" | "failed" | "cancelled") {
+            Some(chrono::Utc::now().to_rfc3339())
+        } else {
+            None
+        };
     database
         .execute(
             "UPDATE agent_runs SET status=?1, steps_json=COALESCE(?2, steps_json), final_answer=COALESCE(?3, final_answer), last_error=COALESCE(?4, last_error), finished_at=COALESCE(?5, finished_at) WHERE id=?6",
@@ -1134,7 +1175,9 @@ pub fn local_list_documents(
         let rows = statement
             .query_map(params![], row_document)
             .map_err(|error| error.to_string())?;
-        let docs: Vec<LocalDocument> = rows.collect::<Result<Vec<_>, _>>().map_err(|error| error.to_string())?;
+        let docs: Vec<LocalDocument> = rows
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|error| error.to_string())?;
         return Ok(docs
             .into_iter()
             .map(|document| LocalSearchHit {
@@ -1190,12 +1233,17 @@ pub fn local_save_document(
     app: tauri::AppHandle,
     document: LocalDocument,
 ) -> Result<LocalDocument, String> {
-    let document=save_document_inner(&app,document)?;
-    if let Ok(payload)=serde_json::to_string(&document){crate::plugins::installer::dispatch_subscribed(&app,"document.saved",&payload);}
+    let document = save_document_inner(&app, document)?;
+    if let Ok(payload) = serde_json::to_string(&document) {
+        crate::plugins::installer::dispatch_subscribed(&app, "document.saved", &payload);
+    }
     Ok(document)
 }
 
-pub(crate) fn save_document_inner(app:&tauri::AppHandle,document:LocalDocument)->Result<LocalDocument,String>{
+pub(crate) fn save_document_inner(
+    app: &tauri::AppHandle,
+    document: LocalDocument,
+) -> Result<LocalDocument, String> {
     let database = connection(&app)?;
     let tags = serde_json::to_string(&document.tags).map_err(|error| error.to_string())?;
     let auto_tags = serde_json::to_string(&document.auto_tags).unwrap_or_else(|_| "[]".to_string());
@@ -1224,7 +1272,11 @@ pub fn local_delete_document(app: tauri::AppHandle, id: String) -> Result<(), St
     connection(&app)?
         .execute("DELETE FROM local_documents WHERE id=?", params![id])
         .map_err(|error| error.to_string())?;
-    crate::plugins::installer::dispatch_subscribed(&app,"document.deleted",&serde_json::json!({"id":id}).to_string());
+    crate::plugins::installer::dispatch_subscribed(
+        &app,
+        "document.deleted",
+        &serde_json::json!({"id":id}).to_string(),
+    );
     Ok(())
 }
 
@@ -1268,11 +1320,14 @@ pub fn local_update_document(
     let mut statement = database
         .prepare("SELECT id,title,url,source,author,summary,markdown,word_count,status,tags,auto_tags,created_at,starred FROM local_documents WHERE id=?1")
         .map_err(|error| error.to_string())?;
-    let document=statement
+    let document = statement
         .query_row(params![id], row_document)
         .map_err(|error| error.to_string())?;
-    drop(statement);drop(database);
-    if let Ok(payload)=serde_json::to_string(&document){crate::plugins::installer::dispatch_subscribed(&app,"document.updated",&payload);}
+    drop(statement);
+    drop(database);
+    if let Ok(payload) = serde_json::to_string(&document) {
+        crate::plugins::installer::dispatch_subscribed(&app, "document.updated", &payload);
+    }
     Ok(document)
 }
 
@@ -1285,7 +1340,10 @@ pub fn local_update_tags(
     let database = connection(&app)?;
     let tags_json = serde_json::to_string(&tags).map_err(|error| error.to_string())?;
     let updated = database
-        .execute("UPDATE local_documents SET tags=? WHERE id=?", params![tags_json, id])
+        .execute(
+            "UPDATE local_documents SET tags=? WHERE id=?",
+            params![tags_json, id],
+        )
         .map_err(|error| error.to_string())?;
     if updated == 0 {
         return Err(format!("document not found: {id}"));
@@ -1302,7 +1360,10 @@ pub fn local_update_auto_tags(
     let database = connection(&app)?;
     let tags_json = serde_json::to_string(&auto_tags).map_err(|error| error.to_string())?;
     let updated = database
-        .execute("UPDATE local_documents SET auto_tags=? WHERE id=?", params![tags_json, id])
+        .execute(
+            "UPDATE local_documents SET auto_tags=? WHERE id=?",
+            params![tags_json, id],
+        )
         .map_err(|error| error.to_string())?;
     if updated == 0 {
         return Err(format!("document not found: {id}"));
@@ -1344,7 +1405,14 @@ pub fn local_create_collection(
             params![id, trimmed, description, now, now],
         )
         .map_err(|error| error.to_string())?;
-    Ok(LocalCollection { id, name: trimmed.to_string(), description, created_at: now.clone(), updated_at: now, document_count: 0 })
+    Ok(LocalCollection {
+        id,
+        name: trimmed.to_string(),
+        description,
+        created_at: now.clone(),
+        updated_at: now,
+        document_count: 0,
+    })
 }
 
 #[tauri::command]
@@ -1365,7 +1433,8 @@ pub fn local_list_collections(app: tauri::AppHandle) -> Result<Vec<LocalCollecti
             })
         })
         .map_err(|error| error.to_string())?;
-    rows.collect::<Result<Vec<_>, _>>().map_err(|error| error.to_string())
+    rows.collect::<Result<Vec<_>, _>>()
+        .map_err(|error| error.to_string())
 }
 
 #[tauri::command]
@@ -1435,7 +1504,8 @@ pub fn local_list_collections_for_document(
             })
         })
         .map_err(|error| error.to_string())?;
-    rows.collect::<Result<Vec<_>, _>>().map_err(|error| error.to_string())
+    rows.collect::<Result<Vec<_>, _>>()
+        .map_err(|error| error.to_string())
 }
 
 fn row_task(row: &rusqlite::Row<'_>) -> rusqlite::Result<LocalTask> {
@@ -1499,7 +1569,9 @@ pub fn local_claim_pending_task(app: tauri::AppHandle) -> Result<Option<LocalTas
              RETURNING id,kind,document_id,payload,status,attempts,max_attempts,available_at,started_at,finished_at,last_error",
         )
         .map_err(|error| error.to_string())?;
-    let mut rows = statement.query(params![now]).map_err(|error| error.to_string())?;
+    let mut rows = statement
+        .query(params![now])
+        .map_err(|error| error.to_string())?;
     match rows.next().map_err(|error| error.to_string())? {
         Some(row) => Ok(Some(row_task(&row).map_err(|error| error.to_string())?)),
         None => Ok(None),
@@ -1511,7 +1583,10 @@ pub fn local_complete_task(app: tauri::AppHandle, id: String) -> Result<(), Stri
     let database = connection(&app)?;
     let now = chrono::Utc::now().to_rfc3339();
     database
-        .execute("UPDATE tasks SET status='COMPLETED', finished_at=? WHERE id=?", params![now, id])
+        .execute(
+            "UPDATE tasks SET status='COMPLETED', finished_at=? WHERE id=?",
+            params![now, id],
+        )
         .map_err(|error| error.to_string())?;
     Ok(())
 }
@@ -1588,7 +1663,8 @@ pub fn local_list_recent_tasks(
     let rows = statement
         .query_map(params![limit], row_task)
         .map_err(|error| error.to_string())?;
-    rows.collect::<Result<Vec<_>, _>>().map_err(|error| error.to_string())
+    rows.collect::<Result<Vec<_>, _>>()
+        .map_err(|error| error.to_string())
 }
 
 const KEYRING_SERVICE: &str = "ai-knowledge-browser";
@@ -1623,7 +1699,8 @@ fn row_provider(row: &rusqlite::Row<'_>) -> rusqlite::Result<LocalAIProvider> {
 }
 
 fn validate_provider_base_url(value: &str) -> Result<url::Url, String> {
-    let parsed = url::Url::parse(value).map_err(|error| format!("invalid provider base url: {error}"))?;
+    let parsed =
+        url::Url::parse(value).map_err(|error| format!("invalid provider base url: {error}"))?;
     if !parsed.username().is_empty() || parsed.password().is_some() {
         return Err("provider base url must not contain credentials".into());
     }
@@ -1633,7 +1710,9 @@ fn validate_provider_base_url(value: &str) -> Result<url::Url, String> {
     let host = parsed.host_str().unwrap_or_default();
     let loopback = host.eq_ignore_ascii_case("localhost") || host == "127.0.0.1" || host == "::1";
     if parsed.scheme() != "https" && !(parsed.scheme() == "http" && loopback) {
-        return Err("provider base url must use https; http is allowed only for loopback hosts".into());
+        return Err(
+            "provider base url must use https; http is allowed only for loopback hosts".into(),
+        );
     }
     Ok(parsed)
 }
@@ -1656,16 +1735,29 @@ pub fn local_save_ai_provider(
     if trimmed_type.is_empty() || trimmed_base.is_empty() || trimmed_model.is_empty() {
         return Err("provider type, base url and model are required".into());
     }
-    if !matches!(trimmed_type, "openai-compatible" | "ollama" | "deepseek" | "qwen" | "kimi" | "minimax") {
+    if !matches!(
+        trimmed_type,
+        "openai-compatible" | "ollama" | "deepseek" | "qwen" | "kimi" | "minimax"
+    ) {
         return Err("unsupported provider type".into());
     }
-    if trimmed_model.len() > 200 || embedding_model.as_deref().is_some_and(|value| value.len() > 200) {
+    if trimmed_model.len() > 200
+        || embedding_model
+            .as_deref()
+            .is_some_and(|value| value.len() > 200)
+    {
         return Err("model name is too long".into());
     }
     if api_key.as_deref().is_some_and(|value| value.len() > 8192) {
         return Err("api key is too long".into());
     }
-    if id.as_deref().is_some_and(|value| value.is_empty() || value.len() > 128 || !value.chars().all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_'))) {
+    if id.as_deref().is_some_and(|value| {
+        value.is_empty()
+            || value.len() > 128
+            || !value
+                .chars()
+                .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_'))
+    }) {
         return Err("invalid provider id".into());
     }
     if !(1..=600).contains(&timeout_seconds) {
@@ -1697,7 +1789,10 @@ pub fn local_save_ai_provider(
         .map_err(|e| e.to_string())?
         .query_row(params![provider_id], |row| Ok((row.get(0)?, row.get(1)?)))
         .ok();
-    let created_at = existing.as_ref().map(|row| row.0.clone()).unwrap_or_else(|| now.clone());
+    let created_at = existing
+        .as_ref()
+        .map(|row| row.0.clone())
+        .unwrap_or_else(|| now.clone());
     database
         .execute(
             "INSERT INTO ai_providers(id,provider_type,base_url,model,embedding_model,timeout_seconds,has_api_key,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET provider_type=excluded.provider_type, base_url=excluded.base_url, model=excluded.model, embedding_model=excluded.embedding_model, timeout_seconds=excluded.timeout_seconds, has_api_key=excluded.has_api_key, updated_at=excluded.updated_at",
@@ -1721,9 +1816,7 @@ pub fn local_get_ai_provider(
     let mut statement = database
         .prepare("SELECT id,provider_type,base_url,model,embedding_model,timeout_seconds,has_api_key,created_at,updated_at FROM ai_providers WHERE id=?")
         .map_err(|e| e.to_string())?;
-    let mut rows = statement
-        .query(params![id])
-        .map_err(|e| e.to_string())?;
+    let mut rows = statement.query(params![id]).map_err(|e| e.to_string())?;
     match rows.next().map_err(|e| e.to_string())? {
         Some(row) => Ok(Some(row_provider(&row).map_err(|e| e.to_string())?)),
         None => Ok(None),
@@ -1739,7 +1832,8 @@ pub fn local_list_ai_providers(app: tauri::AppHandle) -> Result<Vec<LocalAIProvi
     let rows = statement
         .query_map([], row_provider)
         .map_err(|e| e.to_string())?;
-    rows.collect::<Result<Vec<_>, _>>().map_err(|e| e.to_string())
+    rows.collect::<Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -1771,7 +1865,11 @@ pub fn local_find_document_by_url(
 }
 
 #[tauri::command]
-pub fn local_toggle_starred(app: tauri::AppHandle, id: String, starred: bool) -> Result<bool, String> {
+pub fn local_toggle_starred(
+    app: tauri::AppHandle,
+    id: String,
+    starred: bool,
+) -> Result<bool, String> {
     let database = connection(&app)?;
     let updated = database
         .execute(
@@ -1815,7 +1913,9 @@ pub fn local_set_session(app: tauri::AppHandle, key: String, value: String) -> R
 pub fn local_list_history(app: tauri::AppHandle) -> Result<Vec<LocalHistoryEntry>, String> {
     let database = connection(&app)?;
     let mut statement = database
-        .prepare("SELECT url,title,visited_at FROM browser_history ORDER BY visited_at DESC, id DESC")
+        .prepare(
+            "SELECT url,title,visited_at FROM browser_history ORDER BY visited_at DESC, id DESC",
+        )
         .map_err(|error| error.to_string())?;
     let rows = statement
         .query_map([], |row| {
@@ -1854,29 +1954,52 @@ pub fn local_record_reading_activity(
 }
 
 #[tauri::command]
-pub fn local_list_reading_activity(app: tauri::AppHandle) -> Result<Vec<LocalReadingActivity>, String> {
+pub fn local_list_reading_activity(
+    app: tauri::AppHandle,
+) -> Result<Vec<LocalReadingActivity>, String> {
     let database = connection(&app)?;
     let mut statement = database.prepare(
         "SELECT url,title,first_visited_at,last_visited_at,active_seconds,max_scroll_depth,visit_count,excerpt,markdown,captured_at FROM reading_activity ORDER BY last_visited_at DESC"
     ).map_err(|error| error.to_string())?;
-    let rows = statement.query_map([], |row| Ok(LocalReadingActivity {
-        url: row.get(0)?, title: row.get(1)?, first_visited_at: row.get(2)?, last_visited_at: row.get(3)?,
-        active_seconds: row.get(4)?, max_scroll_depth: row.get(5)?, visit_count: row.get(6)?,
-        excerpt: row.get(7)?, markdown: row.get(8)?, captured_at: row.get(9)?,
-    })).map_err(|error| error.to_string())?;
-    rows.collect::<Result<Vec<_>, _>>().map_err(|error| error.to_string())
+    let rows = statement
+        .query_map([], |row| {
+            Ok(LocalReadingActivity {
+                url: row.get(0)?,
+                title: row.get(1)?,
+                first_visited_at: row.get(2)?,
+                last_visited_at: row.get(3)?,
+                active_seconds: row.get(4)?,
+                max_scroll_depth: row.get(5)?,
+                visit_count: row.get(6)?,
+                excerpt: row.get(7)?,
+                markdown: row.get(8)?,
+                captured_at: row.get(9)?,
+            })
+        })
+        .map_err(|error| error.to_string())?;
+    rows.collect::<Result<Vec<_>, _>>()
+        .map_err(|error| error.to_string())
 }
 
 #[tauri::command]
-pub fn local_save_reading_snapshot(app: tauri::AppHandle, url: String, excerpt: String, markdown: String) -> Result<(), String> {
+pub fn local_save_reading_snapshot(
+    app: tauri::AppHandle,
+    url: String,
+    excerpt: String,
+    markdown: String,
+) -> Result<(), String> {
     if url.len() > 8192 || excerpt.len() > 16_384 || markdown.len() > 4 * 1024 * 1024 {
         return Err("reading snapshot is too large".into());
     }
-    let updated = connection(&app)?.execute(
-        "UPDATE reading_activity SET excerpt=?2,markdown=?3,captured_at=?4 WHERE url=?1",
-        params![url, excerpt, markdown, unix_seconds()],
-    ).map_err(|error| error.to_string())?;
-    if updated == 0 { return Err("reading activity not found".into()); }
+    let updated = connection(&app)?
+        .execute(
+            "UPDATE reading_activity SET excerpt=?2,markdown=?3,captured_at=?4 WHERE url=?1",
+            params![url, excerpt, markdown, unix_seconds()],
+        )
+        .map_err(|error| error.to_string())?;
+    if updated == 0 {
+        return Err("reading activity not found".into());
+    }
     Ok(())
 }
 
@@ -1894,23 +2017,38 @@ pub fn local_reading_snapshot_stats(app: tauri::AppHandle) -> Result<ReadingSnap
 
 #[tauri::command]
 pub fn local_delete_reading_snapshot(app: tauri::AppHandle, url: String) -> Result<(), String> {
-    connection(&app)?.execute(
-        "UPDATE reading_activity SET excerpt=NULL,markdown=NULL,captured_at=NULL WHERE url=?1", params![url]
-    ).map_err(|error| error.to_string())?;
+    connection(&app)?
+        .execute(
+            "UPDATE reading_activity SET excerpt=NULL,markdown=NULL,captured_at=NULL WHERE url=?1",
+            params![url],
+        )
+        .map_err(|error| error.to_string())?;
     Ok(())
 }
 
 #[tauri::command]
-pub fn local_clear_reading_snapshots(app: tauri::AppHandle) -> Result<ReadingSnapshotStats, String> {
+pub fn local_clear_reading_snapshots(
+    app: tauri::AppHandle,
+) -> Result<ReadingSnapshotStats, String> {
     let database = connection(&app)?;
-    database.execute("UPDATE reading_activity SET excerpt=NULL,markdown=NULL,captured_at=NULL", [])
+    database
+        .execute(
+            "UPDATE reading_activity SET excerpt=NULL,markdown=NULL,captured_at=NULL",
+            [],
+        )
         .map_err(|error| error.to_string())?;
     reading_snapshot_stats(&database)
 }
 
 #[tauri::command]
-pub fn local_purge_reading_snapshots(app: tauri::AppHandle, retention_days: i64, max_bytes: i64) -> Result<ReadingSnapshotStats, String> {
-    if !(1..=3650).contains(&retention_days) || !(1024 * 1024..=10 * 1024 * 1024 * 1024_i64).contains(&max_bytes) {
+pub fn local_purge_reading_snapshots(
+    app: tauri::AppHandle,
+    retention_days: i64,
+    max_bytes: i64,
+) -> Result<ReadingSnapshotStats, String> {
+    if !(1..=3650).contains(&retention_days)
+        || !(1024 * 1024..=10 * 1024 * 1024 * 1024_i64).contains(&max_bytes)
+    {
         return Err("invalid snapshot retention settings".into());
     }
     let database = connection(&app)?;
@@ -1958,31 +2096,55 @@ pub fn local_clear_history(app: tauri::AppHandle, since: Option<i64>) -> Result<
 }
 
 #[tauri::command]
-pub fn local_get_browser_workspace(app: tauri::AppHandle) -> Result<Option<LocalBrowserWorkspace>, String> {
+pub fn local_get_browser_workspace(
+    app: tauri::AppHandle,
+) -> Result<Option<LocalBrowserWorkspace>, String> {
     let database = connection(&app)?;
-    let active = match database.query_row("SELECT active_tab_id FROM browser_sessions WHERE id='main'", [], |row| row.get::<_, String>(0)) {
+    let active = match database.query_row(
+        "SELECT active_tab_id FROM browser_sessions WHERE id='main'",
+        [],
+        |row| row.get::<_, String>(0),
+    ) {
         Ok(value) => value,
         Err(rusqlite::Error::QueryReturnedNoRows) => return Ok(None),
         Err(error) => return Err(error.to_string()),
     };
-    let mut statement = database.prepare("SELECT payload FROM browser_tabs WHERE session_id='main' ORDER BY position")
+    let mut statement = database
+        .prepare("SELECT payload FROM browser_tabs WHERE session_id='main' ORDER BY position")
         .map_err(|error| error.to_string())?;
-    let tabs = statement.query_map([], |row| row.get::<_, String>(0)).map_err(|error| error.to_string())?
+    let tabs = statement
+        .query_map([], |row| row.get::<_, String>(0))
+        .map_err(|error| error.to_string())?
         .filter_map(|raw| raw.ok().and_then(|value| serde_json::from_str(&value).ok()))
         .collect();
-    Ok(Some(LocalBrowserWorkspace { tabs, active_tab_id: active }))
+    Ok(Some(LocalBrowserWorkspace {
+        tabs,
+        active_tab_id: active,
+    }))
 }
 
 #[tauri::command]
-pub fn local_save_browser_workspace(app: tauri::AppHandle, workspace: LocalBrowserWorkspace) -> Result<(), String> {
-    if workspace.tabs.is_empty() || workspace.tabs.len() > 500 { return Err("invalid browser workspace".into()); }
+pub fn local_save_browser_workspace(
+    app: tauri::AppHandle,
+    workspace: LocalBrowserWorkspace,
+) -> Result<(), String> {
+    if workspace.tabs.is_empty() || workspace.tabs.len() > 500 {
+        return Err("invalid browser workspace".into());
+    }
     let mut database = connection(&app)?;
     let transaction = database.transaction().map_err(|error| error.to_string())?;
     transaction.execute("INSERT INTO browser_sessions(id,active_tab_id,updated_at) VALUES('main',?,?) ON CONFLICT(id) DO UPDATE SET active_tab_id=excluded.active_tab_id,updated_at=excluded.updated_at", params![workspace.active_tab_id, unix_seconds()]).map_err(|error| error.to_string())?;
-    transaction.execute("DELETE FROM browser_tabs WHERE session_id='main'", []).map_err(|error| error.to_string())?;
+    transaction
+        .execute("DELETE FROM browser_tabs WHERE session_id='main'", [])
+        .map_err(|error| error.to_string())?;
     for (position, tab) in workspace.tabs.into_iter().enumerate() {
-        let id = tab.get("id").and_then(|value| value.as_str()).ok_or("tab id is required")?;
-        if id.len() > 128 { return Err("invalid tab id".into()); }
+        let id = tab
+            .get("id")
+            .and_then(|value| value.as_str())
+            .ok_or("tab id is required")?;
+        if id.len() > 128 {
+            return Err("invalid tab id".into());
+        }
         let payload = serde_json::to_string(&tab).map_err(|error| error.to_string())?;
         transaction.execute("INSERT INTO browser_tabs(id,session_id,position,payload,updated_at) VALUES(?,'main',?,?,?)", params![id, position as i64, payload, unix_seconds()]).map_err(|error| error.to_string())?;
     }
@@ -1991,13 +2153,21 @@ pub fn local_save_browser_workspace(app: tauri::AppHandle, workspace: LocalBrows
 
 fn validate_workspace_name(name: &str) -> Result<(), String> {
     let trimmed = name.trim();
-    if trimmed.is_empty() { return Err("workspace name is required".into()); }
-    if trimmed.chars().count() > 80 { return Err("workspace name too long (max 80 chars)".into()); }
+    if trimmed.is_empty() {
+        return Err("workspace name is required".into());
+    }
+    if trimmed.chars().count() > 80 {
+        return Err("workspace name too long (max 80 chars)".into());
+    }
     Ok(())
 }
 
 fn count_tabs(payload: &serde_json::Value) -> i64 {
-    payload.get("tabs").and_then(|v| v.as_array()).map(|arr| arr.len() as i64).unwrap_or(0)
+    payload
+        .get("tabs")
+        .and_then(|v| v.as_array())
+        .map(|arr| arr.len() as i64)
+        .unwrap_or(0)
 }
 
 #[tauri::command]
@@ -2005,20 +2175,30 @@ pub fn local_list_workspaces(app: tauri::AppHandle) -> Result<Vec<LocalWorkspace
     let database = connection(&app)?;
     let mut statement = database.prepare("SELECT id, name, description, tab_count, created_at, updated_at FROM workspaces ORDER BY updated_at DESC LIMIT 200")
         .map_err(|error| error.to_string())?;
-    let rows = statement.query_map([], |row| Ok(LocalWorkspaceSummary {
-        id: row.get(0)?,
-        name: row.get(1)?,
-        description: row.get(2)?,
-        tab_count: row.get(3)?,
-        created_at: row.get(4)?,
-        updated_at: row.get(5)?,
-    })).map_err(|error| error.to_string())?;
-    rows.collect::<Result<Vec<_>, _>>().map_err(|error| error.to_string())
+    let rows = statement
+        .query_map([], |row| {
+            Ok(LocalWorkspaceSummary {
+                id: row.get(0)?,
+                name: row.get(1)?,
+                description: row.get(2)?,
+                tab_count: row.get(3)?,
+                created_at: row.get(4)?,
+                updated_at: row.get(5)?,
+            })
+        })
+        .map_err(|error| error.to_string())?;
+    rows.collect::<Result<Vec<_>, _>>()
+        .map_err(|error| error.to_string())
 }
 
 #[tauri::command]
-pub fn local_get_workspace(app: tauri::AppHandle, id: String) -> Result<Option<LocalWorkspace>, String> {
-    if id.trim().is_empty() { return Err("workspace id is required".into()); }
+pub fn local_get_workspace(
+    app: tauri::AppHandle,
+    id: String,
+) -> Result<Option<LocalWorkspace>, String> {
+    if id.trim().is_empty() {
+        return Err("workspace id is required".into());
+    }
     let database = connection(&app)?;
     let row = database.query_row(
         "SELECT id, name, description, payload, created_at, updated_at FROM workspaces WHERE id = ?",
@@ -2044,9 +2224,14 @@ pub fn local_get_workspace(app: tauri::AppHandle, id: String) -> Result<Option<L
 }
 
 #[tauri::command]
-pub fn local_save_workspace(app: tauri::AppHandle, input: LocalWorkspaceSaveInput) -> Result<LocalWorkspaceSummary, String> {
+pub fn local_save_workspace(
+    app: tauri::AppHandle,
+    input: LocalWorkspaceSaveInput,
+) -> Result<LocalWorkspaceSummary, String> {
     validate_workspace_name(&input.name)?;
-    if input.description.chars().count() > 240 { return Err("workspace description too long (max 240 chars)".into()); }
+    if input.description.chars().count() > 240 {
+        return Err("workspace description too long (max 240 chars)".into());
+    }
     let database = connection(&app)?;
     let now = chrono::Utc::now().to_rfc3339();
     let tab_count = count_tabs(&input.payload);
@@ -2055,7 +2240,9 @@ pub fn local_save_workspace(app: tauri::AppHandle, input: LocalWorkspaceSaveInpu
         Some(existing) => existing.to_string(),
         None => format!("ws-{}", uuid::Uuid::new_v4()),
     };
-    if id.len() > 128 { return Err("invalid workspace id".into()); }
+    if id.len() > 128 {
+        return Err("invalid workspace id".into());
+    }
     database.execute(
         "INSERT INTO workspaces (id, name, description, tab_count, payload, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(id) DO UPDATE SET name=excluded.name, description=excluded.description, tab_count=excluded.tab_count, payload=excluded.payload, updated_at=excluded.updated_at",
@@ -2077,9 +2264,12 @@ pub fn local_save_workspace(app: tauri::AppHandle, input: LocalWorkspaceSaveInpu
 
 #[tauri::command]
 pub fn local_delete_workspace(app: tauri::AppHandle, id: String) -> Result<(), String> {
-    if id.trim().is_empty() { return Err("workspace id is required".into()); }
+    if id.trim().is_empty() {
+        return Err("workspace id is required".into());
+    }
     let database = connection(&app)?;
-    database.execute("DELETE FROM workspaces WHERE id = ?", params![id])
+    database
+        .execute("DELETE FROM workspaces WHERE id = ?", params![id])
         .map_err(|error| error.to_string())?;
     Ok(())
 }
@@ -2088,59 +2278,123 @@ pub fn local_delete_workspace(app: tauri::AppHandle, id: String) -> Result<(), S
 pub fn local_list_closed_tabs(app: tauri::AppHandle) -> Result<Vec<LocalClosedTab>, String> {
     let database = connection(&app)?;
     let mut statement = database.prepare("SELECT id,url,title,favicon,closed_at FROM closed_tabs ORDER BY closed_at DESC LIMIT 20").map_err(|error| error.to_string())?;
-    let rows = statement.query_map([], |row| Ok(LocalClosedTab { id: row.get(0)?, url: row.get(1)?, title: row.get(2)?, favicon: row.get(3)?, closed_at: row.get(4)? })).map_err(|error| error.to_string())?;
-    rows.collect::<Result<Vec<_>, _>>().map_err(|error| error.to_string())
+    let rows = statement
+        .query_map([], |row| {
+            Ok(LocalClosedTab {
+                id: row.get(0)?,
+                url: row.get(1)?,
+                title: row.get(2)?,
+                favicon: row.get(3)?,
+                closed_at: row.get(4)?,
+            })
+        })
+        .map_err(|error| error.to_string())?;
+    rows.collect::<Result<Vec<_>, _>>()
+        .map_err(|error| error.to_string())
 }
 
 #[tauri::command]
 pub fn local_save_closed_tab(app: tauri::AppHandle, tab: LocalClosedTab) -> Result<(), String> {
-    validate_history_entry(&LocalHistoryEntry { url: tab.url.clone(), title: tab.title.clone(), visited_at: tab.closed_at })?;
+    validate_history_entry(&LocalHistoryEntry {
+        url: tab.url.clone(),
+        title: tab.title.clone(),
+        visited_at: tab.closed_at,
+    })?;
     let database = connection(&app)?;
-    database.execute("INSERT OR REPLACE INTO closed_tabs(id,url,title,favicon,closed_at) VALUES(?,?,?,?,?)", params![tab.id, tab.url, tab.title, tab.favicon, tab.closed_at]).map_err(|error| error.to_string())?;
+    database
+        .execute(
+            "INSERT OR REPLACE INTO closed_tabs(id,url,title,favicon,closed_at) VALUES(?,?,?,?,?)",
+            params![tab.id, tab.url, tab.title, tab.favicon, tab.closed_at],
+        )
+        .map_err(|error| error.to_string())?;
     database.execute("DELETE FROM closed_tabs WHERE id NOT IN (SELECT id FROM closed_tabs ORDER BY closed_at DESC LIMIT 20)", []).map_err(|error| error.to_string())?;
     Ok(())
 }
 
 #[tauri::command]
 pub fn local_delete_closed_tab(app: tauri::AppHandle, id: String) -> Result<(), String> {
-    connection(&app)?.execute("DELETE FROM closed_tabs WHERE id=?", params![id]).map_err(|error| error.to_string())?;
+    connection(&app)?
+        .execute("DELETE FROM closed_tabs WHERE id=?", params![id])
+        .map_err(|error| error.to_string())?;
     Ok(())
 }
 
 #[tauri::command]
 pub fn local_clear_closed_tabs(app: tauri::AppHandle) -> Result<(), String> {
-    connection(&app)?.execute("DELETE FROM closed_tabs", []).map_err(|error| error.to_string())?;
+    connection(&app)?
+        .execute("DELETE FROM closed_tabs", [])
+        .map_err(|error| error.to_string())?;
     Ok(())
 }
 
 #[tauri::command]
-pub fn local_list_site_permissions(app: tauri::AppHandle) -> Result<Vec<LocalSitePermission>, String> {
+pub fn local_list_site_permissions(
+    app: tauri::AppHandle,
+) -> Result<Vec<LocalSitePermission>, String> {
     let database = connection(&app)?;
     let mut statement = database.prepare("SELECT origin,permission_kind,decision FROM site_permissions ORDER BY origin,permission_kind").map_err(|error| error.to_string())?;
-    let rows = statement.query_map([], |row| Ok(LocalSitePermission { origin: row.get(0)?, permission_kind: row.get(1)?, decision: row.get(2)? })).map_err(|error| error.to_string())?;
-    rows.collect::<Result<Vec<_>, _>>().map_err(|error| error.to_string())
+    let rows = statement
+        .query_map([], |row| {
+            Ok(LocalSitePermission {
+                origin: row.get(0)?,
+                permission_kind: row.get(1)?,
+                decision: row.get(2)?,
+            })
+        })
+        .map_err(|error| error.to_string())?;
+    rows.collect::<Result<Vec<_>, _>>()
+        .map_err(|error| error.to_string())
 }
 
 #[tauri::command]
-pub fn local_replace_site_permissions(app: tauri::AppHandle, permissions: Vec<LocalSitePermission>) -> Result<(), String> {
+pub fn local_replace_site_permissions(
+    app: tauri::AppHandle,
+    permissions: Vec<LocalSitePermission>,
+) -> Result<(), String> {
     let mut database = connection(&app)?;
     let transaction = database.transaction().map_err(|error| error.to_string())?;
-    transaction.execute("DELETE FROM site_permissions", []).map_err(|error| error.to_string())?;
+    transaction
+        .execute("DELETE FROM site_permissions", [])
+        .map_err(|error| error.to_string())?;
     for permission in permissions {
-        if !matches!(permission.permission_kind.as_str(), "camera" | "microphone" | "location" | "notifications" | "clipboard") || !matches!(permission.decision.as_str(), "allow" | "deny" | "ask") { return Err("invalid site permission".into()); }
+        if !matches!(
+            permission.permission_kind.as_str(),
+            "camera" | "microphone" | "location" | "notifications" | "clipboard"
+        ) || !matches!(permission.decision.as_str(), "allow" | "deny" | "ask")
+        {
+            return Err("invalid site permission".into());
+        }
         let parsed = url::Url::parse(&permission.origin).map_err(|error| error.to_string())?;
-        if !matches!(parsed.scheme(), "http" | "https") || parsed.origin().ascii_serialization() != permission.origin { return Err("invalid permission origin".into()); }
+        if !matches!(parsed.scheme(), "http" | "https")
+            || parsed.origin().ascii_serialization() != permission.origin
+        {
+            return Err("invalid permission origin".into());
+        }
         transaction.execute("INSERT INTO site_permissions(origin,permission_kind,decision,updated_at) VALUES(?,?,?,?)", params![permission.origin, permission.permission_kind, permission.decision, unix_seconds()]).map_err(|error| error.to_string())?;
     }
     transaction.commit().map_err(|error| error.to_string())
 }
 
-pub(crate) fn site_permission_decision(app: &tauri::AppHandle, origin: &str, kind: &str) -> Option<String> {
+pub(crate) fn site_permission_decision(
+    app: &tauri::AppHandle,
+    origin: &str,
+    kind: &str,
+) -> Option<String> {
     let database = connection(app).ok()?;
-    database.query_row("SELECT decision FROM site_permissions WHERE origin=? AND permission_kind=?", params![origin, kind], |row| row.get(0)).optional().ok().flatten()
+    database
+        .query_row(
+            "SELECT decision FROM site_permissions WHERE origin=? AND permission_kind=?",
+            params![origin, kind],
+            |row| row.get(0),
+        )
+        .optional()
+        .ok()
+        .flatten()
 }
 
-fn credential_key(id: &str) -> String { format!("browser-password:{id}") }
+fn credential_key(id: &str) -> String {
+    format!("browser-password:{id}")
+}
 
 fn validate_credential_origin(origin: &str) -> Result<(), String> {
     let parsed = url::Url::parse(origin).map_err(|_| "invalid credential origin".to_string())?;
@@ -2151,51 +2405,103 @@ fn validate_credential_origin(origin: &str) -> Result<(), String> {
 }
 
 #[tauri::command]
-pub fn browser_password_save(app: tauri::AppHandle, origin: String, username: String, password: String) -> Result<SavedCredential, String> {
+pub fn browser_password_save(
+    app: tauri::AppHandle,
+    origin: String,
+    username: String,
+    password: String,
+) -> Result<SavedCredential, String> {
     validate_credential_origin(&origin)?;
     let username = username.trim().to_string();
-    if username.is_empty() || username.len() > 320 || password.is_empty() || password.len() > 4096 { return Err("invalid username or password".into()) }
+    if username.is_empty() || username.len() > 320 || password.is_empty() || password.len() > 4096 {
+        return Err("invalid username or password".into());
+    }
     let database = connection(&app)?;
-    let existing: Option<String> = database.query_row("SELECT id FROM saved_credentials WHERE origin=? AND username=?", params![origin, username], |row| row.get(0)).optional().map_err(|e| e.to_string())?;
+    let existing: Option<String> = database
+        .query_row(
+            "SELECT id FROM saved_credentials WHERE origin=? AND username=?",
+            params![origin, username],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(|e| e.to_string())?;
     let id = existing.unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
     keyring_set(&credential_key(&id), &password)?;
     let now = unix_seconds();
     database.execute("INSERT INTO saved_credentials(id,origin,username,created_at,updated_at) VALUES(?,?,?,?,?) ON CONFLICT(origin,username) DO UPDATE SET updated_at=excluded.updated_at", params![id, origin, username, now, now]).map_err(|e| e.to_string())?;
-    Ok(SavedCredential { id, origin, username, updated_at: now })
+    Ok(SavedCredential {
+        id,
+        origin,
+        username,
+        updated_at: now,
+    })
 }
 
 #[tauri::command]
 pub fn browser_password_list(app: tauri::AppHandle) -> Result<Vec<SavedCredential>, String> {
     let database = connection(&app)?;
-    let mut statement = database.prepare("SELECT id,origin,username,updated_at FROM saved_credentials ORDER BY updated_at DESC").map_err(|e| e.to_string())?;
-    let rows = statement.query_map([], |row| Ok(SavedCredential { id: row.get(0)?, origin: row.get(1)?, username: row.get(2)?, updated_at: row.get(3)? })).map_err(|e| e.to_string())?;
-    rows.collect::<Result<Vec<_>, _>>().map_err(|e| e.to_string())
+    let mut statement = database
+        .prepare(
+            "SELECT id,origin,username,updated_at FROM saved_credentials ORDER BY updated_at DESC",
+        )
+        .map_err(|e| e.to_string())?;
+    let rows = statement
+        .query_map([], |row| {
+            Ok(SavedCredential {
+                id: row.get(0)?,
+                origin: row.get(1)?,
+                username: row.get(2)?,
+                updated_at: row.get(3)?,
+            })
+        })
+        .map_err(|e| e.to_string())?;
+    rows.collect::<Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())
 }
 
-pub(crate) fn password_for_origin(app: &tauri::AppHandle, origin: &str) -> Result<Option<AutofillCredential>, String> {
+pub(crate) fn password_for_origin(
+    app: &tauri::AppHandle,
+    origin: &str,
+) -> Result<Option<AutofillCredential>, String> {
     validate_credential_origin(origin)?;
     let database = connection(app)?;
     let row: Option<(String, String)> = database.query_row("SELECT id,username FROM saved_credentials WHERE origin=? ORDER BY updated_at DESC LIMIT 1", [origin], |row| Ok((row.get(0)?, row.get(1)?))).optional().map_err(|e| e.to_string())?;
-    let Some((id, username)) = row else { return Ok(None) };
-    let password = keyring::Entry::new(KEYRING_SERVICE, &credential_key(&id)).map_err(|e| e.to_string())?.get_password().map_err(|e| e.to_string())?;
+    let Some((id, username)) = row else {
+        return Ok(None);
+    };
+    let password = keyring::Entry::new(KEYRING_SERVICE, &credential_key(&id))
+        .map_err(|e| e.to_string())?
+        .get_password()
+        .map_err(|e| e.to_string())?;
     Ok(Some(AutofillCredential { username, password }))
 }
 
 #[tauri::command]
 pub fn browser_password_delete(app: tauri::AppHandle, id: String) -> Result<bool, String> {
     let database = connection(&app)?;
-    let changed = database.execute("DELETE FROM saved_credentials WHERE id=?", [&id]).map_err(|e| e.to_string())? > 0;
-    if changed { let _ = keyring_delete(&credential_key(&id)); }
+    let changed = database
+        .execute("DELETE FROM saved_credentials WHERE id=?", [&id])
+        .map_err(|e| e.to_string())?
+        > 0;
+    if changed {
+        let _ = keyring_delete(&credential_key(&id));
+    }
     Ok(changed)
 }
 
 #[tauri::command]
 pub fn browser_password_generate(length: Option<usize>) -> Result<String, String> {
     let length = length.unwrap_or(20).clamp(16, 64);
-    let seed = format!("{}{}", uuid::Uuid::new_v4().simple(), uuid::Uuid::new_v4().simple());
+    let seed = format!(
+        "{}{}",
+        uuid::Uuid::new_v4().simple(),
+        uuid::Uuid::new_v4().simple()
+    );
     let alphabet = b"ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789!@#$%^&*";
     let mut out = String::with_capacity(length);
-    for (index, byte) in seed.bytes().enumerate().take(length.saturating_sub(4)) { out.push(alphabet[(byte as usize + index * 17) % alphabet.len()] as char); }
+    for (index, byte) in seed.bytes().enumerate().take(length.saturating_sub(4)) {
+        out.push(alphabet[(byte as usize + index * 17) % alphabet.len()] as char);
+    }
     out.push_str("A9!a");
     Ok(out.chars().take(length).collect())
 }
@@ -2257,7 +2563,10 @@ pub fn local_export_backup(app: tauri::AppHandle) -> Result<LocalBackup, String>
 }
 
 #[tauri::command]
-pub fn local_import_backup(app: tauri::AppHandle, backup: LocalBackup) -> Result<LocalImportSummary, String> {
+pub fn local_import_backup(
+    app: tauri::AppHandle,
+    backup: LocalBackup,
+) -> Result<LocalImportSummary, String> {
     if backup.version != 1 {
         return Err(format!("unsupported backup version: {}", backup.version));
     }
@@ -2266,7 +2575,8 @@ pub fn local_import_backup(app: tauri::AppHandle, backup: LocalBackup) -> Result
     let mut documents_skipped = 0;
     for document in backup.documents {
         let tags = serde_json::to_string(&document.tags).map_err(|error| error.to_string())?;
-        let auto_tags = serde_json::to_string(&document.auto_tags).unwrap_or_else(|_| "[]".to_string());
+        let auto_tags =
+            serde_json::to_string(&document.auto_tags).unwrap_or_else(|_| "[]".to_string());
         let result = database.execute(
             "INSERT OR REPLACE INTO local_documents(id,title,url,source,author,summary,markdown,word_count,status,tags,auto_tags,created_at,starred) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)",
             params![document.id, document.title, document.url, document.source, document.author, document.summary, document.markdown, document.word_count, document.status, tags, auto_tags, document.created_at, document.starred as i64],
@@ -2304,7 +2614,11 @@ pub fn local_migration_status(app: tauri::AppHandle) -> Result<LocalMigrationSta
             |row| row.get(0),
         )
         .map_err(|error| error.to_string())?;
-    let latest = MIGRATIONS.iter().map(|(version, _)| *version).max().unwrap_or(0);
+    let latest = MIGRATIONS
+        .iter()
+        .map(|(version, _)| *version)
+        .max()
+        .unwrap_or(0);
     Ok(LocalMigrationStatus {
         version,
         pending: (latest - version).max(0),
@@ -2412,7 +2726,9 @@ mod tests {
     fn v10_migrates_legacy_history_json_into_rows() {
         let mut database = fresh();
         run_migrations(&mut database).unwrap();
-        database.execute("DELETE FROM schema_version WHERE version=10", []).unwrap();
+        database
+            .execute("DELETE FROM schema_version WHERE version=10", [])
+            .unwrap();
         database.execute("DROP TABLE browser_history", []).unwrap();
         database.execute(
             "INSERT INTO local_session(key,value,updated_at) VALUES('browser.history',?,1)",
@@ -2428,9 +2744,16 @@ mod tests {
             .unwrap()
             .collect::<Result<Vec<_>, _>>()
             .unwrap();
-        assert_eq!(rows, vec![("https://example.com/a".into(), "A".into(), 1000)]);
+        assert_eq!(
+            rows,
+            vec![("https://example.com/a".into(), "A".into(), 1000)]
+        );
         let legacy_count: i64 = database
-            .query_row("SELECT COUNT(*) FROM local_session WHERE key='browser.history'", [], |row| row.get(0))
+            .query_row(
+                "SELECT COUNT(*) FROM local_session WHERE key='browser.history'",
+                [],
+                |row| row.get(0),
+            )
             .unwrap();
         assert_eq!(legacy_count, 0);
     }
@@ -2524,13 +2847,25 @@ mod tests {
             .unwrap()
             .collect::<Result<Vec<_>, _>>()
             .unwrap();
-        let mut stmt = source.prepare("SELECT key, value FROM local_session ORDER BY key ASC").unwrap();
+        let mut stmt = source
+            .prepare("SELECT key, value FROM local_session ORDER BY key ASC")
+            .unwrap();
         let session: Vec<LocalSessionEntry> = stmt
-            .query_map([], |row| Ok(LocalSessionEntry { key: row.get(0)?, value: row.get(1)? }))
+            .query_map([], |row| {
+                Ok(LocalSessionEntry {
+                    key: row.get(0)?,
+                    value: row.get(1)?,
+                })
+            })
             .unwrap()
             .collect::<Result<Vec<_>, _>>()
             .unwrap();
-        let backup = LocalBackup { version: 1, exported_at: "1".into(), documents, session };
+        let backup = LocalBackup {
+            version: 1,
+            exported_at: "1".into(),
+            documents,
+            session,
+        };
 
         // Import into a fresh database.
         let mut target = fresh();
@@ -2541,11 +2876,19 @@ mod tests {
         assert_eq!(summary.session_inserted, 1);
 
         let restored_title: String = target
-            .query_row("SELECT title FROM local_documents WHERE id='local-1'", [], |row| row.get(0))
+            .query_row(
+                "SELECT title FROM local_documents WHERE id='local-1'",
+                [],
+                |row| row.get(0),
+            )
             .unwrap();
         assert_eq!(restored_title, "Title");
         let restored_session: String = target
-            .query_row("SELECT value FROM local_session WHERE key='browser.tabs'", [], |row| row.get(0))
+            .query_row(
+                "SELECT value FROM local_session WHERE key='browser.tabs'",
+                [],
+                |row| row.get(0),
+            )
             .unwrap();
         assert_eq!(restored_session, "{\"tabs\":[]}");
     }
@@ -2554,7 +2897,12 @@ mod tests {
     fn import_rejects_unsupported_backup_version() {
         let mut database = fresh();
         run_migrations(&mut database).unwrap();
-        let backup = LocalBackup { version: 99, exported_at: "0".into(), documents: vec![], session: vec![] };
+        let backup = LocalBackup {
+            version: 99,
+            exported_at: "0".into(),
+            documents: vec![],
+            session: vec![],
+        };
         let result = local_import_backup_for_test(&mut database, backup);
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("unsupported backup version"));
@@ -2584,7 +2932,10 @@ mod tests {
         let payload = serde_json::json!({ "tabs": [{}, {}, {}] });
         assert_eq!(count_tabs(&payload), 3);
         assert_eq!(count_tabs(&serde_json::json!({})), 0);
-        assert_eq!(count_tabs(&serde_json::json!({ "tabs": "not-an-array" })), 0);
+        assert_eq!(
+            count_tabs(&serde_json::json!({ "tabs": "not-an-array" })),
+            0
+        );
     }
 
     #[test]
@@ -2592,7 +2943,11 @@ mod tests {
         let mut database = fresh();
         run_migrations(&mut database).unwrap();
         let count: i64 = database
-            .query_row("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='workspaces'", [], |row| row.get(0))
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='workspaces'",
+                [],
+                |row| row.get(0),
+            )
             .unwrap();
         assert_eq!(count, 1);
         let versions: Vec<i64> = database
@@ -2602,7 +2957,10 @@ mod tests {
             .unwrap()
             .collect::<Result<_, _>>()
             .unwrap();
-        assert!(versions.contains(&13), "schema_version must include 13, got {versions:?}");
+        assert!(
+            versions.contains(&13),
+            "schema_version must include 13, got {versions:?}"
+        );
     }
 
     #[test]
@@ -2623,7 +2981,10 @@ mod tests {
                 |row| row.get(0),
             )
             .unwrap();
-        assert!(fts_count >= 1, "backfilled row must be searchable, got {fts_count}");
+        assert!(
+            fts_count >= 1,
+            "backfilled row must be searchable, got {fts_count}"
+        );
 
         // After INSERT, UPDATE, DELETE the FTS index stays in sync via triggers.
         database
@@ -2654,7 +3015,10 @@ mod tests {
                 |row| row.get(0),
             )
             .unwrap();
-        assert_eq!(renamed_hits, 1, "after UPDATE trigger must re-index the row");
+        assert_eq!(
+            renamed_hits, 1,
+            "after UPDATE trigger must re-index the row"
+        );
         let stale_tokio: i64 = database
             .query_row(
                 "SELECT COUNT(*) FROM local_documents_fts WHERE local_documents_fts MATCH ?1",
@@ -2662,7 +3026,10 @@ mod tests {
                 |row| row.get(0),
             )
             .unwrap();
-        assert_eq!(stale_tokio, 0, "old title tokens must be removed by UPDATE trigger");
+        assert_eq!(
+            stale_tokio, 0,
+            "old title tokens must be removed by UPDATE trigger"
+        );
 
         database
             .execute("DELETE FROM local_documents WHERE id='fts-new'", [])
@@ -2674,14 +3041,20 @@ mod tests {
                 |row| row.get(0),
             )
             .unwrap();
-        assert_eq!(after_delete, 0, "after DELETE trigger must purge the row from FTS");
+        assert_eq!(
+            after_delete, 0,
+            "after DELETE trigger must purge the row from FTS"
+        );
     }
 
     #[test]
     fn build_fts5_query_strips_unsafe_tokens_and_supports_prefix_match() {
         let query = build_fts5_query("rust (unsafe) +flag \"exact\"");
         // Special chars stripped; remaining tokens get prefix wildcards; joined by AND.
-        assert_eq!(query, "\"rust\"* AND \"unsafe\"* AND \"flag\"* AND \"exact\"*");
+        assert_eq!(
+            query,
+            "\"rust\"* AND \"unsafe\"* AND \"flag\"* AND \"exact\"*"
+        );
         assert_eq!(build_fts5_query("   "), "");
         assert_eq!(build_fts5_query(""), "");
     }
@@ -2698,7 +3071,9 @@ mod tests {
             command: Some("npx".into()),
             url: None,
             args: vec!["-y".into(), "@modelcontextprotocol/server-github".into()],
-            env: [("GITHUB_TOKEN".into(), "secret".into())].into_iter().collect(),
+            env: [("GITHUB_TOKEN".into(), "secret".into())]
+                .into_iter()
+                .collect(),
             headers: Default::default(),
             enabled: true,
         };
@@ -2714,7 +3089,9 @@ mod tests {
             url: Some("https://example.com/mcp".into()),
             args: vec![],
             env: Default::default(),
-            headers: [("Authorization".into(), "Bearer xyz".into())].into_iter().collect(),
+            headers: [("Authorization".into(), "Bearer xyz".into())]
+                .into_iter()
+                .collect(),
             enabled: true,
         };
         let saved_http = save_mcp_server_for_test(&database, input_http).expect("save http");
@@ -2735,7 +3112,10 @@ mod tests {
         assert!(save_mcp_server_for_test(&database, bad).is_err());
     }
 
-    fn save_mcp_server_for_test(database: &Connection, input: McpServerInput) -> Result<McpServer, String> {
+    fn save_mcp_server_for_test(
+        database: &Connection,
+        input: McpServerInput,
+    ) -> Result<McpServer, String> {
         if input.name.trim().is_empty() {
             return Err("server name is required".into());
         }
@@ -2796,8 +3176,20 @@ mod tests {
                 params!["running", id],
             )
             .unwrap();
-        let status: String = database.query_row("SELECT status FROM agent_runs WHERE id=?1", params![id], |row| row.get(0)).unwrap();
-        let finished_at: Option<String> = database.query_row("SELECT finished_at FROM agent_runs WHERE id=?1", params![id], |row| row.get(0)).unwrap();
+        let status: String = database
+            .query_row(
+                "SELECT status FROM agent_runs WHERE id=?1",
+                params![id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let finished_at: Option<String> = database
+            .query_row(
+                "SELECT finished_at FROM agent_runs WHERE id=?1",
+                params![id],
+                |row| row.get(0),
+            )
+            .unwrap();
         assert_eq!(status, "running");
         assert!(finished_at.is_none());
         // Mark completed.
@@ -2807,7 +3199,13 @@ mod tests {
                 params![chrono::Utc::now().to_rfc3339(), id],
             )
             .unwrap();
-        let finished_at: Option<String> = database.query_row("SELECT finished_at FROM agent_runs WHERE id=?1", params![id], |row| row.get(0)).unwrap();
+        let finished_at: Option<String> = database
+            .query_row(
+                "SELECT finished_at FROM agent_runs WHERE id=?1",
+                params![id],
+                |row| row.get(0),
+            )
+            .unwrap();
         assert!(finished_at.is_some());
     }
 
@@ -2849,12 +3247,27 @@ mod tests {
                  WHERE local_documents_fts MATCH ?1 \
                  ORDER BY bm25(local_documents_fts) LIMIT 1",
                 rusqlite::params!["\"tokio\"*"],
-                |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, f64>(2)?)),
+                |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, f64>(2)?,
+                    ))
+                },
             )
             .unwrap();
-        assert_eq!(title_snip, "Rust async runtime guide", "title snippet returns unmatched column content");
-        assert!(markdown_snip.contains("<mark>Tokio</mark>"), "markdown snippet must include <mark>: {markdown_snip}");
-        assert!(rank.is_finite() && rank < 0.0, "bm25 should rank higher-quality matches lower");
+        assert_eq!(
+            title_snip, "Rust async runtime guide",
+            "title snippet returns unmatched column content"
+        );
+        assert!(
+            markdown_snip.contains("<mark>Tokio</mark>"),
+            "markdown snippet must include <mark>: {markdown_snip}"
+        );
+        assert!(
+            rank.is_finite() && rank < 0.0,
+            "bm25 should rank higher-quality matches lower"
+        );
 
         // Embedding round-trip + cosine similarity
         let query_vector: Vec<f32> = vec![0.10, 0.20, 0.30, 0.40];
@@ -2897,13 +3310,25 @@ mod tests {
         let sorted: Vec<&str> = {
             let mut with_score = scored.clone();
             with_score.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
-            with_score.into_iter().map(|(id, _)| Box::leak(id.into_boxed_str()) as &str).collect()
+            with_score
+                .into_iter()
+                .map(|(id, _)| Box::leak(id.into_boxed_str()) as &str)
+                .collect()
         };
-        assert_eq!(sorted[0], document_id, "nearest neighbour must be the related document");
+        assert_eq!(
+            sorted[0], document_id,
+            "nearest neighbour must be the related document"
+        );
         let related_score = scored.iter().find(|(id, _)| id == document_id).unwrap().1;
         let unrelated_score = scored.iter().find(|(id, _)| id == "unrelated").unwrap().1;
-        assert!(related_score > unrelated_score, "related doc must score higher than unrelated");
-        assert!(related_score > 0.99, "near-identical vectors must score ~1.0");
+        assert!(
+            related_score > unrelated_score,
+            "related doc must score higher than unrelated"
+        );
+        assert!(
+            related_score > 0.99,
+            "near-identical vectors must score ~1.0"
+        );
     }
 
     #[test]
@@ -2936,26 +3361,40 @@ mod tests {
             )
             .unwrap();
         assert_eq!(match_count, 1, "FTS5 must index 'tokio' from markdown");
-        let (title_snip, markdown_snip, summary_snip, rank): (String, String, String, f64) = database
-            .query_row(
-                "SELECT snippet(local_documents_fts, 0, '<mark>', '</mark>', '…', 8), \
+        let (title_snip, markdown_snip, summary_snip, rank): (String, String, String, f64) =
+            database
+                .query_row(
+                    "SELECT snippet(local_documents_fts, 0, '<mark>', '</mark>', '…', 8), \
                         snippet(local_documents_fts, 1, '<mark>', '</mark>', '…', 16), \
                         snippet(local_documents_fts, 2, '<mark>', '</mark>', '…', 12), \
                         bm25(local_documents_fts) \
                  FROM local_documents d \
                  INNER JOIN local_documents_fts fts ON fts.rowid = d.rowid \
                  WHERE local_documents_fts MATCH ?1",
-                rusqlite::params!["\"tokio\"*"],
-                |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?, row.get::<_, f64>(3)?)),
-            )
-            .unwrap();
+                    rusqlite::params!["\"tokio\"*"],
+                    |row| {
+                        Ok((
+                            row.get::<_, String>(0)?,
+                            row.get::<_, String>(1)?,
+                            row.get::<_, String>(2)?,
+                            row.get::<_, f64>(3)?,
+                        ))
+                    },
+                )
+                .unwrap();
         // Title doesn't contain "tokio", so FTS5 snippet for that column is empty
         // (with our 8-token limit and ellipsis behaviour).
         assert_eq!(title_snip, "Rust async runtime guide");
         // Markdown contains "tokio" — should be wrapped in <mark> tags.
-        assert!(markdown_snip.contains("<mark>Tokio</mark>"), "markdown snippet missing mark: {markdown_snip}");
+        assert!(
+            markdown_snip.contains("<mark>Tokio</mark>"),
+            "markdown snippet missing mark: {markdown_snip}"
+        );
         // Summary contains "tokio".
-        assert!(summary_snip.contains("<mark>tokio</mark>"), "summary snippet missing mark: {summary_snip}");
+        assert!(
+            summary_snip.contains("<mark>tokio</mark>"),
+            "summary snippet missing mark: {summary_snip}"
+        );
         assert!(rank.is_finite());
     }
 
@@ -2975,7 +3414,10 @@ mod tests {
         assert_eq!(count, 0, "must return empty for unmatched query");
     }
 
-    fn local_import_backup_for_test(database: &mut Connection, backup: LocalBackup) -> Result<LocalImportSummary, String> {
+    fn local_import_backup_for_test(
+        database: &mut Connection,
+        backup: LocalBackup,
+    ) -> Result<LocalImportSummary, String> {
         if backup.version != 1 {
             return Err(format!("unsupported backup version: {}", backup.version));
         }
@@ -2983,7 +3425,8 @@ mod tests {
         let mut documents_skipped = 0;
         for document in backup.documents {
             let tags = serde_json::to_string(&document.tags).map_err(|error| error.to_string())?;
-            let auto_tags = serde_json::to_string(&document.auto_tags).unwrap_or_else(|_| "[]".to_string());
+            let auto_tags =
+                serde_json::to_string(&document.auto_tags).unwrap_or_else(|_| "[]".to_string());
             let result = database.execute(
                 "INSERT OR REPLACE INTO local_documents(id,title,url,source,author,summary,markdown,word_count,status,tags,auto_tags,created_at,starred) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 params![document.id, document.title, document.url, document.source, document.author, document.summary, document.markdown, document.word_count, document.status, tags, auto_tags, document.created_at, document.starred as i64],
@@ -3002,19 +3445,31 @@ mod tests {
             ).map_err(|error| error.to_string())?;
             session_inserted += 1;
         }
-        Ok(LocalImportSummary { documents_inserted, documents_skipped, session_inserted })
+        Ok(LocalImportSummary {
+            documents_inserted,
+            documents_skipped,
+            session_inserted,
+        })
     }
 
     #[test]
     fn chunk_markdown_respects_chunk_size_and_splits_on_paragraphs() {
         let mut body = String::new();
         for index in 0..10 {
-            body.push_str(&format!("Paragraph {index} about tokenising prose for retrieval.\n\n"));
+            body.push_str(&format!(
+                "Paragraph {index} about tokenising prose for retrieval.\n\n"
+            ));
         }
         let chunks = chunk_markdown(&body, 200, 20);
-        assert!(chunks.len() >= 2, "must split long markdown into multiple chunks");
+        assert!(
+            chunks.len() >= 2,
+            "must split long markdown into multiple chunks"
+        );
         for (offset, text) in &chunks {
-            assert!(body[*offset..].starts_with(text), "chunk text must align with offset");
+            assert!(
+                body[*offset..].starts_with(text),
+                "chunk text must align with offset"
+            );
         }
     }
 

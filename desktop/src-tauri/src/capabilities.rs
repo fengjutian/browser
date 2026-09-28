@@ -43,16 +43,24 @@ pub fn browser_capabilities() -> BrowserCapabilities {
 }
 
 #[cfg(target_os = "windows")]
-fn webview_backend_label() -> &'static str { "webview2" }
+fn webview_backend_label() -> &'static str {
+    "webview2"
+}
 
 #[cfg(target_os = "macos")]
-fn webview_backend_label() -> &'static str { "wkwebview" }
+fn webview_backend_label() -> &'static str {
+    "wkwebview"
+}
 
 #[cfg(target_os = "linux")]
-fn webview_backend_label() -> &'static str { "webkitgtk" }
+fn webview_backend_label() -> &'static str {
+    "webkitgtk"
+}
 
 #[cfg(not(any(target_os = "windows", target_os = "macos", target_os = "linux")))]
-fn webview_backend_label() -> &'static str { "unknown" }
+fn webview_backend_label() -> &'static str {
+    "unknown"
+}
 
 #[cfg(test)]
 mod tests {
@@ -61,14 +69,35 @@ mod tests {
     #[test]
     fn capability_flags_match_matrix_expectations() {
         let caps = browser_capabilities();
-        assert!(caps.download_progress_bytes, "download progress is always observable");
-        assert!(!caps.download_pause_resume, "Tauri 2 stable does not expose native pause/resume");
-        assert!(caps.download_cancel, "on_download Requested return-false is wired");
+        assert!(
+            caps.download_progress_bytes,
+            "download progress is always observable"
+        );
+        assert!(
+            !caps.download_pause_resume,
+            "Tauri 2 stable does not expose native pause/resume"
+        );
+        assert!(
+            caps.download_cancel,
+            "on_download Requested return-false is wired"
+        );
         assert_eq!(caps.native_permission_events, cfg!(target_os = "windows"));
-        assert!(!caps.native_context_menu, "wry has no context-menu integration in stable");
+        assert!(
+            !caps.native_context_menu,
+            "wry has no context-menu integration in stable"
+        );
         assert_eq!(caps.clear_site_data, cfg!(target_os = "windows"));
-        assert_eq!(caps.certificate_error_interceptor, cfg!(target_os = "windows"));
-        assert!(caps.webview_backend.is_some(), "backend label must be set on every target");
-        assert!(caps.tauri_runtime_version.is_some(), "tauri runtime version must be set");
+        assert_eq!(
+            caps.certificate_error_interceptor,
+            cfg!(target_os = "windows")
+        );
+        assert!(
+            caps.webview_backend.is_some(),
+            "backend label must be set on every target"
+        );
+        assert!(
+            caps.tauri_runtime_version.is_some(),
+            "tauri runtime version must be set"
+        );
     }
 }

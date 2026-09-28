@@ -1,21 +1,21 @@
+pub mod bookmarks;
 pub mod browser;
+pub mod capabilities;
+pub mod certificate_guard;
 pub mod downloads;
 pub mod local_store;
 pub mod mcp;
+pub mod permission_guard;
 pub mod plugins;
+pub mod privacy;
+pub mod process_memory;
 pub mod providers;
 pub mod session_lock;
 pub mod webview_compat;
-pub mod certificate_guard;
-pub mod privacy;
-pub mod capabilities;
-pub mod bookmarks;
-pub mod process_memory;
-pub mod permission_guard;
 
+use rusqlite::params;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
-use rusqlite::params;
 use std::collections::HashMap;
 use std::sync::Mutex;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -57,7 +57,11 @@ struct PermissionRequestPayload {
 
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct PasswordCandidatePayload { origin: String, username: String, password: String }
+struct PasswordCandidatePayload {
+    origin: String,
+    username: String,
+    password: String,
+}
 
 /// v2 download progress payload. The legacy v1 fields (`tabLabel`, `url`,
 /// `path`, `status`) are preserved so existing consumers keep working; new
@@ -121,7 +125,11 @@ impl PermissionWaiters {
         rx
     }
     fn resolve(&self, request_id: &str, allow: bool) -> bool {
-        self.pending.lock().ok().and_then(|mut guard| guard.remove(request_id).map(|tx| tx.send(allow).is_ok())).unwrap_or(false)
+        self.pending
+            .lock()
+            .ok()
+            .and_then(|mut guard| guard.remove(request_id).map(|tx| tx.send(allow).is_ok()))
+            .unwrap_or(false)
     }
 }
 
@@ -132,10 +140,16 @@ impl DownloadIndex {
         }
     }
     fn forget(&self, url: &str) -> Option<String> {
-        self.by_url.lock().ok().and_then(|mut guard| guard.remove(url))
+        self.by_url
+            .lock()
+            .ok()
+            .and_then(|mut guard| guard.remove(url))
     }
     fn get(&self, url: &str) -> Option<String> {
-        self.by_url.lock().ok().and_then(|guard| guard.get(url).cloned())
+        self.by_url
+            .lock()
+            .ok()
+            .and_then(|guard| guard.get(url).cloned())
     }
 }
 
@@ -247,7 +261,8 @@ fn context_menu_script() -> String {
 
 fn ad_blocker_script(label: &str, enabled: bool) -> String {
     let label = serde_json::to_string(label).unwrap_or_else(|_| "\"browser\"".into());
-    format!(r#"(() => {{
+    format!(
+        r#"(() => {{
       if (window.__arcadiaAdBlocker) {{ window.__arcadiaAdBlocker.setEnabled({enabled}); return; }}
       const tabLabel = {label};
       const blockedHosts = [
@@ -294,7 +309,8 @@ fn ad_blocker_script(label: &str, enabled: bool) -> String {
       window.__arcadiaAdBlocker = {{ setEnabled(value) {{ active=!!value; if (active) start(); else {{ observer.disconnect(); style?.remove(); style=undefined; }} emit(); }} }};
       if (active) {{ if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start, {{once:true}}); else start(); }}
       emit();
-    }})()"#)
+    }})()"#
+    )
 }
 
 #[cfg(test)]
@@ -303,21 +319,27 @@ mod context_menu_tests {
     fn context_menu_script_is_a_single_expression() {
         let script = super::context_menu_script();
         assert!(script.starts_with("(() =>"), "script must be an IIFE");
-        assert!(script.contains("contextmenu"), "script must intercept contextmenu events");
+        assert!(
+            script.contains("contextmenu"),
+            "script must intercept contextmenu events"
+        );
     }
 }
 
 fn permission_guard_script(rules: &[SitePermissionRule]) -> String {
     // WebView2 permission requests are handled by the native event guard on
     // Windows. Keeping the JavaScript shim there would display two prompts.
-    if cfg!(target_os = "windows") { return "(()=>{})()".into() }
+    if cfg!(target_os = "windows") {
+        return "(()=>{})()".into();
+    }
     let rules = serde_json::to_string(rules).unwrap_or_else(|_| "[]".into());
     // Each sensitive JS API is wrapped: the wrapper inspects the current
     // rule for (origin, kind). `allow` keeps the original behaviour;
     // `deny` rejects the call; `ask` invokes `browser_permission_request`
     // which round-trips through the host UI and resolves / rejects based
     // on the user's verdict.
-    format!(r#"(()=>{{
+    format!(
+        r#"(()=>{{
       const rules={rules};
       const origin=location.origin;
       const rule=rules.find(item=>item.origin===origin) || {{}};
@@ -388,7 +410,8 @@ fn permission_guard_script(rules: &[SitePermissionRule]) -> String {
           navigator.clipboard.readText=wrap(navigator.clipboard.readText);
         }} catch {{}}
       }}
-    }})()"#)
+    }})()"#
+    )
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -412,7 +435,11 @@ struct BrowserState {
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct NetworkDiagnosis { kind: String, message: String, http_status: Option<u16> }
+struct NetworkDiagnosis {
+    kind: String,
+    message: String,
+    http_status: Option<u16>,
+}
 
 #[tauri::command]
 async fn browser_diagnose_url(url: String) -> Result<NetworkDiagnosis, String> {
@@ -420,12 +447,20 @@ async fn browser_diagnose_url(url: String) -> Result<NetworkDiagnosis, String> {
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(12))
         .redirect(reqwest::redirect::Policy::limited(5))
-        .build().map_err(|error| error.to_string())?;
+        .build()
+        .map_err(|error| error.to_string())?;
     match client.get(parsed).send().await {
         Ok(response) => {
             let status = response.status();
             Ok(NetworkDiagnosis {
-                kind: if status.is_server_error() { "http-server" } else if status.is_client_error() { "http-client" } else { "reachable" }.into(),
+                kind: if status.is_server_error() {
+                    "http-server"
+                } else if status.is_client_error() {
+                    "http-client"
+                } else {
+                    "reachable"
+                }
+                .into(),
                 message: format!("服务器返回 HTTP {}", status.as_u16()),
                 http_status: Some(status.as_u16()),
             })
@@ -434,9 +469,15 @@ async fn browser_diagnose_url(url: String) -> Result<NetworkDiagnosis, String> {
             let detail = error.to_string().to_lowercase();
             let (kind, message) = if error.is_timeout() {
                 ("timeout", "连接服务器超时")
-            } else if detail.contains("dns") || detail.contains("name or service") || detail.contains("failed to lookup") {
+            } else if detail.contains("dns")
+                || detail.contains("name or service")
+                || detail.contains("failed to lookup")
+            {
                 ("dns", "无法解析网站域名，请检查 DNS 设置")
-            } else if detail.contains("certificate") || detail.contains("tls") || detail.contains("ssl") {
+            } else if detail.contains("certificate")
+                || detail.contains("tls")
+                || detail.contains("ssl")
+            {
                 ("tls", "TLS/证书验证失败")
             } else if detail.contains("refused") {
                 ("connection-refused", "服务器拒绝连接")
@@ -445,7 +486,11 @@ async fn browser_diagnose_url(url: String) -> Result<NetworkDiagnosis, String> {
             } else {
                 ("network", "网络请求失败")
             };
-            Ok(NetworkDiagnosis { kind: kind.into(), message: message.into(), http_status: None })
+            Ok(NetworkDiagnosis {
+                kind: kind.into(),
+                message: message.into(),
+                http_status: None,
+            })
         }
     }
 }
@@ -463,10 +508,19 @@ struct NavStack {
 
 impl NavStack {
     fn push(&mut self, url: String) {
-        if let Some(pos) = self.entries.get(self.index + 1..).and_then(|_| Some(self.index + 1)) {
+        if let Some(pos) = self
+            .entries
+            .get(self.index + 1..)
+            .and_then(|_| Some(self.index + 1))
+        {
             self.entries.truncate(pos);
         }
-        if self.entries.last().map(|last| last == &url).unwrap_or(false) {
+        if self
+            .entries
+            .last()
+            .map(|last| last == &url)
+            .unwrap_or(false)
+        {
             return;
         }
         self.entries.push(url);
@@ -474,19 +528,27 @@ impl NavStack {
     }
 
     fn back(&mut self) -> bool {
-        if self.index == 0 { return false; }
+        if self.index == 0 {
+            return false;
+        }
         self.index -= 1;
         true
     }
 
     fn forward(&mut self) -> bool {
-        if self.index + 1 >= self.entries.len() { return false; }
+        if self.index + 1 >= self.entries.len() {
+            return false;
+        }
         self.index += 1;
         true
     }
 
-    fn can_go_back(&self) -> bool { self.index > 0 }
-    fn can_go_forward(&self) -> bool { self.index + 1 < self.entries.len() }
+    fn can_go_back(&self) -> bool {
+        self.index > 0
+    }
+    fn can_go_forward(&self) -> bool {
+        self.index + 1 < self.entries.len()
+    }
 
     fn observe(&mut self, url: String) {
         if self.entries.is_empty() {
@@ -531,7 +593,12 @@ fn external_url(input: &str) -> Result<url::Url, String> {
         scheme if matches!(scheme, "mailto" | "tel" | "sms") => {
             Err(format!("external-protocol:{scheme}"))
         }
-        scheme if matches!(scheme, "file" | "javascript" | "data" | "vbscript" | "about" | "chrome") => {
+        scheme
+            if matches!(
+                scheme,
+                "file" | "javascript" | "data" | "vbscript" | "about" | "chrome"
+            ) =>
+        {
             Err(format!("blocked-protocol:{scheme}"))
         }
         scheme => Err(format!("unknown-protocol:{scheme}")),
@@ -539,15 +606,23 @@ fn external_url(input: &str) -> Result<url::Url, String> {
 }
 
 fn validate_browser_label(label: &str) -> Result<(), String> {
-    let suffix = label.strip_prefix("browser-").ok_or_else(|| "invalid browser webview label".to_string())?;
-    if suffix.is_empty() || label.len() > 96 || !suffix.chars().all(|ch| ch.is_ascii_alphanumeric() || ch == '-') {
+    let suffix = label
+        .strip_prefix("browser-")
+        .ok_or_else(|| "invalid browser webview label".to_string())?;
+    if suffix.is_empty()
+        || label.len() > 96
+        || !suffix
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || ch == '-')
+    {
         return Err("invalid browser webview label".into());
     }
     Ok(())
 }
 
 fn audio_monitor_script(label: &str) -> String {
-    format!(r#"(() => {{
+    format!(
+        r#"(() => {{
       let muted=false, last='';
       const media=()=>Array.from(document.querySelectorAll('audio,video'));
       const emit=()=>{{
@@ -561,13 +636,17 @@ fn audio_monitor_script(label: &str) -> String {
       new MutationObserver(scan).observe(document,{{subtree:true,childList:true}});
       document.addEventListener('DOMContentLoaded',scan,{{once:true}});scan();
       window.__arcadiaAudio={{setMuted(value){{muted=!!value;media().forEach(node=>{{node.muted=muted}});emit()}},state(){{return{{muted}}}}}};
-    }})()"#)
+    }})()"#
+    )
 }
 
 fn password_manager_script(label: &str, private_mode: bool) -> String {
-    if private_mode { return "(()=>{})()".into() }
+    if private_mode {
+        return "(()=>{})()".into();
+    }
     let label = serde_json::to_string(label).unwrap_or_else(|_| "\"\"".into());
-    format!(r#"(() => {{
+    format!(
+        r#"(() => {{
       const label={label};
       const fields=()=>Array.from(document.querySelectorAll('input'));
       const fill=async()=>{{
@@ -592,7 +671,8 @@ fn password_manager_script(label: &str, private_mode: bool) -> String {
       let fillTimer=0;const scheduleFill=()=>{{clearTimeout(fillTimer);fillTimer=setTimeout(fill,250)}};
       new MutationObserver(scheduleFill).observe(document.documentElement,{{subtree:true,childList:true}});
       if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',scheduleFill,{{once:true}});else scheduleFill();
-    }})()"#)
+    }})()"#
+    )
 }
 
 #[tauri::command]
@@ -618,7 +698,9 @@ async fn browser_create(
     let private_mode = private.unwrap_or(false);
     let builder = tauri::webview::WebviewBuilder::new(&label, tauri::WebviewUrl::External(url))
         .incognito(private_mode)
-        .initialization_script(permission_guard_script(permissions.as_deref().unwrap_or(&[])))
+        .initialization_script(permission_guard_script(
+            permissions.as_deref().unwrap_or(&[]),
+        ))
         .initialization_script(context_menu_script())
         .initialization_script(audio_monitor_script(&label))
         .initialization_script(password_manager_script(&label, private_mode))
@@ -651,14 +733,30 @@ async fn browser_create(
                         .map(|s| s.to_owned())
                         .unwrap_or_else(|| "download".to_string());
                     tauri::async_runtime::spawn(async move {
-                        handle_download_started(app, label, url_str, dest_str, file_name, private_mode).await;
+                        handle_download_started(
+                            app,
+                            label,
+                            url_str,
+                            dest_str,
+                            file_name,
+                            private_mode,
+                        )
+                        .await;
                     });
                 }
                 DownloadEvent::Finished { url, path, success } => {
                     let url_str = url.to_string();
                     let path_str = path.map(|value| value.to_string_lossy().into_owned());
                     tauri::async_runtime::spawn(async move {
-                        handle_download_finished(app, label, url_str, path_str, success, private_mode).await;
+                        handle_download_finished(
+                            app,
+                            label,
+                            url_str,
+                            path_str,
+                            success,
+                            private_mode,
+                        )
+                        .await;
                     });
                 }
                 _ => {}
@@ -679,16 +777,28 @@ async fn browser_create(
     // the user explicitly rejects it or allows this navigation once.
     certificate_guard::attach_certificate_guard(&app, &label);
     privacy::attach_navigation_guard(&app, &label);
-    permission_guard::attach_permission_guard(&app, &label, permissions.unwrap_or_default(), private_mode);
+    permission_guard::attach_permission_guard(
+        &app,
+        &label,
+        permissions.unwrap_or_default(),
+        private_mode,
+    );
     let navs = app.state::<NavStacks>();
-    let mut guard = navs.stacks.lock().map_err(|_| "nav stack poisoned".to_string())?;
+    let mut guard = navs
+        .stacks
+        .lock()
+        .map_err(|_| "nav stack poisoned".to_string())?;
     let stack = guard.entry(label).or_default();
     stack.push(nav_url);
     Ok(())
 }
 
 #[tauri::command]
-async fn browser_set_ad_blocking(app: tauri::AppHandle, label: String, enabled: bool) -> Result<(), String> {
+async fn browser_set_ad_blocking(
+    app: tauri::AppHandle,
+    label: String,
+    enabled: bool,
+) -> Result<(), String> {
     validate_browser_label(&label)?;
     app.get_webview(&label)
         .ok_or_else(|| "browser tab webview not found".to_string())?
@@ -697,7 +807,11 @@ async fn browser_set_ad_blocking(app: tauri::AppHandle, label: String, enabled: 
 }
 
 #[tauri::command]
-async fn browser_set_muted(app: tauri::AppHandle, label: String, muted: bool) -> Result<(), String> {
+async fn browser_set_muted(
+    app: tauri::AppHandle,
+    label: String,
+    muted: bool,
+) -> Result<(), String> {
     validate_browser_label(&label)?;
     app.get_webview(&label)
         .ok_or_else(|| "browser tab webview not found".to_string())?
@@ -718,7 +832,10 @@ async fn browser_navigate(
         .navigate(url.clone())
         .map_err(|error| error.to_string())?;
     let navs = app.state::<NavStacks>();
-    let mut guard = navs.stacks.lock().map_err(|_| "nav stack poisoned".to_string())?;
+    let mut guard = navs
+        .stacks
+        .lock()
+        .map_err(|_| "nav stack poisoned".to_string())?;
     let stack = guard.entry(label).or_default();
     stack.push(url.to_string());
     Ok(url.to_string())
@@ -743,7 +860,11 @@ async fn browser_stop(app: tauri::AppHandle, label: String) -> Result<(), String
 }
 
 #[tauri::command]
-async fn browser_edit_action(app: tauri::AppHandle, label: String, action: String) -> Result<(), String> {
+async fn browser_edit_action(
+    app: tauri::AppHandle,
+    label: String,
+    action: String,
+) -> Result<(), String> {
     validate_browser_label(&label)?;
     let script = match action.as_str() {
         "cut" => "document.execCommand('cut')",
@@ -762,21 +883,24 @@ fn clear_webview_profile_data(view: &tauri::Webview) -> Result<(), String> {
     use std::sync::mpsc;
     use webview2_com::ClearBrowsingDataCompletedHandler;
     use webview2_com::Microsoft::Web::WebView2::Win32::{
-        COREWEBVIEW2_BROWSING_DATA_KINDS_CACHE_STORAGE,
-        COREWEBVIEW2_BROWSING_DATA_KINDS_COOKIES,
-        COREWEBVIEW2_BROWSING_DATA_KINDS_DISK_CACHE,
+        ICoreWebView2Profile2, ICoreWebView2_13, COREWEBVIEW2_BROWSING_DATA_KINDS_CACHE_STORAGE,
+        COREWEBVIEW2_BROWSING_DATA_KINDS_COOKIES, COREWEBVIEW2_BROWSING_DATA_KINDS_DISK_CACHE,
         COREWEBVIEW2_BROWSING_DATA_KINDS_SERVICE_WORKERS,
-        ICoreWebView2Profile2, ICoreWebView2_13,
     };
     use windows::core::Interface;
 
     let (sender, receiver) = mpsc::sync_channel(1);
     view.with_webview(move |platform| {
         let result = (|| {
-            let core = unsafe { platform.controller().CoreWebView2() }.map_err(|error| error.to_string())?;
-            let core13 = core.cast::<ICoreWebView2_13>().map_err(|error| error.to_string())?;
+            let core = unsafe { platform.controller().CoreWebView2() }
+                .map_err(|error| error.to_string())?;
+            let core13 = core
+                .cast::<ICoreWebView2_13>()
+                .map_err(|error| error.to_string())?;
             let profile = unsafe { core13.Profile() }.map_err(|error| error.to_string())?;
-            let profile2 = profile.cast::<ICoreWebView2Profile2>().map_err(|error| error.to_string())?;
+            let profile2 = profile
+                .cast::<ICoreWebView2Profile2>()
+                .map_err(|error| error.to_string())?;
             let kinds = COREWEBVIEW2_BROWSING_DATA_KINDS_COOKIES
                 | COREWEBVIEW2_BROWSING_DATA_KINDS_DISK_CACHE
                 | COREWEBVIEW2_BROWSING_DATA_KINDS_CACHE_STORAGE
@@ -786,18 +910,24 @@ fn clear_webview_profile_data(view: &tauri::Webview) -> Result<(), String> {
                 let _ = callback_sender.send(status.map_err(|error| error.to_string()));
                 Ok(())
             }));
-            unsafe { profile2.ClearBrowsingData(kinds, &callback) }.map_err(|error| error.to_string())?;
+            unsafe { profile2.ClearBrowsingData(kinds, &callback) }
+                .map_err(|error| error.to_string())?;
             webview2_com::wait_with_pump(callback_receiver).map_err(|error| error.to_string())?
         })();
         let _ = sender.send(result);
-    }).map_err(|error| error.to_string())?;
-    receiver.recv_timeout(Duration::from_secs(30)).map_err(|_| "清理 Cookie 与磁盘缓存超时".to_string())?
+    })
+    .map_err(|error| error.to_string())?;
+    receiver
+        .recv_timeout(Duration::from_secs(30))
+        .map_err(|_| "清理 Cookie 与磁盘缓存超时".to_string())?
 }
 
 #[tauri::command]
 async fn browser_clear_page_data(app: tauri::AppHandle, label: String) -> Result<(), String> {
     validate_browser_label(&label)?;
-    let view = app.get_webview(&label).ok_or_else(|| "browser tab webview not found".to_string())?;
+    let view = app
+        .get_webview(&label)
+        .ok_or_else(|| "browser tab webview not found".to_string())?;
     #[cfg(target_os = "windows")]
     clear_webview_profile_data(&view)?;
     // Clear origin-bound DOM databases as well. The native profile call above
@@ -864,15 +994,27 @@ fn browser_open_devtools(app: tauri::AppHandle, label: String) -> Result<(), Str
 #[cfg(target_os = "windows")]
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct ScreenshotClip { x: f64, y: f64, width: f64, height: f64 }
+struct ScreenshotClip {
+    x: f64,
+    y: f64,
+    width: f64,
+    height: f64,
+}
 
 #[cfg(target_os = "windows")]
 #[tauri::command]
-fn browser_capture_screenshot(app: tauri::AppHandle, label: String, full_page: bool, clip: Option<ScreenshotClip>) -> Result<String, String> {
+fn browser_capture_screenshot(
+    app: tauri::AppHandle,
+    label: String,
+    full_page: bool,
+    clip: Option<ScreenshotClip>,
+) -> Result<String, String> {
     use std::sync::mpsc;
     use webview2_com::{CallDevToolsProtocolMethodCompletedHandler, CoTaskMemPWSTR};
     validate_browser_label(&label)?;
-    let view = app.get_webview(&label).ok_or_else(|| "browser tab webview not found".to_string())?;
+    let view = app
+        .get_webview(&label)
+        .ok_or_else(|| "browser tab webview not found".to_string())?;
     let (sender, receiver) = mpsc::sync_channel(1);
     view.with_webview(move |platform| {
         let core = match unsafe { platform.controller().CoreWebView2() } {
@@ -898,14 +1040,25 @@ fn browser_capture_screenshot(app: tauri::AppHandle, label: String, full_page: b
         };
         let _ = sender.send(result);
     }).map_err(|error| error.to_string())?;
-    let raw = receiver.recv_timeout(Duration::from_secs(30)).map_err(|_| "screenshot timed out".to_string())??;
+    let raw = receiver
+        .recv_timeout(Duration::from_secs(30))
+        .map_err(|_| "screenshot timed out".to_string())??;
     let value: serde_json::Value = serde_json::from_str(&raw).map_err(|error| error.to_string())?;
-    value.get("data").and_then(|item| item.as_str()).map(str::to_string).ok_or_else(|| "screenshot data missing".into())
+    value
+        .get("data")
+        .and_then(|item| item.as_str())
+        .map(str::to_string)
+        .ok_or_else(|| "screenshot data missing".into())
 }
 
 #[cfg(not(target_os = "windows"))]
 #[tauri::command]
-fn browser_capture_screenshot(_app: tauri::AppHandle, _label: String, _full_page: bool, _clip: Option<serde_json::Value>) -> Result<String, String> {
+fn browser_capture_screenshot(
+    _app: tauri::AppHandle,
+    _label: String,
+    _full_page: bool,
+    _clip: Option<serde_json::Value>,
+) -> Result<String, String> {
     Err("native screenshot is currently available on Windows/WebView2".into())
 }
 
@@ -917,7 +1070,10 @@ async fn browser_history(app: tauri::AppHandle, label: String, delta: i32) -> Re
     }
     {
         let navs = app.state::<NavStacks>();
-        let mut guard = navs.stacks.lock().map_err(|_| "nav stack poisoned".to_string())?;
+        let mut guard = navs
+            .stacks
+            .lock()
+            .map_err(|_| "nav stack poisoned".to_string())?;
         let stack = guard.entry(label.clone()).or_default();
         let moved = match delta {
             -1 => stack.back(),
@@ -964,7 +1120,10 @@ async fn browser_state(app: tauri::AppHandle, label: String) -> Result<BrowserSt
     )
     .await?;
     let navs = app.state::<NavStacks>();
-    let mut guard = navs.stacks.lock().map_err(|_| "nav stack poisoned".to_string())?;
+    let mut guard = navs
+        .stacks
+        .lock()
+        .map_err(|_| "nav stack poisoned".to_string())?;
     let stack = guard.entry(label).or_default();
     stack.observe(state.url.clone());
     state.can_go_back = stack.can_go_back();
@@ -973,7 +1132,12 @@ async fn browser_state(app: tauri::AppHandle, label: String) -> Result<BrowserSt
 }
 
 #[tauri::command]
-fn browser_restore_scroll(app: tauri::AppHandle, label: String, x: f64, y: f64) -> Result<(), String> {
+fn browser_restore_scroll(
+    app: tauri::AppHandle,
+    label: String,
+    x: f64,
+    y: f64,
+) -> Result<(), String> {
     validate_browser_label(&label)?;
     if !x.is_finite() || !y.is_finite() {
         return Err("invalid scroll position".into());
@@ -986,7 +1150,12 @@ fn browser_restore_scroll(app: tauri::AppHandle, label: String, x: f64, y: f64) 
 
 #[tauri::command]
 #[allow(dead_code)]
-fn browser_toolbar_menu_in_page(app: tauri::AppHandle, label: String, open: bool, zoom_percent: u16) -> Result<(), String> {
+fn browser_toolbar_menu_in_page(
+    app: tauri::AppHandle,
+    label: String,
+    open: bool,
+    zoom_percent: u16,
+) -> Result<(), String> {
     validate_browser_label(&label)?;
     let webview = app
         .get_webview(&label)
@@ -994,7 +1163,8 @@ fn browser_toolbar_menu_in_page(app: tauri::AppHandle, label: String, open: bool
     let script = if !open {
         "window.__arcadiaToolbarMenu?.close(false)".to_string()
     } else {
-        format!(r#"(() => {{
+        format!(
+            r#"(() => {{
           window.__arcadiaToolbarMenu?.close(false);
           const host = document.createElement('div');
           host.id = '__arcadia-toolbar-menu';
@@ -1029,13 +1199,19 @@ fn browser_toolbar_menu_in_page(app: tauri::AppHandle, label: String, open: bool
           document.documentElement.append(host);
           setTimeout(()=>{{document.addEventListener('pointerdown',outside,true);document.addEventListener('keydown',keydown,true)}},0);
           window.__arcadiaToolbarMenu={{close}};
-        }})()"#)
+        }})()"#
+        )
     };
     webview.eval(script).map_err(|error| error.to_string())
 }
 
 #[tauri::command]
-fn browser_toolbar_menu(app: tauri::AppHandle, label: String, open: bool, zoom_percent: u16) -> Result<(), String> {
+fn browser_toolbar_menu(
+    app: tauri::AppHandle,
+    label: String,
+    open: bool,
+    zoom_percent: u16,
+) -> Result<(), String> {
     validate_browser_label(&label)?;
     if !open {
         return Ok(());
@@ -1062,7 +1238,10 @@ fn browser_toolbar_menu(app: tauri::AppHandle, label: String, open: bool, zoom_p
         .separator()
         .text(id("zoom-out"), "缩小\t−")
         .text(id("zoom-in"), "放大\t+")
-        .text(id("zoom-reset"), format!("重置缩放（{zoom_percent}%）\tCtrl+0"))
+        .text(
+            id("zoom-reset"),
+            format!("重置缩放（{zoom_percent}%）\tCtrl+0"),
+        )
         .build()
         .map_err(|error| error.to_string())?;
     let window = app
@@ -1100,7 +1279,8 @@ fn browser_toolbar_panel(
     }
     let kind_js = serde_json::to_string(&kind).map_err(|error| error.to_string())?;
     let data_js = serde_json::to_string(&data).map_err(|error| error.to_string())?;
-    let script = format!(r#"(() => {{
+    let script = format!(
+        r#"(() => {{
       window.__arcadiaToolbarMenu?.close(false);
       const kind={kind_js}, data={data_js};
       const host=document.createElement('div'); host.id='__arcadia-toolbar-panel';
@@ -1135,7 +1315,8 @@ fn browser_toolbar_panel(
       }}
       Object.assign(host.style,{{position:'fixed',top:'8px',right:'8px',zIndex:'2147483647'}});document.documentElement.append(host);
       setTimeout(()=>{{document.addEventListener('pointerdown',outside,true);document.addEventListener('keydown',keydown,true)}},0);window.__arcadiaToolbarMenu={{close}};
-    }})()"#);
+    }})()"#
+    );
     webview.eval(script).map_err(|error| error.to_string())
 }
 
@@ -1157,7 +1338,10 @@ async fn browser_snapshot(app: tauri::AppHandle, label: String) -> Result<PageSn
 }
 
 fn source_origin_from_url(url: &str) -> Option<String> {
-    url::Url::parse(url).ok().map(|u| u.origin().ascii_serialization()).filter(|s| s != "null")
+    url::Url::parse(url)
+        .ok()
+        .map(|u| u.origin().ascii_serialization())
+        .filter(|s| s != "null")
 }
 
 async fn handle_download_started(
@@ -1232,8 +1416,12 @@ async fn handle_download_finished(
     };
     index.forget(&url);
     let scan_error = if success {
-        final_path.as_ref().and_then(|path| downloads::scan_download_file(std::path::Path::new(path)).err())
-    } else { None };
+        final_path
+            .as_ref()
+            .and_then(|path| downloads::scan_download_file(std::path::Path::new(path)).err())
+    } else {
+        None
+    };
     let status = if scan_error.is_some() {
         downloads::DownloadStatus::Blocked
     } else if success {
@@ -1254,7 +1442,13 @@ async fn handle_download_finished(
             received_bytes: -1, // unknown on Finished events
             total_bytes: None,
             status,
-            error_message: scan_error.clone().or_else(|| if success { None } else { Some("download failed".into()) }),
+            error_message: scan_error.clone().or_else(|| {
+                if success {
+                    None
+                } else {
+                    Some("download failed".into())
+                }
+            }),
         };
         if let Err(error) = downloads::update_progress(&database, progress_input) {
             eprintln!("downloads: update_progress failed: {error}");
@@ -1272,7 +1466,13 @@ async fn handle_download_finished(
     let origin = source_origin_from_url(&url);
     let progress = DownloadProgress {
         version: EVENT_PAYLOAD_VERSION,
-        kind: if scan_error.is_some() { "blocked".into() } else if success { DOWNLOAD_EVENT_KIND_FINISHED.into() } else { DOWNLOAD_EVENT_KIND_FAILED.into() },
+        kind: if scan_error.is_some() {
+            "blocked".into()
+        } else if success {
+            DOWNLOAD_EVENT_KIND_FINISHED.into()
+        } else {
+            DOWNLOAD_EVENT_KIND_FAILED.into()
+        },
         id,
         tab_label,
         url,
@@ -1282,9 +1482,21 @@ async fn handle_download_finished(
         received_bytes: 0,
         total_bytes: None,
         progress_known: false,
-        status: if scan_error.is_some() { "blocked".into() } else if success { "completed".into() } else { "failed".into() },
+        status: if scan_error.is_some() {
+            "blocked".into()
+        } else if success {
+            "completed".into()
+        } else {
+            "failed".into()
+        },
         danger_type: "none".into(),
-        error_message: scan_error.or_else(|| if success { None } else { Some("download failed".into()) }),
+        error_message: scan_error.or_else(|| {
+            if success {
+                None
+            } else {
+                Some("download failed".into())
+            }
+        }),
         private,
         source_origin: origin,
     };
@@ -1301,7 +1513,9 @@ async fn ai_chat(
     let (provider_type, base_url, model, timeout_seconds): (String, String, String, i64) = database
         .prepare("SELECT provider_type,base_url,model,timeout_seconds FROM ai_providers WHERE id=?")
         .map_err(|error| error.to_string())?
-        .query_row(params![provider_id], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)))
+        .query_row(params![provider_id], |row| {
+            Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
+        })
         .map_err(|error| error.to_string())?;
     let timeout = Duration::from_secs(timeout_seconds.clamp(1, 600) as u64);
     let api_key = keyring::Entry::new(KEYRING_SERVICE, &provider_id)
@@ -1309,51 +1523,101 @@ async fn ai_chat(
         .and_then(|entry| entry.get_password().ok())
         .filter(|value| !value.is_empty());
     let provider: Box<dyn AiProvider> = match provider_type.as_str() {
-        "openai-compatible" | "deepseek" | "qwen" | "kimi" | "minimax" => Box::new(providers::openai::OpenAICompatibleProvider {
+        "openai-compatible" | "deepseek" | "qwen" | "kimi" | "minimax" => {
+            Box::new(providers::openai::OpenAICompatibleProvider {
+                base_url,
+                model,
+                api_key: api_key.clone(),
+                timeout,
+            })
+        }
+        "ollama" => Box::new(providers::ollama::OllamaProvider {
             base_url,
             model,
-            api_key: api_key.clone(),
             timeout,
         }),
-        "ollama" => Box::new(providers::ollama::OllamaProvider { base_url, model, timeout }),
         other => return Err(format!("unknown provider type: {other}")),
     };
     if provider.type_id() == "openai-compatible" && api_key.is_none() {
         return Err("missing api key for openai-compatible provider".into());
     }
-    let _ = ChatMessage { role: "system".into(), content: String::new() }; // keep types referenced
-    provider.chat(request).await.map_err(|error| error.to_string())
+    let _ = ChatMessage {
+        role: "system".into(),
+        content: String::new(),
+    }; // keep types referenced
+    provider
+        .chat(request)
+        .await
+        .map_err(|error| error.to_string())
 }
 
 #[tauri::command]
-async fn ai_embed(app: tauri::AppHandle, provider_id: String, inputs: Vec<String>) -> Result<Vec<Vec<f32>>, String> {
-    if inputs.is_empty() || inputs.len() > 64 { return Err("embedding input count must be 1..64".into()) }
-    if inputs.iter().any(|value| value.len() > 32_000) { return Err("embedding input is too large".into()) }
+async fn ai_embed(
+    app: tauri::AppHandle,
+    provider_id: String,
+    inputs: Vec<String>,
+) -> Result<Vec<Vec<f32>>, String> {
+    if inputs.is_empty() || inputs.len() > 64 {
+        return Err("embedding input count must be 1..64".into());
+    }
+    if inputs.iter().any(|value| value.len() > 32_000) {
+        return Err("embedding input is too large".into());
+    }
     let database = local_store::connection(&app)?;
     let (provider_type, base_url, model, timeout_seconds): (String, String, Option<String>, i64) = database
         .query_row("SELECT provider_type,base_url,embedding_model,timeout_seconds FROM ai_providers WHERE id=?", params![provider_id], |row| Ok((row.get(0)?,row.get(1)?,row.get(2)?,row.get(3)?)))
         .map_err(|error| error.to_string())?;
-    let model = model.filter(|value| !value.trim().is_empty()).ok_or("provider has no embedding model")?;
-    let client = reqwest::Client::builder().timeout(Duration::from_secs(timeout_seconds.clamp(1,600) as u64)).build().map_err(|e| e.to_string())?;
+    let model = model
+        .filter(|value| !value.trim().is_empty())
+        .ok_or("provider has no embedding model")?;
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(timeout_seconds.clamp(1, 600) as u64))
+        .build()
+        .map_err(|e| e.to_string())?;
     let (endpoint, body) = if provider_type == "ollama" {
-        (format!("{}/api/embed", base_url.trim_end_matches('/')), serde_json::json!({"model":model,"input":inputs}))
+        (
+            format!("{}/api/embed", base_url.trim_end_matches('/')),
+            serde_json::json!({"model":model,"input":inputs}),
+        )
     } else {
-        (format!("{}/embeddings", base_url.trim_end_matches('/')), serde_json::json!({"model":model,"input":inputs}))
+        (
+            format!("{}/embeddings", base_url.trim_end_matches('/')),
+            serde_json::json!({"model":model,"input":inputs}),
+        )
     };
     let mut request = client.post(endpoint).json(&body);
     if provider_type != "ollama" {
-        let key = keyring::Entry::new(KEYRING_SERVICE,&provider_id).map_err(|e|e.to_string())?.get_password().map_err(|_|"missing api key")?;
+        let key = keyring::Entry::new(KEYRING_SERVICE, &provider_id)
+            .map_err(|e| e.to_string())?
+            .get_password()
+            .map_err(|_| "missing api key")?;
         request = request.bearer_auth(key);
     }
-    let response = request.send().await.map_err(|e|e.to_string())?;
+    let response = request.send().await.map_err(|e| e.to_string())?;
     let status = response.status();
-    let value: serde_json::Value = response.json().await.map_err(|e|e.to_string())?;
-    if !status.is_success() { return Err(format!("embedding HTTP {}: {}",status.as_u16(),value)); }
+    let value: serde_json::Value = response.json().await.map_err(|e| e.to_string())?;
+    if !status.is_success() {
+        return Err(format!("embedding HTTP {}: {}", status.as_u16(), value));
+    }
     if provider_type == "ollama" {
-        serde_json::from_value(value.get("embeddings").cloned().ok_or("missing embeddings")?).map_err(|e|e.to_string())
+        serde_json::from_value(
+            value
+                .get("embeddings")
+                .cloned()
+                .ok_or("missing embeddings")?,
+        )
+        .map_err(|e| e.to_string())
     } else {
-        value.get("data").and_then(|v|v.as_array()).ok_or("missing embedding data")?.iter()
-            .map(|item| serde_json::from_value(item.get("embedding").cloned().ok_or("missing embedding")?).map_err(|e|e.to_string())).collect()
+        value
+            .get("data")
+            .and_then(|v| v.as_array())
+            .ok_or("missing embedding data")?
+            .iter()
+            .map(|item| {
+                serde_json::from_value(item.get("embedding").cloned().ok_or("missing embedding")?)
+                    .map_err(|e| e.to_string())
+            })
+            .collect()
     }
 }
 
@@ -1373,7 +1637,10 @@ impl AiStreamRegistry {
             .lock()
             .ok()
             .and_then(|mut map| map.remove(id))
-            .map(|token| { token.cancel(); true })
+            .map(|token| {
+                token.cancel();
+                true
+            })
             .unwrap_or(false)
     }
     fn finish(&self, id: &str) {
@@ -1419,7 +1686,9 @@ async fn ai_chat_stream(
     let (provider_type, base_url, model, timeout_seconds): (String, String, String, i64) = database
         .prepare("SELECT provider_type,base_url,model,timeout_seconds FROM ai_providers WHERE id=?")
         .map_err(|error| error.to_string())?
-        .query_row(params![provider_id], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)))
+        .query_row(params![provider_id], |row| {
+            Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
+        })
         .map_err(|error| error.to_string())?;
     let timeout = Duration::from_secs(timeout_seconds.clamp(1, 600) as u64);
     let api_key = keyring::Entry::new(KEYRING_SERVICE, &provider_id)
@@ -1427,13 +1696,19 @@ async fn ai_chat_stream(
         .and_then(|entry| entry.get_password().ok())
         .filter(|value| !value.is_empty());
     let provider: Box<dyn AiProvider> = match provider_type.as_str() {
-        "openai-compatible" | "deepseek" | "qwen" | "kimi" | "minimax" => Box::new(providers::openai::OpenAICompatibleProvider {
+        "openai-compatible" | "deepseek" | "qwen" | "kimi" | "minimax" => {
+            Box::new(providers::openai::OpenAICompatibleProvider {
+                base_url,
+                model,
+                api_key: api_key.clone(),
+                timeout,
+            })
+        }
+        "ollama" => Box::new(providers::ollama::OllamaProvider {
             base_url,
             model,
-            api_key: api_key.clone(),
             timeout,
         }),
-        "ollama" => Box::new(providers::ollama::OllamaProvider { base_url, model, timeout }),
         other => return Err(format!("unknown provider type: {other}")),
     };
     if provider.type_id() == "openai-compatible" && api_key.is_none() {
@@ -1454,10 +1729,20 @@ async fn ai_chat_stream(
         let result = provider_for_task.chat_stream(request, tx, cancel).await;
         match result {
             Ok(()) => {
-                let _ = app_for_task.emit("ai://stream-done", AiStreamCancelledEvent { stream_id: stream_id_for_task.clone() });
+                let _ = app_for_task.emit(
+                    "ai://stream-done",
+                    AiStreamCancelledEvent {
+                        stream_id: stream_id_for_task.clone(),
+                    },
+                );
             }
             Err(providers::ProviderError::Cancelled) => {
-                let _ = app_for_task.emit("ai://stream-cancelled", AiStreamCancelledEvent { stream_id: stream_id_for_task.clone() });
+                let _ = app_for_task.emit(
+                    "ai://stream-cancelled",
+                    AiStreamCancelledEvent {
+                        stream_id: stream_id_for_task.clone(),
+                    },
+                );
             }
             Err(error) => {
                 let retryable = is_retryable(&error);
@@ -1498,8 +1783,13 @@ async fn ai_chat_stream(
 }
 
 fn is_retryable(error: &providers::ProviderError) -> bool {
-    matches!(error,
-        providers::ProviderError::Http(_) | providers::ProviderError::ProviderStatus { status: 408 | 409 | 425 | 429 | 500 | 502 | 503 | 504, .. }
+    matches!(
+        error,
+        providers::ProviderError::Http(_)
+            | providers::ProviderError::ProviderStatus {
+                status: 408 | 409 | 425 | 429 | 500 | 502 | 503 | 504,
+                ..
+            }
     )
 }
 
@@ -1534,13 +1824,23 @@ async fn ai_test_provider(
     let (provider_type, base_url, timeout_seconds): (String, String, i64) = database
         .prepare("SELECT provider_type,base_url,timeout_seconds FROM ai_providers WHERE id=?")
         .map_err(|error| error.to_string())?
-        .query_row(params![provider_id], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))
+        .query_row(params![provider_id], |row| {
+            Ok((row.get(0)?, row.get(1)?, row.get(2)?))
+        })
         .map_err(|error| error.to_string())?;
     let timeout = Duration::from_secs(timeout_seconds.clamp(1, 600) as u64);
-    let client = reqwest::Client::builder().timeout(timeout).build().map_err(|error| error.to_string())?;
+    let client = reqwest::Client::builder()
+        .timeout(timeout)
+        .build()
+        .map_err(|error| error.to_string())?;
     let (endpoint, needs_auth) = match provider_type.as_str() {
-        "openai-compatible" | "deepseek" | "qwen" | "kimi" | "minimax" => (format!("{}/models", base_url.trim_end_matches('/')), true),
-        "ollama" => (format!("{}/api/tags", base_url.trim_end_matches('/')), false),
+        "openai-compatible" | "deepseek" | "qwen" | "kimi" | "minimax" => {
+            (format!("{}/models", base_url.trim_end_matches('/')), true)
+        }
+        "ollama" => (
+            format!("{}/api/tags", base_url.trim_end_matches('/')),
+            false,
+        ),
         other => return Err(format!("unknown provider type: {other}")),
     };
     let mut request_builder = client.get(&endpoint);
@@ -1550,35 +1850,96 @@ async fn ai_test_provider(
                 if !key.is_empty() {
                     request_builder = request_builder.bearer_auth(key);
                 } else {
-                    return Ok(ProviderTestResult { ok: false, endpoint, status: None, models: vec![], message: "API Key 未配置".into() });
+                    return Ok(ProviderTestResult {
+                        ok: false,
+                        endpoint,
+                        status: None,
+                        models: vec![],
+                        message: "API Key 未配置".into(),
+                    });
                 }
             } else {
-                return Ok(ProviderTestResult { ok: false, endpoint, status: None, models: vec![], message: "API Key 未配置".into() });
+                return Ok(ProviderTestResult {
+                    ok: false,
+                    endpoint,
+                    status: None,
+                    models: vec![],
+                    message: "API Key 未配置".into(),
+                });
             }
         } else {
-            return Ok(ProviderTestResult { ok: false, endpoint, status: None, models: vec![], message: "API Key 未配置".into() });
+            return Ok(ProviderTestResult {
+                ok: false,
+                endpoint,
+                status: None,
+                models: vec![],
+                message: "API Key 未配置".into(),
+            });
         }
     }
-    let response = request_builder.send().await.map_err(|error| error.to_string())?;
+    let response = request_builder
+        .send()
+        .await
+        .map_err(|error| error.to_string())?;
     let status = response.status();
     let text = response.text().await.map_err(|error| error.to_string())?;
     if !status.is_success() {
-        return Ok(ProviderTestResult { ok: false, endpoint, status: Some(status.as_u16()), models: vec![], message: format!("HTTP {}", status.as_u16()) });
+        return Ok(ProviderTestResult {
+            ok: false,
+            endpoint,
+            status: Some(status.as_u16()),
+            models: vec![],
+            message: format!("HTTP {}", status.as_u16()),
+        });
     }
     let models = match provider_type.as_str() {
         "openai-compatible" => serde_json::from_str::<serde_json::Value>(&text)
             .ok()
-            .and_then(|v| v.get("data").and_then(|d| d.as_array().map(|arr| arr.clone())))
-            .map(|arr| arr.into_iter().filter_map(|m| m.get("id").and_then(|v| v.as_str()).map(String::from)).collect())
+            .and_then(|v| {
+                v.get("data")
+                    .and_then(|d| d.as_array().map(|arr| arr.clone()))
+            })
+            .map(|arr| {
+                arr.into_iter()
+                    .filter_map(|m| m.get("id").and_then(|v| v.as_str()).map(String::from))
+                    .collect()
+            })
             .unwrap_or_default(),
         "ollama" => serde_json::from_str::<serde_json::Value>(&text)
             .ok()
-            .and_then(|v| v.get("models").and_then(|d| d.as_array().map(|arr| arr.clone())))
-            .map(|arr| arr.into_iter().filter_map(|m| m.get("name").and_then(|v| v.as_str()).map(String::from)).collect())
+            .and_then(|v| {
+                v.get("models")
+                    .and_then(|d| d.as_array().map(|arr| arr.clone()))
+            })
+            .map(|arr| {
+                arr.into_iter()
+                    .filter_map(|m| m.get("name").and_then(|v| v.as_str()).map(String::from))
+                    .collect()
+            })
             .unwrap_or_default(),
         _ => vec![],
     };
-    Ok(ProviderTestResult { ok: true, endpoint, status: Some(status.as_u16()), models, message: format!("连接成功，发现 {} 个模型", match provider_type.as_str() { "openai-compatible" | "deepseek" | "qwen" | "kimi" | "minimax" => serde_json::from_str::<serde_json::Value>(&text).ok().and_then(|v| v.get("data").and_then(|d| d.as_array()).map(|a| a.len())).unwrap_or(0), "ollama" => serde_json::from_str::<serde_json::Value>(&text).ok().and_then(|v| v.get("models").and_then(|d| d.as_array()).map(|a| a.len())).unwrap_or(0), _ => 0 }) })
+    Ok(ProviderTestResult {
+        ok: true,
+        endpoint,
+        status: Some(status.as_u16()),
+        models,
+        message: format!(
+            "连接成功，发现 {} 个模型",
+            match provider_type.as_str() {
+                "openai-compatible" | "deepseek" | "qwen" | "kimi" | "minimax" =>
+                    serde_json::from_str::<serde_json::Value>(&text)
+                        .ok()
+                        .and_then(|v| v.get("data").and_then(|d| d.as_array()).map(|a| a.len()))
+                        .unwrap_or(0),
+                "ollama" => serde_json::from_str::<serde_json::Value>(&text)
+                    .ok()
+                    .and_then(|v| v.get("models").and_then(|d| d.as_array()).map(|a| a.len()))
+                    .unwrap_or(0),
+                _ => 0,
+            }
+        ),
+    })
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -1610,13 +1971,21 @@ pub fn run() {
         })
         .on_menu_event(|app, event| {
             let raw: &str = event.id().as_ref();
-            let Some(rest) = raw.strip_prefix("browser-toolbar|") else { return };
-            let Some((tab_label, action)) = rest.rsplit_once('|') else { return };
-            let _ = app.emit_to("main", "browser://toolbar-menu-action", serde_json::json!({
-                "version": 1,
-                "tabLabel": tab_label,
-                "action": action,
-            }));
+            let Some(rest) = raw.strip_prefix("browser-toolbar|") else {
+                return;
+            };
+            let Some((tab_label, action)) = rest.rsplit_once('|') else {
+                return;
+            };
+            let _ = app.emit_to(
+                "main",
+                "browser://toolbar-menu-action",
+                serde_json::json!({
+                    "version": 1,
+                    "tabLabel": tab_label,
+                    "action": action,
+                }),
+            );
         })
         .on_window_event(|window, event| {
             // Tauri 2 surfaces WindowEvent::CloseRequested for every window;
@@ -1821,9 +2190,15 @@ fn browser_permission_respond(
     Ok(waiters.resolve(&request_id, allow))
 }
 
-fn validate_password_origin(app: &tauri::AppHandle, label: &str, origin: &str) -> Result<(), String> {
+fn validate_password_origin(
+    app: &tauri::AppHandle,
+    label: &str,
+    origin: &str,
+) -> Result<(), String> {
     validate_browser_label(label)?;
-    let view = app.get_webview(label).ok_or_else(|| "browser tab webview not found".to_string())?;
+    let view = app
+        .get_webview(label)
+        .ok_or_else(|| "browser tab webview not found".to_string())?;
     let current = view.url().map_err(|error| error.to_string())?;
     if current.scheme() != "https" || current.origin().ascii_serialization() != origin {
         return Err("credential origin does not match the requesting page".into());
@@ -1832,16 +2207,37 @@ fn validate_password_origin(app: &tauri::AppHandle, label: &str, origin: &str) -
 }
 
 #[tauri::command]
-fn browser_password_autofill(app: tauri::AppHandle, label: String, origin: String) -> Result<Option<local_store::AutofillCredential>, String> {
+fn browser_password_autofill(
+    app: tauri::AppHandle,
+    label: String,
+    origin: String,
+) -> Result<Option<local_store::AutofillCredential>, String> {
     validate_password_origin(&app, &label, &origin)?;
     local_store::password_for_origin(&app, &origin)
 }
 
 #[tauri::command]
-fn browser_password_candidate(app: tauri::AppHandle, label: String, origin: String, username: String, password: String) -> Result<(), String> {
+fn browser_password_candidate(
+    app: tauri::AppHandle,
+    label: String,
+    origin: String,
+    username: String,
+    password: String,
+) -> Result<(), String> {
     validate_password_origin(&app, &label, &origin)?;
-    if username.is_empty() || password.is_empty() || username.len() > 320 || password.len() > 4096 { return Err("invalid credential candidate".into()) }
-    app.emit_to("main", "browser://password-candidate", PasswordCandidatePayload { origin, username, password }).map_err(|error| error.to_string())
+    if username.is_empty() || password.is_empty() || username.len() > 320 || password.len() > 4096 {
+        return Err("invalid credential candidate".into());
+    }
+    app.emit_to(
+        "main",
+        "browser://password-candidate",
+        PasswordCandidatePayload {
+            origin,
+            username,
+            password,
+        },
+    )
+    .map_err(|error| error.to_string())
 }
 
 #[cfg(test)]
