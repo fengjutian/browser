@@ -1,10 +1,10 @@
-import { InputRef } from 'antd'
+import type { InputRef } from '../../components/ui/Input'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { buildSuggestions, type SuggestionItem } from './suggestionProvider'
 import { trimSuggestions } from './suggestionProvider'
 import { renderSuggestion } from './suggestionRenderer'
 import { resolveActiveSearchTemplate, readSearchEngineConfig } from './searchEngine'
-import type { HistoryEntry } from './types'
+import type { HistoryEntry } from '../history/dedupeHistory'
 
 export interface AddressSuggestionOption {
   value: string
