@@ -315,6 +315,41 @@ const MIGRATIONS: &[(i64, &str)] = &[
         CREATE INDEX idx_mcp_audit_created ON mcp_audit_log(created_at DESC);
         CREATE INDEX idx_mcp_audit_server ON mcp_audit_log(server_id, created_at DESC);",
     ),
+    (
+        21,
+        "CREATE TABLE plugins (
+            id TEXT PRIMARY KEY,
+            name TEXT NOT NULL,
+            version TEXT NOT NULL,
+            manifest_json TEXT NOT NULL,
+            component_path TEXT NOT NULL,
+            sha256 TEXT NOT NULL,
+            status TEXT NOT NULL CHECK(status IN ('INSTALLING','DISABLED','ENABLED','FAILED','QUARANTINED')),
+            enabled INTEGER NOT NULL DEFAULT 0,
+            last_error TEXT,
+            installed_at INTEGER NOT NULL,
+            updated_at INTEGER NOT NULL
+        );
+        CREATE TABLE plugin_grants (
+            plugin_id TEXT NOT NULL,
+            permission TEXT NOT NULL,
+            granted INTEGER NOT NULL DEFAULT 0,
+            updated_at INTEGER NOT NULL,
+            PRIMARY KEY(plugin_id, permission),
+            FOREIGN KEY(plugin_id) REFERENCES plugins(id) ON DELETE CASCADE
+        );
+        CREATE TABLE plugin_audit_log (
+            id TEXT PRIMARY KEY,
+            plugin_id TEXT NOT NULL,
+            action TEXT NOT NULL,
+            permission TEXT,
+            success INTEGER NOT NULL,
+            error TEXT,
+            created_at INTEGER NOT NULL
+        );
+        CREATE INDEX idx_plugins_enabled ON plugins(enabled, status);
+        CREATE INDEX idx_plugin_audit_created ON plugin_audit_log(created_at DESC);",
+    ),
 ];
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

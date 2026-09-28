@@ -27,6 +27,9 @@ tokio = { version = "1", features = ["sync", "rt", "macros", "fs", "io-util"] }
 tokio-util = { version = "0.7", features = ["rt"] }
 async-trait = "0.1"
 thiserror = "1"
+sha2 = "0.10"
+zip = { version = "4", default-features = false, features = ["deflate"] }
+wasmtime = { version = "49", features = ["component-model", "cranelift", "runtime"], default-features = false }
 
 [target.x86_64-pc-windows-msvc.dependencies]
 webview2-com = "0.38.2"
