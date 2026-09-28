@@ -4,6 +4,7 @@ interface host {
   log: func(level: string, message: string) -> result<_, string>;
   knowledge-search: func(query: string, limit: u32) -> result<string, string>;
   knowledge-get: func(id: string) -> result<string, string>;
+  knowledge-save: func(document-json: string) -> result<string, string>;
   ai-chat: func(request-json: string) -> result<string, string>;
   http-fetch: func(request-json: string) -> result<string, string>;
 }
