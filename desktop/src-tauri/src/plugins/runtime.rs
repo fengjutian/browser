@@ -89,8 +89,9 @@ impl bindings::arcadia::plugin::host::Host for HostState {
         let app = self.app.clone().ok_or("host application is unavailable")?;
         let value: AiRequest =
             serde_json::from_str(&request_json).map_err(|e| format!("invalid AI request: {e}"))?;
-        let response =
-            tauri::async_runtime::block_on(crate::ai_chat(app, value.provider_id, value.request))?;
+        let response = tauri::async_runtime::block_on(async move {
+            tokio::time::timeout(TIMEOUT,crate::ai_chat(app,value.provider_id,value.request)).await.map_err(|_|"AI host call timed out".to_string())?
+        })?;
         serde_json::to_string(&response).map_err(|e| e.to_string())
     }
     fn http_fetch(&mut self, request_json: String) -> Result<String, String> {
@@ -125,7 +126,7 @@ impl bindings::arcadia::plugin::host::Host for HostState {
             return Err("HTTP method is not allowed".into());
         }
         let client = reqwest::Client::builder()
-            .timeout(Duration::from_secs(15))
+            .timeout(TIMEOUT)
             .redirect(reqwest::redirect::Policy::none())
             .build()
             .map_err(|e| e.to_string())?;

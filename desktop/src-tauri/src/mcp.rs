@@ -224,5 +224,6 @@ mod tests {
             parse_response("event: message\ndata: {\"result\":{\"ok\":true}}\n").unwrap()["ok"],
             true
         );
+        assert_eq!(parse_response("event: message\ndata: {\"result\":\ndata: {\"ok\":true}}\n\n").unwrap()["ok"],true);
     }
 }
