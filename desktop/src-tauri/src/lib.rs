@@ -1710,6 +1710,7 @@ pub fn run() {
             mcp::mcp_call_tool,
             plugins::installer::install_plugin,
             plugins::installer::list_plugins,
+            plugins::installer::list_plugin_audit,
             plugins::installer::set_plugin_enabled,
             plugins::installer::set_plugin_permission,
             plugins::installer::dispatch_plugin_event,

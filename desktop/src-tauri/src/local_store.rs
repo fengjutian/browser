@@ -1195,6 +1195,8 @@ pub fn local_save_document(
     let auto_tags = serde_json::to_string(&document.auto_tags).unwrap_or_else(|_| "[]".to_string());
     database.execute("INSERT OR REPLACE INTO local_documents(id,title,url,source,author,summary,markdown,word_count,status,tags,auto_tags,created_at,starred) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)", params![document.id, document.title, document.url, document.source, document.author, document.summary, document.markdown, document.word_count, document.status, tags, auto_tags, document.created_at, document.starred as i64])
         .map_err(|error| error.to_string())?;
+    drop(database);
+    if let Ok(payload)=serde_json::to_string(&document){crate::plugins::installer::dispatch_subscribed(&app,"document.saved",&payload);}
     Ok(document)
 }
 
@@ -1218,6 +1220,7 @@ pub fn local_delete_document(app: tauri::AppHandle, id: String) -> Result<(), St
     connection(&app)?
         .execute("DELETE FROM local_documents WHERE id=?", params![id])
         .map_err(|error| error.to_string())?;
+    crate::plugins::installer::dispatch_subscribed(&app,"document.deleted",&serde_json::json!({"id":id}).to_string());
     Ok(())
 }
 
@@ -1261,9 +1264,12 @@ pub fn local_update_document(
     let mut statement = database
         .prepare("SELECT id,title,url,source,author,summary,markdown,word_count,status,tags,auto_tags,created_at,starred FROM local_documents WHERE id=?1")
         .map_err(|error| error.to_string())?;
-    statement
+    let document=statement
         .query_row(params![id], row_document)
-        .map_err(|error| error.to_string())
+        .map_err(|error| error.to_string())?;
+    drop(statement);drop(database);
+    if let Ok(payload)=serde_json::to_string(&document){crate::plugins::installer::dispatch_subscribed(&app,"document.updated",&payload);}
+    Ok(document)
 }
 
 #[tauri::command]
