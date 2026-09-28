@@ -26,7 +26,7 @@ pub trait PluginRuntime: Send+Sync {
 
 struct RunningInstance { engine:Engine, store:Store<HostState>, guest:bindings::ArcadiaPlugin }
 pub struct WasmRuntime { instances:Mutex<HashMap<String,RunningInstance>>, app:Mutex<Option<tauri::AppHandle>> }
-impl Default for WasmRuntime { fn default()->Self{Self{instances:Mutex::new(HashMap::new())},app:Mutex::new(None)} }
+impl Default for WasmRuntime { fn default()->Self{Self{instances:Mutex::new(HashMap::new()),app:Mutex::new(None)}} }
 
 impl WasmRuntime {
     pub fn attach_app(&self,app:tauri::AppHandle){if let Ok(mut slot)=self.app.lock(){*slot=Some(app)}}
