@@ -103,10 +103,18 @@ mod win {
                     return;
                 }
             };
-            // Cache the ICoreWebView2Environment up front so the dispatcher
-            // can build a 204 response on a `Block` decision (the response
-            // builder is the only API that needs the env).
-            let env = unsafe { platform.controller().Environment() }.ok();
+            // Capture the ICoreWebView2Environment via ICoreWebView2_2.
+            // `Environment()` is the only API that gives us the env, and
+            // it's on the v2 interface (`ICoreWebView2_2`), not the
+            // controller's default surface. We try the v2 cast first; if
+            // a host blocks it (Windows <= 1709), we fall back to no env
+            // and the dispatcher falls back to counting without sending a
+            // 204 body — spec calls this out as the right behavior when
+            // response builders are unavailable.
+            let env = core
+                .cast::<ICoreWebView2_2>()
+                .ok()
+                .and_then(|c2| unsafe { c2.Environment() }.ok());
             // Try the ICoreWebView2_22 path first; fall back to v2.
             let filter_uri = windows::core::HSTRING::from("*");
             if let Ok(core22) = core.cast::<ICoreWebView2_22>() {

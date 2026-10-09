@@ -8,8 +8,15 @@ const { title, description = site.description, image = '/images/arcadia.png' } =
 const pageTitle = title ? `${title} — ${site.name}` : `${site.name} — 本地优先的 AI 知识浏览器`;
 const canonical = new URL(Astro.url.pathname, Astro.site);
 ---
-<!doctype html><html lang="zh-CN"><head>
+<!doctype html><html lang="zh-CN" data-theme="dark"><head>
   <meta charset="UTF-8"/><meta name="viewport" content="width=device-width"/><meta name="generator" content={Astro.generator}/>
+  <script is:inline>
+    (() => {
+      const saved = localStorage.getItem('arcadia-theme');
+      const preferred = matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
+      document.documentElement.dataset.theme = saved === 'light' || saved === 'dark' ? saved : preferred;
+    })();
+  </script>
   <title>{pageTitle}</title><meta name="description" content={description}/><link rel="canonical" href={canonical}/>
   <meta property="og:title" content={pageTitle}/><meta property="og:description" content={description}/><meta property="og:type" content="website"/><meta property="og:url" content={canonical}/><meta property="og:image" content={new URL(image, Astro.site)}/>
   <link rel="icon" href="/favicon.svg"/>
