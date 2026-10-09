@@ -9,7 +9,9 @@
       // React shell renders in a plain browser. Not part of the app build.
       window.__TAURI_INTERNALS__ = {
         metadata: { currentWindow: { label: 'main' }, currentWebview: { label: 'main', windowLabel: 'main' } },
-        invoke: async () => { throw new Error('preview: tauri invoke unavailable') },
+        // Resolve instead of throwing: the audit harness only needs layout, and
+        // rejected invokes would spam the console and stall async effects.
+        invoke: async (cmd) => (/list|^recover_stale_tasks$/.test(cmd) ? [] : null),
         transformCallback: (cb) => { const id = Math.floor(Math.random() * 1e9); window[`_${id}`] = cb; return id },
         convertFileSrc: (p) => p,
         unregisterCallback: () => {},
