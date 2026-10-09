@@ -7,6 +7,7 @@ export interface StoredConversationTurn {
   docIds?: number[]
   notFound?: boolean
   error?: string
+  pending?: boolean
 }
 
 export function parseStoredConversation(raw: string | null): StoredConversationTurn[] {

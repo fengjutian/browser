@@ -67,15 +67,17 @@ export function AssistantPage({ onNavigate }: { onNavigate?: (view: View) => voi
     void getSession(CONVERSATION_KEY).then(raw => {
       setTurns(parseStoredConversation(raw).map(turn => turn.role === 'user'
         ? { id:turn.id, role:'user', content:turn.content }
-        : { id:turn.id, role:'assistant', content:turn.content, docIds:turn.docIds ?? [], notFound:turn.notFound === true, pending:false, error:turn.error }))
+        : turn.pending
+          ? { id:turn.id, role:'assistant', content:'生成因应用重新加载而中断，请重新提问。', docIds:turn.docIds ?? [], notFound:false, pending:false, error:'生成因应用重新加载而中断' }
+          : { id:turn.id, role:'assistant', content:turn.content, docIds:turn.docIds ?? [], notFound:turn.notFound === true, pending:false, error:turn.error }))
     }).finally(() => setConversationHydrated(true))
   }, [])
 
   useEffect(() => {
     if (!conversationHydrated) return
-    const stored = turns.filter(turn => !('pending' in turn && turn.pending)).map(turn => turn.role === 'user'
+    const stored = turns.map(turn => turn.role === 'user'
       ? { id:turn.id, role:turn.role, content:turn.content }
-      : { id:turn.id, role:turn.role, content:turn.content, docIds:turn.docIds, notFound:turn.notFound, error:turn.error })
+      : { id:turn.id, role:turn.role, content:turn.content, docIds:turn.docIds, notFound:turn.notFound, error:turn.error, pending:turn.pending })
     void setSession(CONVERSATION_KEY, JSON.stringify(stored))
   }, [turns, conversationHydrated])
 
