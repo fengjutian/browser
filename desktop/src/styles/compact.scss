@@ -176,14 +176,7 @@
   height: 100vh;
   min-width: 0;
   min-height: 0;
-  overflow-x: hidden;
-  overflow-y: auto;
-  scrollbar-width: none;
-
-  &::-webkit-scrollbar {
-    width: 0;
-    height: 0;
-  }
+  overflow: hidden;
 }
 
 // Keep the navigation rail visually connected to the soft page canvas, but still
@@ -517,13 +510,23 @@ body[data-theme='github'] {
 }
 
 .route-view:not(.is-hidden) {
-  min-height: 100%;
-  height: auto;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
   animation: route-enter .32s cubic-bezier(.22, 1, .36, 1) both;
 }
 
+.route-view[data-view='browser'],
+.route-view[data-view='ai'] {
+  overflow: hidden;
+}
+
 .route-view > .browser-page {
-  height: 100vh;
+  height: 100%;
 }
 
 // Route motion stays short and low-amplitude so navigation feels responsive
@@ -789,11 +792,23 @@ select {
 }
 
 // Cohesive application shell and content rhythm.
-body[data-theme='green'] { --accent:#347851; --accent-soft:#e2eee6; --accent-border:#c9ddcf; --page:#f5f7f4; }
-body[data-theme='beige'] { --accent:#8a6846; --accent-soft:#eee2d1; --accent-border:#ddcbb4; --page:#f7f2e9; }
-body[data-theme='light'] { --accent:#3f6f5a; --accent-soft:#e7ece9; --accent-border:#d1dad5; --page:#f7f8f7; }
-body[data-theme='dark'] { --accent:#65a77d; --accent-soft:#24372c; --accent-border:#375342; --page:#111714; }
-body[data-theme='github'] { --accent:#0969da; --accent-soft:#ddf4ff; --accent-border:#d0d7de; --page:#f6f8fa; }
+// `--accent` is the readable accent (text, icons, borders); `--accent-solid` is
+// the filled-control pair that has to carry white text, so it diverges on the
+// dark palette where `--accent` is already a light tone.
+body {
+  --accent: #3f6f5a;
+  --accent-soft: #e7ece9;
+  --accent-border: #d1dad5;
+  --page: #f7f8f7;
+  --accent-hover: #334b40;
+  --accent-solid: #3f6f5a;
+  --accent-solid-hover: #334b40;
+}
+body[data-theme='green'] { --accent:#347851; --accent-soft:#e2eee6; --accent-border:#c9ddcf; --page:#f5f7f4; --accent-hover:#275f3f; --accent-solid:#347851; --accent-solid-hover:#275f3f; }
+body[data-theme='beige'] { --accent:#8a6846; --accent-soft:#eee2d1; --accent-border:#ddcbb4; --page:#f7f2e9; --accent-hover:#6f5034; --accent-solid:#8a6846; --accent-solid-hover:#6f5034; }
+body[data-theme='light'] { --accent:#3f6f5a; --accent-soft:#e7ece9; --accent-border:#d1dad5; --page:#f7f8f7; --accent-hover:#334b40; --accent-solid:#3f6f5a; --accent-solid-hover:#334b40; }
+body[data-theme='dark'] { --accent:#65a77d; --accent-soft:#24372c; --accent-border:#375342; --page:#111714; --accent-hover:#8fd1a8; --accent-solid:#3d7752; --accent-solid-hover:#4b8d64; }
+body[data-theme='github'] { --accent:#0969da; --accent-soft:#ddf4ff; --accent-border:#d0d7de; --page:#f6f8fa; --accent-hover:#0550ae; --accent-solid:#0969da; --accent-solid-hover:#0550ae; }
 
 .page {
   width: 100%;
