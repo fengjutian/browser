@@ -45,14 +45,45 @@
 }
 
 .search-results {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  align-items: stretch;
+  gap: 12px;
   margin-top: 12px;
 
-  .ant-list-item, .ui-list-item {
-    margin-bottom: 6px;
-    padding: 10px 12px;
+  > .ui-list__row {
+    min-width: 0;
+    border-top: 0 !important;
   }
 
+  > .ui-list__loading,
+  > .ui-empty { grid-column: 1 / -1; }
+
+  .ant-list-item, .ui-list-item {
+    height: 100%;
+    min-height: 154px;
+    margin-bottom: 0;
+    padding: 14px;
+    align-items: flex-start;
+  }
+
+  .ui-list-meta,
+  .ui-list-meta__content { min-width: 0; }
+  .ui-list-meta__title {
+    display: -webkit-box;
+    overflow: hidden;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+  }
   .ant-typography { margin-bottom: 4px; }
+}
+
+@media (max-width: 1280px) {
+  .search-results { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+@media (max-width: 820px) {
+  .search-results { grid-template-columns: minmax(0, 1fr); }
 }
 
 .assistant-grid {
@@ -258,13 +289,13 @@
 .visit-trend { display:flex; align-items:stretch; gap:4px; height:170px; padding-top:20px; border-bottom:1px solid #dfe5e2; }
 .visit-trend__column { flex:1; min-width:0; display:flex; flex-direction:column; justify-content:flex-end; align-items:center; height:100%; }
 .visit-trend__column > span { height:16px; font-size:11px; color:#7a8580; }
-.visit-trend__column > i { width:min(22px,75%); min-height:2px; border-radius:5px 5px 0 0; background:linear-gradient(180deg,#69b1ff,#1677ff); }
+.visit-trend__column > i { width:min(22px,75%); min-height:2px; border-radius:5px 5px 0 0; background:linear-gradient(180deg,color-mix(in srgb,var(--accent) 55%,white),var(--accent)); }
 .visit-trend__column > small { height:20px; margin-top:4px; color:#7a8580; font-size:10px; white-space:nowrap; }
 .visit-bars,.visit-category-chart { display:flex; flex-direction:column; gap:10px; }
 .visit-bar { display:grid; grid-template-columns:minmax(90px,180px) minmax(100px,1fr) 34px; gap:10px; align-items:center; font-size:13px; }
 .visit-bar__label { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .visit-bar__track,.visit-category__track { display:block; height:10px; overflow:hidden; border-radius:999px; background:#edf1ef; }
-.visit-bar__track i,.visit-category__track i { display:block; height:100%; border-radius:inherit; background:linear-gradient(90deg,#1677ff,#69b1ff); }
+.visit-bar__track i,.visit-category__track i { display:block; height:100%; border-radius:inherit; background:linear-gradient(90deg,var(--accent),color-mix(in srgb,var(--accent) 55%,white)); }
 .visit-category { display:grid; grid-template-columns:90px minmax(80px,1fr) 48px 46px; gap:8px; align-items:center; font-size:13px; }
 .visit-category__name { display:flex; align-items:center; gap:7px; }
 .visit-category__name i { width:9px; height:9px; border-radius:50%; flex:none; }
@@ -523,6 +554,11 @@ body[data-theme='github'] {
 .route-view[data-view='browser'],
 .route-view[data-view='ai'] {
   overflow: hidden;
+}
+
+.route-view:not(.is-hidden):not([data-view='browser']) {
+  height: calc(100% - var(--window-control-height, 38px));
+  margin-top: var(--window-control-height, 38px);
 }
 
 .route-view > .browser-page {
@@ -1283,7 +1319,7 @@ body[data-theme='dark'] {
 
 // The assistant is an application workspace, not a scrolling document.
 .assistant-page {
-  height: 100vh;
+  height: 100%;
   min-height: 0;
   display: flex;
   flex-direction: column;
