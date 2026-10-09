@@ -2,7 +2,8 @@ import { Alert, Avatar, Button, Card, Drawer, Empty, Input, List, message, Space
 import { ArrowRightOutlined, FileTextOutlined, RobotOutlined, SettingOutlined, UserOutlined } from '../../components/ui/icons'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { PageHeader } from '../../shared/components/PageHeader'
-import { aiChat, aiEmbed, getSession, listAIProviders, listDocuments, searchDocuments, searchSimilarEmbeddings, setSession } from '../../api'
+import { aiChat, aiEmbed, getSession, listAIProviders, listDocuments, ragAnswer, searchDocuments, searchSimilarEmbeddings, setSession } from '../../api'
+import type { RagQuery } from '../../api'
 import { DocumentDetailDrawer } from '../../features/documents/DocumentDetailDrawer'
 import { buildCrossAskPrompt, citationIdsInRequest, parseCrossAnswer } from '../../features/ai/crossAsk'
 import type { AIProvider, Document, View } from '../../types'
@@ -134,11 +135,56 @@ export function AssistantPage({ onNavigate }: { onNavigate?: (view: View) => voi
         .filter(turn => turn.role === 'user' || (!turn.pending && turn.content.length > 0))
         .map(turn => ({ role: turn.role as 'user' | 'assistant', content: turn.content })), 12_000)
       const provider = providers.find(item=>item.id===providerId)
+
+      // Prefer the Rust `rag_answer` pipeline: it builds the evidence pack,
+      // calls the model, validates citations, and applies one repair pass on
+      // the Rust side. The frontend never has to reason about SOURCE blocks.
+      const ragQuery: RagQuery = {
+        query: trimmed,
+        topK: 8,
+        candidateK: 16,
+        documentIds: undefined,
+        collectionIds: undefined,
+        tags: undefined,
+        dateFrom: undefined,
+        dateTo: undefined,
+        includeArchived: false,
+        retrievalMode: provider?.embeddingModel ? 'hybrid' : 'lexical',
+        rerank: !!provider?.embeddingModel,
+        providerId: providerId,
+        embeddingModel: provider?.embeddingModel ?? undefined,
+        embeddingVersion: undefined,
+        chunkerVersion: undefined,
+        dimensions: undefined,
+      }
+      const rag = await ragAnswer(providerId, ragQuery, { temperature: 0.2, maxTokens: 1024 })
+      if (rag) {
+        const status = rag.citationStatus
+        const usable = status === 'valid' || status === 'notRequired' || status === 'partial'
+        if (usable) {
+          setTurns(current => current.map(turn => (
+            turn.id === pendingTurn.id
+              ? {
+                  ...turn,
+                  content: rag.answer,
+                  docIds: rag.citations
+                    .map(c => Number.parseInt(c.documentId.replace(/\D+/g, ''), 10))
+                    .filter(n => Number.isFinite(n)),
+                  notFound: rag.citationStatus === 'notRequired',
+                  pending: false,
+                }
+              : turn
+          )))
+          return
+        }
+        // fall through to the legacy path for `invalid`
+      }
+
+      // Fallback: legacy local-RAG path used when `ragAnswer` is unavailable
+      // (no Tauri, embedding model missing, or answer is invalid). Kept so
+      // the page still works in browser-only mode.
       let rankedDocumentIds: string[] | undefined
       if (provider?.embeddingModel) {
-        // Retrieval is read-only: vectors are built by the background task
-        // worker, so asking a question never embeds (or re-writes) the corpus.
-        // Only the query itself is embedded here.
         const [queryVector] = await aiEmbed(providerId,[trimmed])
         const [keyword, vector] = await Promise.all([searchDocuments(trimmed),searchSimilarEmbeddings(provider.embeddingModel,queryVector,16)])
         const fused = await applyReranker(rrfReranker, trimmed, reciprocalRankFusion(

@@ -3,7 +3,7 @@ import { AutoComplete, Badge, Button, Dropdown, Input, message, Modal, Popover, 
 import { ArrowDownOutlined, ArrowLeftOutlined, ArrowRightOutlined, ArrowUpOutlined, AudioMutedOutlined, BookOutlined, CheckCircleOutlined, CloseCircleOutlined, CloseOutlined, CopyOutlined, DownloadOutlined, FullscreenOutlined, LoadingOutlined, MoreOutlined, PlusOutlined, PrinterOutlined, ReloadOutlined, SafetyCertificateOutlined, SaveOutlined, SearchOutlined, SoundOutlined, StarFilled, StarOutlined, ThunderboltOutlined, TranslationOutlined, WarningOutlined } from '../../components/ui/icons'
 import { Sparkles as RobotOutlined } from 'lucide-react'
 import type { BrowserTab } from '../../types'
-import { addBrowserHistory, deleteClosedTab, findDocumentByUrl, getBrowserShortcutsEnabled, getBrowserWorkspace, getDocument, listBrowserHistory, listClosedTabs, listSitePermissions, purgeReadingSnapshots, recordReadingActivity, saveBrowserWorkspace, saveClosedTab, saveDocument, saveReadingSnapshot, setSession, toggleStarred } from '../../api'
+import { addBrowserHistory, deleteClosedTab, findDocumentByUrl, getBrowserShortcutsEnabled, getBrowserWorkspace, getDocument, listBrowserHistory, listClosedTabs, listSitePermissions, privacyCapabilityReport, privacyGetSiteSetting, privacyGetStats, privacyListBlockEvents, privacyListBlocklists, privacySetBlocklistEnabled, privacySetSiteSetting, purgeReadingSnapshots, recordReadingActivity, saveBrowserWorkspace, saveClosedTab, saveDocument, saveReadingSnapshot, setSession, toggleStarred } from '../../api'
 import { captureNativePage, captureNativeScreenshot, clearNativePageData, closeNativeTab, editNativePage, ensureNativeTab, findInNativeTab, generateBrowserPassword, hasNativeTab, hideNativeTab, isNativeBrowserAvailable, navigateHistory, onNativeAdBlockUpdate, onNativeAudioState, onNativeNewTab, onNativeToolbarMenuAction, onPasswordCandidate, openNativeDevtools, openNativeTab, printNativeTab, readNativeState, reloadNativeTab, resizeNativeTab, saveBrowserPassword, setNativeMuted, setNativeToolbarMenu, setNativeToolbarPanel, showNativeTab, stopNativeTab, zoomNativeTab, type PasswordCandidate } from '../../services/nativeBrowser'
 import { extractArticle } from '../../features/reader/extractArticle'
 import type { ReaderArticle } from '../../features/reader/types'
@@ -112,6 +112,9 @@ export function BrowserPage({ visible = true, onSearchKnowledge }: { visible?: b
   const [tabSearchOpen, setTabSearchOpen] = useState(false)
   const [historySearchOpen, setHistorySearchOpen] = useState(false)
   const [bookmarkPaletteOpen, setBookmarkPaletteOpen] = useState(false)
+  const [privacyCap, setPrivacyCap] = useState<Awaited<ReturnType<typeof privacyCapabilityReport>> | null>(null)
+  const [privacyStats, setPrivacyStats] = useState<Awaited<ReturnType<typeof privacyGetStats>>>({ blocked: 0, allowed: 0, dropped: 0 })
+  const [blockEvents, setBlockEvents] = useState<Awaited<ReturnType<typeof privacyListBlockEvents>>>([])
   const [bulkSummaryOpen, setBulkSummaryOpen] = useState(false)
   const [bulkSummaryBusy, setBulkSummaryBusy] = useState(false)
   const [bulkSummaryProgress, setBulkSummaryProgress] = useState<BulkProgressEntry[]>([])
@@ -236,6 +239,17 @@ export function BrowserPage({ visible = true, onSearchKnowledge }: { visible?: b
       window.removeEventListener(AD_BLOCKER_EVENT, onAdBlockerChange)
     }
   }, [])
+
+  // Privacy: read the live platform capability + counts once the page mounts.
+  // The toolbar panel surfaces network_subresource_blocking so users can see
+  // whether the WebResourceRequested handler actually attached.
+  useEffect(() => {
+    let cancelled = false
+    void privacyCapabilityReport().then(cap => { if (!cancelled) setPrivacyCap(cap) }).catch(() => undefined)
+    void privacyGetStats().then(stats => { if (!cancelled) setPrivacyStats(stats) }).catch(() => undefined)
+    void privacyListBlockEvents(50).then(events => { if (!cancelled) setBlockEvents(events ?? []) }).catch(() => undefined)
+    return () => { cancelled = true }
+  }, [active.id])
 
   useEffect(() => {
     let unlisten: () => void = () => undefined
@@ -984,6 +998,22 @@ export function BrowserPage({ visible = true, onSearchKnowledge }: { visible?: b
         <li><span>播放音频</span><b>{resourceStats.audibleTabs}</b></li>
         <li><span>下载中</span><b>{resourceStats.downloadingTabs}</b></li>
         <li><span>最久未活跃</span><b>{resourceStats.idleMinutes} 分钟</b></li>
+      </ul>
+      <Typography.Text type="secondary" className="resource-panel__title resource-panel__title--sub">隐私拦截</Typography.Text>
+      <ul className="resource-panel__privacy">
+        <li><span>子资源拦截</span><b>{privacyCap?.networkSubresourceBlocking ? '已开启' : '未启用'}</b></li>
+        <li><span>已阻断请求</span><b>{privacyStats.blocked}</b></li>
+        <li><span>已放行请求</span><b>{privacyStats.allowed}</b></li>
+        <li><span>私密标签</span><b>{active.private ? '是' : '否'}</b></li>
+        {blockEvents.slice(0, 5).map(event => (
+          <li key={event.id} className="resource-panel__privacy-item">
+            <span>{event.resourceType}</span>
+            <b title={event.requestHost}>{event.requestHost}</b>
+          </li>
+        ))}
+        {blockEvents.length === 0 && (
+          <li className="resource-panel__privacy-item"><span>最近无阻断</span><b>—</b></li>
+        )}
       </ul>
       <Typography.Text type="secondary" className="resource-panel__title resource-panel__title--sub">进程内存</Typography.Text>
       <ul className="resource-panel__memory">

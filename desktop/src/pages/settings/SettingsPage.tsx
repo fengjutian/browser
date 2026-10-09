@@ -2,7 +2,7 @@ import { Alert, Button, Card, Descriptions, Drawer, Form, Input, InputNumber, Li
 import { BgColorsOutlined, DeleteOutlined, KeyOutlined, MoonOutlined, SafetyCertificateOutlined, SaveOutlined, SearchOutlined, SunOutlined, ThunderboltOutlined } from '../../components/ui/icons'
 import { useEffect, useMemo, useState } from 'react'
 import { PageHeader } from '../../shared/components/PageHeader'
-import { callMcpTool, clearBrowserHistory, clearClosedTabs as clearClosedTabsInDb, clearReadingSnapshots, deleteAIProvider, deleteMcpServer, discoverMcpServer, dispatchPluginEvent, exportBackup, getAIProvider, getBrowserShortcutsEnabled, getReadingSnapshotStats, importBackup, installPlugin, listAIProviders, listBrowserHistory, listMcpResources, listMcpServers, listMcpTools, listPluginAudit, listPlugins, purgeReadingSnapshots, replaceSitePermissions, saveAIProvider, saveMcpServer, aiTestProvider, setBrowserShortcutsEnabled, setPluginEnabled, setPluginPermission, uninstallPlugin, type AIProviderInput, type InstalledPlugin, type McpServer, type McpTransport, type PluginAuditEntry, type PluginPermission, type ReadingSnapshotStats } from '../../api'
+import { callMcpTool, clearBrowserHistory, clearClosedTabs as clearClosedTabsInDb, clearReadingSnapshots, deleteAIProvider, deleteMcpServer, discoverMcpServer, dispatchPluginEvent, exportBackup, getAIProvider, getBrowserShortcutsEnabled, getReadingSnapshotStats, importBackup, installPlugin, listAIProviders, listBrowserHistory, listMcpResources, listMcpServers, listMcpTools, listPluginAudit, listPlugins, privacyCapabilityReport, privacyGetStats, privacyListBlocklists, privacyListBlockEvents, privacySetBlocklistEnabled, purgeReadingSnapshots, ragCancelJob, ragEnqueueAll, ragIndexStatus, ragListJobs, ragRebuildIndex, ragRetryJob, replaceSitePermissions, saveAIProvider, saveMcpServer, aiTestProvider, setBrowserShortcutsEnabled, setPluginEnabled, setPluginPermission, uninstallPlugin, type AIProviderInput, type InstalledPlugin, type McpServer, type McpTransport, type PluginAuditEntry, type PluginPermission, type ReadingSnapshotStats } from '../../api'
 import type { AIProvider, AIProviderType } from '../../types'
 import { normalizeOrigin, readSitePermissions, writeSitePermissions, type SitePermissionKind, type SitePermissionRule } from '../../features/browser/sitePermissions'
 import { KnowledgeBaseStatusPanel } from '../../features/settings/KnowledgeBaseStatusPanel'
@@ -615,6 +615,10 @@ const PERMISSION_LABELS: Record<SitePermissionKind, string> = {
 function PrivacySettings() {
   const [messageApi, contextHolder] = message.useMessage()
   const [historyEntries, setHistoryEntries] = useState<HistoryEntry[]>([])
+  const [privacyCap, setPrivacyCap] = useState<Awaited<ReturnType<typeof privacyCapabilityReport>> | null>(null)
+  const [privacyStats, setPrivacyStats] = useState<Awaited<ReturnType<typeof privacyGetStats>>>({ blocked: 0, allowed: 0, dropped: 0 })
+  const [blocklists, setBlocklists] = useState<Awaited<ReturnType<typeof privacyListBlocklists>>>([])
+  const [recentBlocks, setRecentBlocks] = useState<Awaited<ReturnType<typeof privacyListBlockEvents>>>([])
   const [cleanupOnExit, setCleanupOnExit] = useState<boolean>(() => readCleanupOnExitPreference())
   const [snapshotStats, setSnapshotStats] = useState<ReadingSnapshotStats>({ count: 0, bytes: 0 })
   const [snapshotRetentionDays, setSnapshotRetentionDays] = useState(() => Number(localStorage.getItem('reading.snapshot.retentionDays') || 90))
@@ -633,6 +637,21 @@ function PrivacySettings() {
   }, [])
 
   useEffect(() => { void getReadingSnapshotStats().then(setSnapshotStats) }, [])
+
+  useEffect(() => {
+    let cancelled = false
+    void privacyCapabilityReport().then(cap => { if (!cancelled) setPrivacyCap(cap) }).catch(() => undefined)
+    void privacyGetStats().then(s => { if (!cancelled) setPrivacyStats(s) }).catch(() => undefined)
+    void privacyListBlocklists().then(lists => { if (!cancelled) setBlocklists(lists ?? []) }).catch(() => undefined)
+    void privacyListBlockEvents(20).then(events => { if (!cancelled) setRecentBlocks(events ?? []) }).catch(() => undefined)
+    return () => { cancelled = true }
+  }, [])
+
+  async function toggleBlocklist(id: string, enabled: boolean) {
+    await privacySetBlocklistEnabled(id, enabled)
+    setBlocklists(current => current.map(item => item.id === id ? { ...item, enabled } : item))
+    messageApi.success(enabled ? '已启用规则集' : '已禁用规则集')
+  }
 
   async function applySnapshotPolicy() {
     const days = Math.max(1, Math.min(3650, Math.round(snapshotRetentionDays)))
