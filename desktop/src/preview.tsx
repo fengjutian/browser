@@ -23,12 +23,11 @@ function page() {
   return <SettingsPage />
 }
 
-function audit() {
-  const out: string[] = []
-  out.push(`view=${view} vh=${window.innerHeight}`)
+function audit(tag: string) {
+  const parts: string[] = [`${tag} view=${view} vh=${window.innerHeight}`]
   for (const sel of ['.app-layout', '.app-sider', '.app-content', '.route-view', '.page']) {
     const el = document.querySelector(sel)
-    if (!el) { out.push(`${sel}=MISSING`); continue }
+    if (!el) { parts.push(`${sel}=MISSING`); continue }
     const cs = getComputedStyle(el)
     const r = el.getBoundingClientRect()
     const clip = el.scrollHeight - el.clientHeight
@@ -36,16 +35,11 @@ function audit() {
     el.scrollTop = 9999
     const after = el.scrollTop
     el.scrollTop = before
-    out.push(`${sel} top=${Math.round(r.top)} h=${Math.round(r.height)} oy=${cs.overflowY} clip=${clip} progScroll=${after > 0 ? 'YES' : 'no'}`)
+    const wheel = /auto|scroll|overlay/.test(cs.overflowY) ? 'WHEEL' : 'block'
+    parts.push(`${sel}[top=${Math.round(r.top)},h=${Math.round(r.height)},oy=${cs.overflowY},clip=${clip},wheel=${wheel},prog=${after > 0 ? 'Y' : 'n'}]`)
   }
-  return out.join(' ;; ')
+  return parts.join(' ')
 }
-
-const diag = document.createElement('pre')
-diag.id = 'diag'
-diag.textContent = 'pending'
-diag.style.cssText = 'position:fixed;left:8px;top:44px;z-index:99999;margin:0;padding:8px;background:#000;color:#0f0;font:10px/1.3 monospace;max-width:80vw;white-space:pre-wrap'
-document.body.appendChild(diag)
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
@@ -55,9 +49,6 @@ createRoot(document.getElementById('root')!).render(
   </StrictMode>,
 )
 
-let n = 0
-const tick = window.setInterval(() => {
-  diag.textContent = audit()
-  console.log('AUDIT ' + diag.textContent.replace(/\s+/g, ' '))
-  if (++n >= 4) window.clearInterval(tick)
-}, 400)
+const shoot = (tag: string) => console.error('AUDIT ' + audit(tag))
+shoot('sync')
+for (const ms of [50, 200, 600, 1200, 2500]) window.setTimeout(() => shoot(`t${ms}`), ms)
