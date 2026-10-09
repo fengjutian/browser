@@ -11,16 +11,12 @@
 //! the actual orchestration stays testable without spinning up a Tauri app
 //! handle.
 
-use std::sync::Arc;
-
 use tauri::AppHandle;
 
 use crate::local_store;
 
 use super::indexer::{cancel_job, enqueue_document, list_jobs, recover_timed_out_jobs, JobRow};
-use super::retrieval::{
-    orchestrate as retrieval_orchestrate, RetrievalDeps, RagRetrieveResponse,
-};
+use super::retrieval::RagRetrieveResponse;
 use super::types::RagQuery;
 
 /// Enqueue an indexing job for a single document. If an open job already
@@ -197,57 +193,35 @@ fn now_seconds(database: &rusqlite::Connection) -> i64 {
         .unwrap_or(0)
 }
 
-/// Run the full retrieval pipeline (spec A6). Embedding is plugged in via the
-/// `provider_id` argument: we look up the active provider's base_url and key
-/// (the key stays in the OS keyring), then call the same wire the existing
-/// `ai_embed` Tauri command uses. If the provider cannot be reached we
-/// gracefully degrade to lexical-only and the response carries a warning.
+/// Run the full retrieval pipeline (spec A6). Embedding is plugged in via
+/// `query.provider_id`; we look up the active provider's base_url, key
+/// (from the OS keyring) and embedding model, then call the shared
+/// `providers::embedding::embed_for_provider`. If the provider cannot be
+/// reached, hybrid mode degrades to lexical-only and the response carries
+/// a warning; vector-only mode returns empty hits with the same warning
+/// so the UI can distinguish "no answer" from "vector outage".
 #[tauri::command]
 pub async fn rag_retrieve(
     app: AppHandle,
     provider_id: String,
     query: RagQuery,
 ) -> Result<RagRetrieveResponse, String> {
-    let database = local_store::connection(&app)?;
-    let (provider_type, base_url, model, timeout_seconds): (String, String, String, i64) = database
-        .query_row(
-            "SELECT provider_type, base_url, model, timeout_seconds FROM ai_providers WHERE id=?1",
-            rusqlite::params![provider_id],
-            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
-        )
-        .map_err(|e| e.to_string())?;
-    let http_client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(timeout_seconds.clamp(1, 600) as u64))
-        .build()
-        .map_err(|e| e.to_string())?;
-    let provider_type_for_closure = provider_type.clone();
-    let base_url_for_closure = base_url.clone();
-    let model_for_closure = model.clone();
-    let client_for_closure = http_client.clone();
-    let embed_query: Box<dyn FnOnce(&str) -> Result<Vec<f32>, String> + Send> = Box::new(move |text: &str| {
-        let body = serde_json::json!({"model": model_for_closure, "input": [text]});
-        let endpoint = if provider_type_for_closure == "ollama" {
-            format!("{}/api/embed", base_url_for_closure.trim_end_matches('/'))
-        } else {
-            format!("{}/embeddings", base_url_for_closure.trim_end_matches('/'))
-        };
-        // Embedding calls live in `lib::ai_embed`; this closure happens on
-        // the async runtime. We use the synchronous Tauri command surface's
-        // contract instead: the closure is `Send + 'static`-compatible
-        // because we don't reach back into `app` here. Returning `Ok` empty
-        // degrades gracefully — the orchestration layer treats that as
-        // "vector unavailable".
-        let _ = (endpoint, body, client_for_closure);
-        Ok(Vec::new())
-    });
-    let _ = Arc::new(()); // keep Arc import alive for future expansion
-
-    retrieval_orchestrate(
-        &query,
-        RetrievalDeps {
-            database: &database,
-            embed_query,
-            per_document_cap: 3,
-        },
-    )
+    if provider_id.trim().is_empty() {
+        return Err("provider_id is required".into());
+    }
+    let mut query = query;
+    if query.provider_id.is_none() {
+        query.provider_id = Some(provider_id.clone());
+    }
+    // Wrap the connection in an `Arc<tokio::sync::Mutex>` so the
+    // `ProviderEmbedder` future is `Send` (rusqlite `Connection` is `!Sync`).
+    let database = {
+        let conn = local_store::connection(&app)?;
+        std::sync::Arc::new(tokio::sync::Mutex::new(conn))
+    };
+    let embedder = super::retrieval::ProviderEmbedder {
+        database: database.clone(),
+        provider_id,
+    };
+    super::retrieval::orchestrate_with_embedder(&query, database, &embedder).await
 }

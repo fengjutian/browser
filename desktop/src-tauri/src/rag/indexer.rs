@@ -779,3 +779,131 @@ mod tests {
         assert!(count > 0);
     }
 }
+
+/// Production [`EmbedClient`] backed by `providers::embedding::embed_for_provider`.
+/// This is what the supervisor loop wires up so jobs produce real embeddings
+/// instead of the deterministic placeholder used in unit tests.
+pub struct HttpEmbedClient {
+    /// `tokio::sync::Mutex` so the embed call can run from the async
+    /// runtime without holding the connection across `.await` points.
+    pub database: std::sync::Arc<tokio::sync::Mutex<Connection>>,
+}
+
+#[async_trait::async_trait]
+impl EmbedClient for HttpEmbedClient {
+    async fn embed(
+        &self,
+        provider_id: &str,
+        _model: &str,
+        texts: &[String],
+    ) -> Result<Vec<Vec<f32>>, String> {
+        let conn = self.database.lock().await;
+        let response = crate::providers::embedding::embed_for_provider(
+            &conn,
+            provider_id,
+            texts.to_vec(),
+        )
+        .await
+        .map_err(|e| e.to_string())?;
+        Ok(response.vectors)
+    }
+}
+
+/// Drive one job using a shared async `tokio::sync::Mutex<Connection>`
+/// and a real HTTP embedder. This is the function the runtime calls from
+/// its supervisor loop.
+pub async fn tick_with_database(
+    database: &mut Connection,
+    client: &dyn EmbedClient,
+    provider_id: &str,
+    batch_size: usize,
+) -> Result<Option<IndexOutcome>, String> {
+    tick(database, client, provider_id, batch_size).await
+}
+
+/// Long-lived supervisor that watches `rag_index_jobs` and runs `tick`
+/// whenever a job becomes available. Spawned from the app's `setup`
+/// hook so it lives for the entire process lifetime.
+pub struct RagSupervisor {
+    notify: std::sync::Arc<tokio::sync::Notify>,
+    cancel: tokio_util::sync::CancellationToken,
+}
+
+impl RagSupervisor {
+    pub fn new() -> Self {
+        Self {
+            notify: std::sync::Arc::new(tokio::sync::Notify::new()),
+            cancel: tokio_util::sync::CancellationToken::new(),
+        }
+    }
+
+    pub fn notifier(&self) -> std::sync::Arc<tokio::sync::Notify> {
+        self.notify.clone()
+    }
+
+    pub fn cancel_token(&self) -> tokio_util::sync::CancellationToken {
+        self.cancel.clone()
+    }
+
+    /// Spawn the supervisor loop on the current tokio runtime. The loop
+    /// waits for a wake-up signal and otherwise polls every 5s. Each
+    /// iteration runs at most one job.
+    pub fn spawn(
+        self: std::sync::Arc<Self>,
+        database: std::sync::Arc<tokio::sync::Mutex<Connection>>,
+        provider_ids: Vec<String>,
+    ) -> tokio::task::JoinHandle<()> {
+        let cancel = self.cancel.clone();
+        let notify = self.notify.clone();
+        tokio::spawn(async move {
+            // On startup: recover timed-out jobs.
+            {
+                let conn = database.lock().await;
+                let _ = recover_timed_out_jobs(&conn);
+            }
+            loop {
+                tokio::select! {
+                    biased;
+                    _ = cancel.cancelled() => break,
+                    _ = notify.notified() => { /* wake */ },
+                    _ = tokio::time::sleep(std::time::Duration::from_secs(5)) => {}
+                }
+                let client = HttpEmbedClient { database: database.clone() };
+                let mut worked = false;
+                for provider_id in &provider_ids {
+                    let outcome = {
+                        let mut conn = database.lock().await;
+                        match tick(&mut conn, &client, provider_id, 16).await {
+                            Ok(Some(outcome)) => Some(outcome),
+                            Ok(None) => None,
+                            Err(error) => {
+                                eprintln!("rag supervisor tick error: {error}");
+                                None
+                            }
+                        }
+                    };
+                    if let Some(outcome) = outcome {
+                        worked = true;
+                        let _ = crate::event_bus::publish(
+                            "rag://index-progress",
+                            &outcome,
+                        );
+                        if outcome.status == STATUS_COMPLETED || outcome.status == STATUS_FAILED {
+                            let event = if outcome.status == STATUS_COMPLETED {
+                                "rag://index-completed"
+                            } else {
+                                "rag://index-failed"
+                            };
+                            let _ = crate::event_bus::publish(event, &outcome);
+                        }
+                    }
+                }
+                // If a wake-up landed but nothing was due, signal another
+                // wake to ensure liveness.
+                if !worked {
+                    notify.notify_one();
+                }
+            }
+        })
+    }
+}

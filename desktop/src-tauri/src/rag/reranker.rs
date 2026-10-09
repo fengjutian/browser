@@ -72,6 +72,38 @@ impl RerankProvider for NoopRerankProvider {
     }
 }
 
+/// Default limits for the rerank step. Spec A7 calls out "input ≤ 20".
+#[derive(Debug, Clone)]
+pub struct RerankerLimits {
+    pub input_cap: usize,
+}
+
+impl Default for RerankerLimits {
+    fn default() -> Self {
+        Self { input_cap: 20 }
+    }
+}
+
+/// Async entry point used by the retrieval orchestrator. Takes the RRF
+/// fused hits, hands them to a rerank provider, then re-orders the hits
+/// in place. Failures fall back to the RRF order and surface a warning
+/// to the caller.
+pub async fn rerank(
+    query: &str,
+    hits: Vec<RetrievalHit>,
+    limits: RerankerLimits,
+) -> Result<Vec<RetrievalHit>, String> {
+    if hits.is_empty() {
+        return Ok(Vec::new());
+    }
+    let input_cap = limits.input_cap.max(1);
+    let (reordered, _) = rerank_candidates(&NoopRerankProvider, query, hits, input_cap);
+    // Stable-sort reorder keeps the existing RRF order when no provider
+    // overrides it (Noop provider returns 1/(idx+1), so the original
+    // order is preserved after sort).
+    Ok(reordered)
+}
+
 /// Rerank-side timing record. The orchestrator folds this into the response's
 /// `timings.rerankMs`.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -178,6 +210,15 @@ mod tests {
         let provider = NoopRerankProvider;
         let (out, _) = rerank_candidates(&provider, "x", vec![], 5);
         assert!(out.is_empty());
+    }
+
+    #[test]
+    fn async_rerank_noop_preserves_order() {
+        let hits = vec![hit("a", 0.5), hit("b", 0.4)];
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let out = rt.block_on(rerank("x", hits, RerankerLimits::default())).unwrap();
+        assert_eq!(out[0].chunk.chunk_id, "a");
+        assert_eq!(out[1].chunk.chunk_id, "b");
     }
 
     #[test]

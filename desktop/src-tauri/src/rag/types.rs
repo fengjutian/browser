@@ -48,6 +48,40 @@ pub struct RagQuery {
     pub retrieval_mode: RetrievalMode,
     #[serde(default)]
     pub rerank: bool,
+    /// Embedding provider id used to embed the query string and the index
+    /// against which vector recall happens. The Rust side validates that the
+    /// provider matches the indexed configuration.
+    #[serde(default)]
+    pub provider_id: Option<String>,
+    /// Embedding model name. The Rust side refuses to vector-search when
+    /// the active index was produced under a different model.
+    #[serde(default)]
+    pub embedding_model: Option<String>,
+    /// Embedding version stamp (e.g. "markdown-structure-v1").
+    #[serde(default)]
+    pub embedding_version: Option<String>,
+    /// Chunker version used at index time. Used to compute chunk IDs that
+    /// line up with what the vector path will hit.
+    #[serde(default)]
+    pub chunker_version: Option<String>,
+    /// Override embedding dimensions for vector search. `None` means "trust
+    /// the query vector's length and look for matching `dims` rows".
+    #[serde(default)]
+    pub dimensions: Option<usize>,
+}
+
+/// Stable key identifying which `(provider_id, model, dimensions,
+/// embedding_version, chunker_version)` tuple an index was built under.
+/// Used by retrieval to validate that a query can be served by the active
+/// index.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct EmbeddingIndexKey {
+    pub provider_id: String,
+    pub model: String,
+    pub dimensions: usize,
+    pub embedding_version: String,
+    pub chunker_version: String,
 }
 
 /// A single chunk as returned by retrieval. The `chunk_id` and `text_hash`

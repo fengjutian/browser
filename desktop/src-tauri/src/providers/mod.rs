@@ -1,3 +1,4 @@
+pub mod embedding;
 pub mod ollama;
 pub mod openai;
 

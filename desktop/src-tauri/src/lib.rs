@@ -4,6 +4,7 @@ pub mod browser;
 pub mod capabilities;
 pub mod certificate_guard;
 pub mod downloads;
+pub mod event_bus;
 pub mod local_store;
 pub mod mcp;
 pub mod permission_guard;
@@ -28,7 +29,7 @@ use tauri::{Emitter, LogicalPosition, Manager};
 
 use crate::providers::{AiProvider, ChatMessage, ChatRequest, ChatResponse};
 
-const KEYRING_SERVICE: &str = "ai-knowledge-browser";
+pub const KEYRING_SERVICE: &str = "ai-knowledge-browser";
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -1581,68 +1582,11 @@ async fn ai_embed(
     provider_id: String,
     inputs: Vec<String>,
 ) -> Result<Vec<Vec<f32>>, String> {
-    if inputs.is_empty() || inputs.len() > 64 {
-        return Err("embedding input count must be 1..64".into());
-    }
-    if inputs.iter().any(|value| value.len() > 32_000) {
-        return Err("embedding input is too large".into());
-    }
     let database = local_store::connection(&app)?;
-    let (provider_type, base_url, model, timeout_seconds): (String, String, Option<String>, i64) = database
-        .query_row("SELECT provider_type,base_url,embedding_model,timeout_seconds FROM ai_providers WHERE id=?", params![provider_id], |row| Ok((row.get(0)?,row.get(1)?,row.get(2)?,row.get(3)?)))
-        .map_err(|error| error.to_string())?;
-    let model = model
-        .filter(|value| !value.trim().is_empty())
-        .ok_or("provider has no embedding model")?;
-    let client = reqwest::Client::builder()
-        .timeout(Duration::from_secs(timeout_seconds.clamp(1, 600) as u64))
-        .build()
-        .map_err(|e| e.to_string())?;
-    let (endpoint, body) = if provider_type == "ollama" {
-        (
-            format!("{}/api/embed", base_url.trim_end_matches('/')),
-            serde_json::json!({"model":model,"input":inputs}),
-        )
-    } else {
-        (
-            format!("{}/embeddings", base_url.trim_end_matches('/')),
-            serde_json::json!({"model":model,"input":inputs}),
-        )
-    };
-    let mut request = client.post(endpoint).json(&body);
-    if provider_type != "ollama" {
-        let key = keyring::Entry::new(KEYRING_SERVICE, &provider_id)
-            .map_err(|e| e.to_string())?
-            .get_password()
-            .map_err(|_| "missing api key")?;
-        request = request.bearer_auth(key);
-    }
-    let response = request.send().await.map_err(|e| e.to_string())?;
-    let status = response.status();
-    let value: serde_json::Value = response.json().await.map_err(|e| e.to_string())?;
-    if !status.is_success() {
-        return Err(format!("embedding HTTP {}: {}", status.as_u16(), value));
-    }
-    if provider_type == "ollama" {
-        serde_json::from_value(
-            value
-                .get("embeddings")
-                .cloned()
-                .ok_or("missing embeddings")?,
-        )
-        .map_err(|e| e.to_string())
-    } else {
-        value
-            .get("data")
-            .and_then(|v| v.as_array())
-            .ok_or("missing embedding data")?
-            .iter()
-            .map(|item| {
-                serde_json::from_value(item.get("embedding").cloned().ok_or("missing embedding")?)
-                    .map_err(|e| e.to_string())
-            })
-            .collect()
-    }
+    let response = providers::embedding::embed_for_provider(&database, &provider_id, inputs)
+        .await
+        .map_err(|e| format!("embedding: {e}"))?;
+    Ok(response.vectors)
 }
 
 #[derive(Default)]

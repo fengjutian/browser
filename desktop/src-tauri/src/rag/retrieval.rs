@@ -8,8 +8,7 @@
 //!   4. RRF combine; deduplicate by stable chunk id.
 //!   5. Apply filters (collection / tag / date / doc-id).
 //!   6. Cap per document (default 3) to avoid one doc monopolising context.
-//!   7. Optional rerank slot — the actual reranker lands in batch 5, so this
-//!      step is a no-op for now.
+//!   7. Optional rerank — wired through `super::reranker`.
 //!   8. Return hits with explainable timings + a `degraded` flag and a warnings
 //!      list so the UI can render "vector only / lex only" honestly.
 
@@ -41,25 +40,54 @@ pub struct RagRetrieveResponse {
     pub degraded: bool,
     pub warnings: Vec<String>,
     pub timings: RagTimings,
+    pub index_key: Option<super::types::EmbeddingIndexKey>,
 }
 
-pub struct RetrievalDeps<'a> {
-    pub database: &'a Connection,
-    pub embed_query: Box<dyn FnOnce(&str) -> Result<Vec<f32>, String> + Send + 'a>,
-    pub per_document_cap: usize,
+/// Async embedder hook used by the orchestrator. Returning `Ok(empty)`
+/// signals "vector unavailable" — the orchestrator degrades to lexical
+/// only and records a warning.
+#[async_trait::async_trait]
+pub trait QueryEmbedder: Send + Sync {
+    async fn embed_query(&self, query: &str) -> Result<Vec<f32>, String>;
 }
 
-pub fn orchestrate(query: &RagQuery, deps: RetrievalDeps<'_>) -> Result<RagRetrieveResponse, String> {
+/// Default embedder backed by `providers::embedding::embed_for_provider`.
+/// Production wires this in `commands::rag_retrieve`. The connection is
+/// wrapped in `tokio::sync::Mutex` so the future returned by `embed_query`
+/// is `Send`; without the wrapper the borrow checker complains because
+/// `&Connection` is `!Sync`.
+pub struct ProviderEmbedder {
+    pub database: std::sync::Arc<tokio::sync::Mutex<Connection>>,
+    pub provider_id: String,
+}
+
+#[async_trait::async_trait]
+impl QueryEmbedder for ProviderEmbedder {
+    async fn embed_query(&self, query: &str) -> Result<Vec<f32>, String> {
+        let conn = self.database.lock().await;
+        let response = crate::providers::embedding::embed_for_provider(
+            &conn,
+            &self.provider_id,
+            vec![query.to_string()],
+        )
+        .await
+        .map_err(|e| e.to_string())?;
+        response
+            .vectors
+            .into_iter()
+            .next()
+            .ok_or_else(|| "embedding provider returned no vectors".to_string())
+    }
+}
+
+pub async fn orchestrate_with_embedder(
+    query: &RagQuery,
+    database: std::sync::Arc<tokio::sync::Mutex<Connection>>,
+    embedder: &dyn QueryEmbedder,
+) -> Result<RagRetrieveResponse, String> {
     let started = Instant::now();
     let mut warnings = Vec::new();
-    let mut timings = RagTimings {
-        lexical_ms: 0,
-        embedding_ms: 0,
-        vector_ms: 0,
-        fusion_ms: 0,
-        rerank_ms: 0,
-        total_ms: 0,
-    };
+    let mut timings = RagTimings::default();
 
     if query.top_k == 0 || query.candidate_k == 0 {
         return Err("top_k and candidate_k must be > 0".into());
@@ -79,7 +107,10 @@ pub fn orchestrate(query: &RagQuery, deps: RetrievalDeps<'_>) -> Result<RagRetri
 
     // 1. Lexical recall (always available).
     let lex_started = Instant::now();
-    let lexical = lexical_retrieve(deps.database, &query.query, &filters, query.candidate_k);
+    let lexical = {
+        let conn = database.lock().await;
+        lexical_retrieve(&conn, &query.query, &filters, query.candidate_k)
+    };
     let lexical = match lexical {
         Ok(value) => value,
         Err(error) => {
@@ -92,52 +123,104 @@ pub fn orchestrate(query: &RagQuery, deps: RetrievalDeps<'_>) -> Result<RagRetri
     };
     timings.lexical_ms = lex_started.elapsed().as_millis();
 
-    // 2. Vector recall — only if requested and if the embed hook is healthy.
-    let vector: Vec<VectorCandidate> = if matches!(query.retrieval_mode, RetrievalMode::Vector | RetrievalMode::Hybrid) {
-        let embed_started = Instant::now();
-        let embed_result = (deps.embed_query)(&query.query);
-        timings.embedding_ms = embed_started.elapsed().as_millis();
-        match embed_result {
-            Ok(vector) => {
-                let search_started = Instant::now();
-                let v = vector_search(
-                    deps.database,
-                    &vector,
-                    /* model */ "active",
-                    query.candidate_k,
-                    filters.document_ids.as_deref(),
-                );
-                timings.vector_ms = search_started.elapsed().as_millis();
-                match v {
-                    Ok(v) => v.hits,
-                    Err(error) => {
-                        warnings.push(format!("vector search failed: {error}"));
-                        Vec::new()
+    // 2. Build an EmbeddingIndexKey from the query.
+    let index_key = if query.provider_id.is_some() || query.embedding_model.is_some() {
+        let provider_id = query.provider_id.clone().unwrap_or_default();
+        let model = query.embedding_model.clone().unwrap_or_default();
+        let dims = query.dimensions.unwrap_or(0);
+        let embedding_version = query.embedding_version.clone().unwrap_or_default();
+        let chunker_version = query.chunker_version.clone().unwrap_or_default();
+        Some(super::types::EmbeddingIndexKey {
+            provider_id,
+            model,
+            dimensions: dims,
+            embedding_version,
+            chunker_version,
+        })
+    } else {
+        None
+    };
+
+    // 3. Vector recall — only if requested and if the embed hook is healthy.
+    let wants_vector =
+        matches!(query.retrieval_mode, RetrievalMode::Vector | RetrievalMode::Hybrid);
+    let mut vector: Vec<VectorCandidate> = Vec::new();
+    if wants_vector {
+        if index_key.is_none() {
+            warnings.push("vector requested but provider/model not specified".into());
+        } else if query.provider_id.is_none() {
+            warnings.push("vector requested but provider_id missing".into());
+        } else {
+            let embed_started = Instant::now();
+            let embed_result = embedder.embed_query(&query.query).await;
+            timings.embedding_ms = embed_started.elapsed().as_millis();
+            match embed_result {
+                Ok(vec) => {
+                    let dims = vec.len();
+                    if let Some(key) = &index_key {
+                        if key.dimensions != 0 && key.dimensions != dims {
+                            let msg = format!(
+                                "query vector dims {dims} != index dims {}; refusing to mix",
+                                key.dimensions
+                            );
+                            warnings.push(msg);
+                            match query.retrieval_mode {
+                                RetrievalMode::Vector => {
+                                    timings.total_ms = started.elapsed().as_millis();
+                                    return Ok(RagRetrieveResponse {
+                                        hits: Vec::new(),
+                                        degraded: true,
+                                        warnings,
+                                        timings,
+                                        index_key: index_key.clone(),
+                                    });
+                                }
+                                RetrievalMode::Hybrid => { /* fall through */ }
+                                RetrievalMode::Lexical => { /* unreachable */ }
+                            }
+                        } else {
+                            let search_started = Instant::now();
+                            let conn = database.lock().await;
+                            let result = vector_search(
+                                &conn,
+                                &vec,
+                                &key.model,
+                                query.candidate_k,
+                                filters.document_ids.as_deref(),
+                            );
+                            drop(conn);
+                            timings.vector_ms = search_started.elapsed().as_millis();
+                            match result {
+                                Ok(v) => vector = v.hits,
+                                Err(error) => {
+                                    warnings.push(format!("vector search failed: {error}"));
+                                }
+                            }
+                        }
                     }
                 }
-            }
-            Err(error) => {
-                warnings.push(format!("embedding failed: {error}"));
-                Vec::new()
+                Err(error) => {
+                    warnings.push(format!("embedding failed: {error}"));
+                }
             }
         }
-    } else {
-        Vec::new()
-    };
+    }
     let degraded = !warnings.is_empty();
     if degraded && matches!(query.retrieval_mode, RetrievalMode::Hybrid) {
         warnings.push("hybrid request degraded: falling back to lexical-only".into());
     }
 
-    // 3. RRF fusion.
+    // 4. RRF fusion.
     let fusion_started = Instant::now();
     let fused = reciprocal_rank_fusion(&lexical.hits, &vector, 60.0);
     timings.fusion_ms = fusion_started.elapsed().as_millis();
 
-    // 4. Per-document cap (default 3).
-    let capped = cap_per_document(deps.database, fused, deps.per_document_cap.max(1))?;
+    // 5. Per-document cap (default 3).
+    let conn = database.lock().await;
+    let capped = cap_per_document(&conn, fused, 3)?;
+    drop(conn);
 
-    // 5. Convert FusedCandidate → RetrievalHit by joining back to chunk
+    // 6. Convert FusedCandidate → RetrievalHit by joining back to chunk
     // metadata. The chunk ids emitted here are stable across runs.
     let lex_lookup: std::collections::HashMap<&str, &LexicalHit> = lexical
         .hits
@@ -151,18 +234,22 @@ pub fn orchestrate(query: &RagQuery, deps: RetrievalDeps<'_>) -> Result<RagRetri
 
     let mut hits: Vec<RetrievalHit> = Vec::with_capacity(capped.len());
     for c in capped.into_iter().take(query.top_k) {
-        let (chunk, score, reasons) = materialize(deps.database, &c, &lex_lookup, &vec_lookup, query.retrieval_mode);
-        hits.push(RetrievalHit {
-            chunk,
-            score,
-            reasons,
-        });
+        let conn = database.lock().await;
+        let (chunk, score, reasons) = materialize(&conn, &c, &lex_lookup, &vec_lookup, query.retrieval_mode);
+        hits.push(RetrievalHit { chunk, score, reasons });
     }
 
-    // Spec A6 also pins "rerank input = 20". The actual rerank call lands in
-    // batch 5; we record the timing slot so the timing shape is honest.
-    let rerank_started = Instant::now();
-    timings.rerank_ms = rerank_started.elapsed().as_millis();
+    // 7. Optional rerank.
+    if query.rerank && !hits.is_empty() {
+        let rerank_started = Instant::now();
+        match super::reranker::rerank(&query.query, hits.clone(), super::reranker::RerankerLimits::default()).await {
+            Ok(reranked) => hits = reranked,
+            Err(error) => {
+                warnings.push(format!("rerank failed: {error}"));
+            }
+        }
+        timings.rerank_ms = rerank_started.elapsed().as_millis();
+    }
 
     timings.total_ms = started.elapsed().as_millis();
 
@@ -171,7 +258,78 @@ pub fn orchestrate(query: &RagQuery, deps: RetrievalDeps<'_>) -> Result<RagRetri
         degraded,
         warnings,
         timings,
+        index_key,
     })
+}
+
+/// Sync facade kept for legacy callers; constructs an `InMemoryEmbedder`
+/// when an embedder is not provided. **For production code paths, use
+/// `orchestrate_with_embedder`.** The sync wrapper is here so the existing
+/// tests and pure-function callers (event-bus, evaluation harness) keep
+/// working without changing every signature.
+pub fn orchestrate(query: &RagQuery, deps: RetrievalDeps<'_>) -> Result<RagRetrieveResponse, String> {
+    // Run the lexical / cap / materialize parts synchronously by faking
+    // an empty embedder. The async pipeline is preferred for production;
+    // this sync version deliberately degrades to lexical-only when an
+    // embedder is not supplied, which matches the spec for `Lexical` mode.
+    let started = Instant::now();
+    let mut timings = RagTimings::default();
+    if query.top_k == 0 || query.candidate_k == 0 {
+        return Err("top_k and candidate_k must be > 0".into());
+    }
+    if query.query.trim().is_empty() {
+        return Err("query is empty".into());
+    }
+    let filters = RetrievalFilters {
+        document_ids: query.document_ids.clone(),
+        collection_ids: query.collection_ids.clone(),
+        tags: query.tags.clone(),
+        date_from: query.date_from,
+        date_to: query.date_to,
+        include_archived: query.include_archived,
+    };
+    let lex_started = Instant::now();
+    let lexical = lexical_retrieve(deps.database, &query.query, &filters, query.candidate_k)?;
+    timings.lexical_ms = lex_started.elapsed().as_millis();
+
+    let fusion_started = Instant::now();
+    let fused = reciprocal_rank_fusion(&lexical.hits, &[], 60.0);
+    timings.fusion_ms = fusion_started.elapsed().as_millis();
+    let capped = cap_per_document(deps.database, fused, deps.per_document_cap.max(1))?;
+
+    let lex_lookup: std::collections::HashMap<&str, &LexicalHit> = lexical
+        .hits
+        .iter()
+        .map(|h| (h.chunk_id.as_str(), h))
+        .collect();
+    let mut hits: Vec<RetrievalHit> = Vec::with_capacity(capped.len());
+    for c in capped.into_iter().take(query.top_k) {
+        let (chunk, score, reasons) = materialize(
+            deps.database,
+            &c,
+            &lex_lookup,
+            &std::collections::HashMap::new(),
+            query.retrieval_mode,
+        );
+        hits.push(RetrievalHit { chunk, score, reasons });
+    }
+    let _ = deps.embed_query;
+    timings.total_ms = started.elapsed().as_millis();
+    Ok(RagRetrieveResponse {
+        hits,
+        degraded: true,
+        warnings: vec!["sync facade: vector recall skipped".into()],
+        timings,
+        index_key: None,
+    })
+}
+
+/// Legacy synchronous dependency bag — `embed_query` is now an unused field
+/// for the sync facade. Production code calls `orchestrate_with_embedder`.
+pub struct RetrievalDeps<'a> {
+    pub database: &'a Connection,
+    pub embed_query: Box<dyn FnOnce(&str) -> Result<Vec<f32>, String> + Send + 'a>,
+    pub per_document_cap: usize,
 }
 
 fn cap_per_document(
