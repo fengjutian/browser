@@ -822,10 +822,58 @@ function PrivacySettings() {
     </Space>
   </div>
 
+  const ruleListContent = <div className="privacy-section">
+    <Typography.Paragraph type="secondary">Rust 端的隐私拦截能力，规则集启用/禁用立即生效；更新规则请前往隐私中心后台任务。</Typography.Paragraph>
+    <div className="privacy-rules">
+      <div className="privacy-rules__row privacy-rules__row--header">
+        <span>规则集</span><span>规则数</span><span>状态</span><span>最近错误</span><span>操作</span>
+      </div>
+      {blocklists.length === 0 && <Typography.Paragraph type="secondary">暂无规则集</Typography.Paragraph>}
+      {blocklists.map(list => (
+        <div key={list.id} className="privacy-rules__row">
+          <span title={list.id}>{list.name ?? list.id}</span>
+          <span>{list.ruleCount}</span>
+          <span><Tag color={list.enabled ? 'green' : 'default'}>{list.enabled ? '启用' : '禁用'}</Tag></span>
+          <span title={list.lastError ?? ''}>{list.lastError ?? '—'}</span>
+          <span>
+            <Button size="small" onClick={() => void toggleBlocklist(list.id, !list.enabled)}>
+              {list.enabled ? '禁用' : '启用'}
+            </Button>
+          </span>
+        </div>
+      ))}
+    </div>
+    <Space style={{ marginTop: 12 }}>
+      <Tag color={privacyCap?.networkSubresourceBlocking ? 'green' : 'red'}>
+        子资源拦截: {privacyCap?.networkSubresourceBlocking ? '已开启' : '未启用'}
+      </Tag>
+      <Tag>已阻断 {privacyStats.blocked}</Tag>
+      <Tag>已放行 {privacyStats.allowed}</Tag>
+    </Space>
+  </div>
+
+  const recentBlocksContent = <div className="privacy-section">
+    <Typography.Paragraph type="secondary">最近 20 条子资源拦截记录。私密标签不写入此表。</Typography.Paragraph>
+    {recentBlocks.length === 0
+      ? <Typography.Paragraph type="secondary">暂无拦截记录</Typography.Paragraph>
+      : <ul className="privacy-recent">
+          {recentBlocks.map(event => (
+            <li key={event.id}>
+              <span>{new Date(event.blockedAt * 1000).toLocaleString()}</span>
+              <span>{event.resourceType}</span>
+              <span title={event.requestHost}>{event.requestHost}</span>
+              <span>{event.topLevelOrigin || '—'}</span>
+            </li>
+          ))}
+        </ul>}
+  </div>
+
   return <>{contextHolder}<Card title="隐私与站点数据" className="settings-card privacy-settings-card"><Tabs className="privacy-section-tabs" defaultActiveKey="history" destroyOnHidden={false} items={[
     { key: 'private', label: '私密浏览', children: privateContent },
     { key: 'history', label: `浏览历史 ${historyEntries.length}`, children: historyContent },
     { key: 'adblock', label: `广告拦截 ${adStats.totalBlocked}`, children: adBlockContent },
+    { key: 'rules', label: `规则集 ${blocklists.length}`, children: ruleListContent },
+    { key: 'blocks', label: `最近拦截 ${recentBlocks.length}`, children: recentBlocksContent },
     { key: 'statistics', label: '访问统计', children: statisticsContent },
     { key: 'cleanup', label: '数据清理', children: cleanupContent },
     { key: 'knowledge-base', label: '知识库', children: <KnowledgeBaseStatusPanel /> },

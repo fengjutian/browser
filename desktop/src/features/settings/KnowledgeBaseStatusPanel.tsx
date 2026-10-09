@@ -1,7 +1,8 @@
 import { Alert, Button, Empty, Space, Table, Tag, Typography, message } from '../../components/ui'
 import { ReloadOutlined } from '../../components/ui/icons'
 import { useCallback, useEffect, useState } from 'react'
-import { getMigrationStatus, listStoredSitePermissions, replaceSitePermissions, type MigrationStatus } from '../../api'
+import { getMigrationStatus, listStoredSitePermissions, ragEnqueueAll, ragIndexStatus, ragListJobs, ragRebuildIndex, ragRetryJob, replaceSitePermissions, type MigrationStatus, type RagIndexStatus, type RagJobRow, listAIProviders } from '../../api'
+import type { AIProvider } from '../../types'
 import { SITE_PERMISSION_KINDS, type SitePermissionRule } from '../browser/sitePermissions'
 
 const DECISION_COLOR: Record<string, string> = { allow: 'green', deny: 'red', ask: 'gold' }
@@ -17,16 +18,25 @@ export function KnowledgeBaseStatusPanel() {
   const [status, setStatus] = useState<MigrationStatus | null>(null)
   const [rules, setRules] = useState<SitePermissionRule[]>([])
   const [loading, setLoading] = useState(false)
+  const [providers, setProviders] = useState<AIProvider[]>([])
+  const [ragStatus, setRagStatus] = useState<RagIndexStatus | null>(null)
+  const [ragJobs, setRagJobs] = useState<RagJobRow[]>([])
 
   const refresh = useCallback(async () => {
     setLoading(true)
     try {
-      const [nextStatus, nextRules] = await Promise.all([
+      const [nextStatus, nextRules, nextProviders, nextRag, nextJobs] = await Promise.all([
         getMigrationStatus(),
         listStoredSitePermissions(),
+        listAIProviders(),
+        ragIndexStatus().catch(() => null),
+        ragListJobs(20).catch(() => []),
       ])
       setStatus(nextStatus)
       setRules(nextRules)
+      setProviders(nextProviders)
+      setRagStatus(nextRag)
+      setRagJobs(nextJobs ?? [])
     } catch {
       // Non-Tauri preview: nothing to report.
     } finally {
@@ -41,6 +51,33 @@ export function KnowledgeBaseStatusPanel() {
     await replaceSitePermissions(remaining)
     setRules(remaining)
     messageApi.success(`已清除 ${origin} 的站点权限`)
+  }
+
+  async function rebuildIndex() {
+    const target = providers.find(p => p.embeddingModel)
+    if (!target) {
+      messageApi.warning('请先在「AI Provider」中配置带 embeddingModel 的 Provider')
+      return
+    }
+    const n = await ragRebuildIndex(target.id, target.embeddingModel ?? target.model)
+    messageApi.success(`已重建索引：${n} 个文档待处理`)
+    void refresh()
+  }
+
+  async function enqueueAll() {
+    const target = providers.find(p => p.embeddingModel)
+    if (!target) {
+      messageApi.warning('请先在「AI Provider」中配置带 embeddingModel 的 Provider')
+      return
+    }
+    const n = await ragEnqueueAll(target.id, target.embeddingModel ?? target.model)
+    messageApi.success(`已入队 ${n} 篇新文档`)
+    void refresh()
+  }
+
+  async function retryJob(jobId: string) {
+    await ragRetryJob(jobId)
+    void refresh()
   }
 
   return <div className="kb-status-panel">
@@ -85,5 +122,53 @@ export function KnowledgeBaseStatusPanel() {
             },
           ]}
         />}
+
+    <Typography.Title level={5} style={{ marginTop: 16 }}>RAG 索引</Typography.Title>
+    {ragStatus
+      ? <Space wrap>
+          <Tag>总任务 {ragStatus.totalJobs}</Tag>
+          <Tag color="gold">等待 {ragStatus.pending}</Tag>
+          <Tag color="red">失败 {ragStatus.failed}</Tag>
+          <Tag color="green">完成 {ragStatus.completed}</Tag>
+          <Tag>已索引 {ragStatus.indexedDocuments}</Tag>
+          {ragStatus.recovered > 0 && <Tag color="cyan">已恢复 {ragStatus.recovered}</Tag>}
+        </Space>
+      : <Alert type="info" showIcon message="非桌面环境，跳过 RAG 索引" />}
+    <Space style={{ marginTop: 8 }} wrap>
+      <Button size="small" onClick={() => void rebuildIndex()}>重建索引</Button>
+      <Button size="small" onClick={() => void enqueueAll()}>入队新文档</Button>
+    </Space>
+    {ragJobs.length > 0 && (
+      <Table<RagJobRow>
+        size="small"
+        style={{ marginTop: 8 }}
+        rowKey="id"
+        dataSource={ragJobs}
+        pagination={false}
+        columns={[
+          { title: '文档', dataIndex: 'documentId' },
+          { title: 'Provider', dataIndex: 'providerId' },
+          { title: '模型', dataIndex: 'model' },
+          {
+            title: '状态',
+            dataIndex: 'status',
+            render: (status: RagJobRow['status']) => {
+              const color = status === 'COMPLETED' ? 'green'
+                : status === 'FAILED' ? 'red'
+                : status === 'CANCELLED' ? 'default'
+                : 'blue'
+              return <Tag color={color}>{status}</Tag>
+            },
+          },
+          {
+            title: '操作',
+            key: 'actions',
+            render: (_: unknown, job: RagJobRow) => (
+              <Button size="small" onClick={() => void retryJob(job.id)}>重试</Button>
+            ),
+          },
+        ]}
+      />
+    )}
   </div>
 }

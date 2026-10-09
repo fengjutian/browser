@@ -237,9 +237,12 @@ pub fn detach_subresource_filter<R: Runtime>(app: &AppHandle<R>, label: &str) ->
 /// the managed `PrivacyRuntimeState` and invokes `attach_subresource_filter`.
 /// Records the resulting `CapabilityRecord` so the toolbar / settings page
 /// can report the live capability per tab.
-pub fn attach_from_runtime<R: Runtime>(app: &AppHandle<R>, label: &str, private: bool) -> PlatformCapability {
-    let runtime = app
-        .try_state::<super::runtime::PrivacyRuntimeState>();
+pub fn attach_from_runtime<R: Runtime>(
+    app: &AppHandle<R>,
+    label: &str,
+    private: bool,
+) -> PlatformCapability {
+    let runtime = app.try_state::<super::runtime::PrivacyRuntimeState>();
     let runtime = match runtime {
         Some(s) => s,
         None => {
@@ -257,12 +260,14 @@ pub fn attach_from_runtime<R: Runtime>(app: &AppHandle<R>, label: &str, private:
         runtime.events.clone(),
         private,
     );
-    runtime.capabilities.record(super::runtime::CapabilityRecord {
-        label: label.to_string(),
-        network_subresource_blocking: cap.network_subresource_blocking,
-        cosmetic_filtering: cap.cosmetic_filtering,
-        notes: cap.notes.clone(),
-    });
+    runtime
+        .capabilities
+        .record(super::runtime::CapabilityRecord {
+            label: label.to_string(),
+            network_subresource_blocking: cap.network_subresource_blocking,
+            cosmetic_filtering: cap.cosmetic_filtering,
+            notes: cap.notes.clone(),
+        });
     cap
 }
 

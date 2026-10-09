@@ -217,7 +217,9 @@ fn build_answer_prompt(retrieval: &RagRetrieveResponse) -> String {
     let mut s = String::new();
     s.push_str("你是一个严格的助理,只能基于提供的资料回答问题。\n");
     s.push_str("If the sources do not contain the answer, reply exactly with: 我不知道 (or in English: I don't know).\n");
-    s.push_str("Every claim that is not a refusal MUST be followed by a citation block in the form:\n");
+    s.push_str(
+        "Every claim that is not a refusal MUST be followed by a citation block in the form:\n",
+    );
     s.push_str("  [SOURCE id=\"doc:<document_id>:chunk:<index>\"]\n  <quoted or paraphrased excerpt>\n  [/SOURCE]\n");
     s.push_str("Use the exact id strings from the evidence list. Do not invent new ids.\n\n");
     s.push_str("Evidence pack (do not reference anything outside this list):\n");
@@ -325,15 +327,24 @@ pub async fn rag_answer(
         temperature: request.temperature.or(Some(0.2)),
         max_tokens: request.max_tokens.or(Some(1024)),
     };
-    let first = provider.chat(chat_request).await.map_err(|e| e.to_string())?;
+    let first = provider
+        .chat(chat_request)
+        .await
+        .map_err(|e| e.to_string())?;
     let mut current_answer = first.content.clone();
-    let mut validated = super::citation::validate_answer(&current_answer, &retrieval, &candidate_ids);
+    let mut validated =
+        super::citation::validate_answer(&current_answer, &retrieval, &candidate_ids);
 
     // 4) Repair pass — at most one. Triggered when validation finds
     //    unsupported ids or uncovered paragraphs.
     if !request.skip_repair
-        && (matches!(validated.citation_status, super::citation::CitationStatus::Invalid)
-            || matches!(validated.citation_status, super::citation::CitationStatus::Partial))
+        && (matches!(
+            validated.citation_status,
+            super::citation::CitationStatus::Invalid
+        ) || matches!(
+            validated.citation_status,
+            super::citation::CitationStatus::Partial
+        ))
     {
         let repair_prompt = build_repair_prompt(&current_answer, &retrieval);
         let repair_request = crate::providers::ChatRequest {
@@ -352,7 +363,8 @@ pub async fn rag_answer(
         };
         if let Ok(second) = provider.chat(repair_request).await {
             current_answer = second.content;
-            validated = super::citation::validate_answer(&current_answer, &retrieval, &candidate_ids);
+            validated =
+                super::citation::validate_answer(&current_answer, &retrieval, &candidate_ids);
         }
     }
 
