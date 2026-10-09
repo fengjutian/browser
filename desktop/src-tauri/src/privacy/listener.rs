@@ -123,7 +123,7 @@ pub fn maybe_emit_throttled<F>(emit: F)
 where
     F: FnOnce(u64, u64),
 {
-    let last = PRIVACY_EVENTS_TOTAL.last_emit.lock().ok().and_then(|mut g| *g);
+    let last = PRIVACY_EVENTS_TOTAL.last_emit.lock().ok().and_then(|g| *g);
     if let Some(when) = last {
         if when.elapsed().as_millis() < EMIT_THROTTLE_MS {
             return;
@@ -187,7 +187,7 @@ pub fn flush_throttled(
     min_interval: Duration,
 ) -> Result<bool, String> {
     let due = {
-        let last = last_flush.lock().ok().and_then(|mut g| *g);
+        let last = last_flush.lock().ok().and_then(|g| *g);
         match last {
             Some(t) if t.elapsed() < min_interval => false,
             _ => true,
