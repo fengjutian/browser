@@ -33,12 +33,10 @@ use serde_json::json;
 use tokio::sync::{Mutex, Notify};
 use tokio_util::sync::CancellationToken;
 
-use super::budget::{
-    evaluate as evaluate_budget, BudgetCounters, BudgetLimits, BudgetVerdict,
-};
-use super::runtime::{apply_counters, leased_by, transition};
+use super::budget::{evaluate as evaluate_budget, BudgetCounters, BudgetLimits, BudgetVerdict};
 #[cfg(test)]
 use super::runtime::create_run;
+use super::runtime::{apply_counters, leased_by, transition};
 use super::tools::{ToolContext, ToolError, ToolRegistry};
 use super::types::AgentStatus;
 
@@ -85,12 +83,12 @@ impl AgentSupervisor {
     /// 1. Recovers any non-terminal run whose lease has expired
     ///    (`recover_interrupted` style, called once per tick).
     /// 2. Picks the next due run and advances it.
-    pub fn spawn(self: Arc<Self>) -> tokio::task::JoinHandle<()> {
+    pub fn spawn(self: Arc<Self>) -> tauri::async_runtime::JoinHandle<()> {
         let cancel = self.cancel.clone();
         let notify = self.notify.clone();
         let database = self.database.clone();
         let registry = self.registry.clone();
-        tokio::spawn(async move {
+        tauri::async_runtime::spawn(async move {
             // Boot recovery — any PLANNING/RUNNING run whose lease expired
             // while we were offline is moved to INTERRUPTED so the UI can
             // offer a resume path.

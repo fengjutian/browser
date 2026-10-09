@@ -851,17 +851,17 @@ impl RagSupervisor {
         self.cancel.clone()
     }
 
-    /// Spawn the supervisor loop on the current tokio runtime. The loop
+    /// Spawn the supervisor loop on Tauri's async runtime. The loop
     /// waits for a wake-up signal and otherwise polls every 5s. Each
     /// iteration runs at most one job.
     pub fn spawn(
         self: std::sync::Arc<Self>,
         database: std::sync::Arc<tokio::sync::Mutex<Connection>>,
         provider_ids: Vec<String>,
-    ) -> tokio::task::JoinHandle<()> {
+    ) -> tauri::async_runtime::JoinHandle<()> {
         let cancel = self.cancel.clone();
         let notify = self.notify.clone();
-        tokio::spawn(async move {
+        tauri::async_runtime::spawn(async move {
             // On startup: recover timed-out jobs.
             {
                 let conn = database.lock().await;

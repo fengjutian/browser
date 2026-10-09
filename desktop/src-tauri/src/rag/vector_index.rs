@@ -127,10 +127,7 @@ impl BruteForceVectorIndex {
     }
 
     pub fn with_items(dimensions: usize, items: Vec<VectorItem>) -> Self {
-        Self {
-            dimensions,
-            items,
-        }
+        Self { dimensions, items }
     }
 }
 
