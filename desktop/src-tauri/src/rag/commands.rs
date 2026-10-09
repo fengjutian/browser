@@ -259,6 +259,8 @@ pub async fn rag_answer(
     app: AppHandle,
     request: RagAnswerRequest,
 ) -> Result<super::citation::RagAnswer, String> {
+    const ANSWER_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(90);
+    tokio::time::timeout(ANSWER_TIMEOUT, async move {
     if request.provider_id.trim().is_empty() {
         return Err("provider_id is required".into());
     }
@@ -369,6 +371,9 @@ pub async fn rag_answer(
     }
 
     Ok(validated)
+    })
+    .await
+    .map_err(|_| "回答超时（90 秒），请检查 AI Provider 连接或稍后重试".to_string())?
 }
 
 /// Run the full retrieval pipeline (spec A6). Embedding is plugged in via

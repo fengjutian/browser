@@ -53,6 +53,7 @@ export function AssistantPage({ onNavigate }: { onNavigate?: (view: View) => voi
   const [agentBusy, setAgentBusy] = useState(false)
   const [agentRuns, setAgentRuns] = useState<AgentRun[]>([])
   const listRef = useRef<HTMLDivElement | null>(null)
+  const busyRef = useRef(false)
 
   useEffect(() => {
     void listDocuments()
@@ -115,7 +116,8 @@ export function AssistantPage({ onNavigate }: { onNavigate?: (view: View) => voi
   async function ask() {
     if (!providerId) return
     const trimmed = question.trim()
-    if (!trimmed || busy) return
+    if (!trimmed || busyRef.current) return
+    busyRef.current = true
 
     const userTurn: UserTurn = { id: `u-${Date.now()}`, role: 'user', content: trimmed }
     const pendingTurn: AssistantTurn = {
@@ -215,6 +217,7 @@ export function AssistantPage({ onNavigate }: { onNavigate?: (view: View) => voi
       )))
       messageApi.error(message_)
     } finally {
+      busyRef.current = false
       setBusy(false)
     }
   }
@@ -356,7 +359,12 @@ export function AssistantPage({ onNavigate }: { onNavigate?: (view: View) => voi
                           avatar={<Avatar icon={<RobotOutlined />} style={{ background: '#16241f' }} />}
                           title={
                             <Space orientation="vertical" size={6} style={{ width: '100%' }}>
-                              {turn.pending && <Spin size="small" />}
+                              {turn.pending && (
+                                <Space size={8}>
+                                  <Spin size="small" />
+                                  <Typography.Text type="secondary">正在检索知识库并生成回答，最长等待 90 秒…</Typography.Text>
+                                </Space>
+                              )}
                               {!turn.pending && turn.error && <Alert type="error" message={turn.error} />}
                               {!turn.pending && !turn.error && turn.notFound && <Alert type="info" message={turn.content} />}
                               {!turn.pending && !turn.error && !turn.notFound && (
