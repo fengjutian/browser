@@ -1142,25 +1142,36 @@ body[data-theme='dark'] {
 // the page hierarchy independent from the browser's omnibox above it.
 .new-tab {
   justify-content: flex-start;
-  padding: clamp(34px, 7vh, 68px) 24px 28px;
+  padding: clamp(32px, 6vh, 58px) 24px 32px;
   overflow: auto;
+}
+
+.new-tab__workspace {
+  width: min(900px, 92%);
+  margin: 0 auto;
+  padding: 28px 34px 30px;
+  border: 1px solid color-mix(in srgb, var(--accent-border) 72%, transparent);
+  border-radius: 24px;
+  background: color-mix(in srgb, #fff 76%, transparent);
+  box-shadow: 0 20px 60px rgba(31, 49, 39, .08);
+  backdrop-filter: blur(14px);
 }
 
 .new-tab__hero {
   text-align: center;
 
   .new-tab__icon { margin: 0 auto; }
-  h1.ant-typography { margin: 12px 0 3px; font-size: clamp(28px, 2.25vw, 38px); }
-  p.ant-typography { margin-bottom: 18px; color: #657269; }
+  h1.ant-typography { margin: 0 0 5px; font-size: clamp(28px, 2.25vw, 38px); }
+  p.ant-typography { margin-bottom: 22px; color: #657269; }
 }
 
 .new-tab-search {
-  width: min(720px, 86%);
-  padding: 10px;
-  border: 1px solid color-mix(in srgb, var(--accent-border) 85%, transparent);
-  border-radius: 18px;
-  background: color-mix(in srgb, #fff 91%, var(--accent-soft));
-  box-shadow: 0 14px 38px rgba(40, 58, 47, .08);
+  width: 100%;
+  padding: 0;
+  border: 0;
+  border-radius: 14px;
+  background: transparent;
+  box-shadow: none;
 
   > .ant-segmented {
     width: 100%;
@@ -1240,9 +1251,15 @@ body[data-theme='dark'] {
   .ui-statistic__value { font-size: 14px; }
 }
 
-.new-tab .quick-sites { width: min(800px, 92%) !important; margin-top: 14px !important; }
+.new-tab .quick-sites { width: 100% !important; margin-top: 22px !important; }
 
 body[data-theme='dark'] {
+  .new-tab__workspace {
+    border-color: #334139;
+    background: rgba(24, 33, 28, .82);
+    box-shadow: 0 20px 60px rgba(0, 0, 0, .22);
+  }
+  .new-tab__workspace .new-tab-search { background: transparent; box-shadow: none; }
   .browser-toolbar > form .ant-input-affix-wrapper { background: #202823; }
   .new-tab__hero p.ant-typography { color: #9aa69e; }
   .new-tab-search { background: #18211c; box-shadow: none; }
@@ -1315,6 +1332,12 @@ body[data-theme='dark'] {
   // were tuned for light and look pale on dark.
   .certificate-error-bar.ant-alert-error { border-color: #5a2b2a; }
   .permission-prompt-bar.ant-alert-warning { border-color: #5a4721; }
+}
+
+body[data-theme='github'] .new-tab__workspace .new-tab-search {
+  border: 0;
+  background: transparent;
+  box-shadow: none;
 }
 
 // The assistant is an application workspace, not a scrolling document.
@@ -1552,6 +1575,8 @@ body[data-theme='dark'] .window-controls > .window-controls__close:hover { backg
   }
 
   .ant-tabs-nav-list {
+    width: auto !important;
+    min-width: 0 !important;
     align-items: flex-end;
     gap: 0;
   }
