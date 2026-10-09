@@ -750,20 +750,20 @@ export async function ragRetrieve(providerId: string, query: RagQuery): Promise<
   return invoke<RagRetrieveResponse>('rag_retrieve', { providerId, query })
 }
 
-export async function ragAnswer(providerId: string, query: RagQuery): Promise<RagAnswerResponse | null> {
+export async function ragAnswer(providerId: string, query: RagQuery, options?: { skipRepair?: boolean; temperature?: number; maxTokens?: number }): Promise<RagAnswerResponse | null> {
   if (!isTauri()) return null
-  // rag_answer is currently exposed as `rag_retrieve`; the production
-  // Evidence Pack + chat call would land as a new command. We keep the
-  // shape here so the AssistantPage can swap implementations later.
-  const retrieval = await ragRetrieve(providerId, query)
-  return {
-    answer: '',
-    citations: [],
-    citationStatus: 'notRequired',
-    unsupportedCitationIds: [],
-    uncoveredParagraphs: [],
-    retrieval,
-  }
+  // The Rust side does the full pipeline: evidence pack → chat → citation
+  // validation → at most one repair pass. The frontend never sees raw
+  // provider output; it always receives a `RagAnswer` with a citation status.
+  return invoke<RagAnswerResponse>('rag_answer', {
+    request: {
+      providerId,
+      query,
+      skipRepair: options?.skipRepair ?? false,
+      temperature: options?.temperature ?? null,
+      maxTokens: options?.maxTokens ?? null,
+    },
+  })
 }
 
 // ---------------------------------------------------------------------------

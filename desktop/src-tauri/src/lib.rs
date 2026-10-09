@@ -808,6 +808,9 @@ async fn browser_create(
         permissions.unwrap_or_default(),
         private_mode,
     );
+    // Wire the privacy sub-resource filter so script/image/xhr/iframe hits
+    // a real `WebResourceRequested` handler backed by the compiled set.
+    let _ = privacy::platform::attach_from_runtime(&app, &label, private_mode);
     let navs = app.state::<NavStacks>();
     let mut guard = navs
         .stacks
@@ -2120,6 +2123,7 @@ pub fn run() {
             rag::commands::rag_index_status,
             rag::commands::rag_rebuild_index,
             rag::commands::rag_retrieve,
+            rag::commands::rag_answer,
             agent::commands::agent_recover_interrupted,
             agent::commands::agent_start,
             agent::commands::agent_pause,
@@ -2314,6 +2318,10 @@ async fn browser_close_tab(app: tauri::AppHandle, label: String) -> Result<(), S
         .await
         .unwrap_or_default();
     webview.close().map_err(|error| error.to_string())?;
+    // Revoke the privacy sub-resource filter handler so the WebView2 token
+    // doesn't outlive the tab. Failure here is non-fatal — the WebView is
+    // already gone.
+    let _ = privacy::platform::detach_subresource_filter(&app, &label);
     let navs = app.state::<NavStacks>();
     if let Ok(mut guard) = navs.stacks.lock() {
         guard.remove(&label);

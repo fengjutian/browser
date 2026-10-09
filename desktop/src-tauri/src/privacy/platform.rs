@@ -18,7 +18,7 @@
 
 use std::sync::Arc;
 
-use tauri::{AppHandle, Runtime};
+use tauri::{AppHandle, Manager, Runtime};
 
 use super::compiler::CompiledSetHandle;
 use super::events::PrivacyEventSender;
@@ -215,6 +215,57 @@ pub fn attach_subresource_filter<R: Runtime>(
     }
 }
 
+/// Detach a previously-attached subresource filter for `label`. Safe to call
+/// from any thread; returns true if a handler was actually revoked.
+pub fn detach_subresource_filter<R: Runtime>(app: &AppHandle<R>, label: &str) -> bool {
+    #[cfg(target_os = "windows")]
+    {
+        win::detach(app, label)
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = (app, label);
+        super::remove_tab(label);
+        if let Some(caps) = app.try_state::<super::runtime::PrivacyRuntimeState>() {
+            caps.capabilities.remove(label);
+        }
+        true
+    }
+}
+
+/// Convenience wrapper that pulls the compiled set + event sender out of
+/// the managed `PrivacyRuntimeState` and invokes `attach_subresource_filter`.
+/// Records the resulting `CapabilityRecord` so the toolbar / settings page
+/// can report the live capability per tab.
+pub fn attach_from_runtime<R: Runtime>(app: &AppHandle<R>, label: &str, private: bool) -> PlatformCapability {
+    let runtime = app
+        .try_state::<super::runtime::PrivacyRuntimeState>();
+    let runtime = match runtime {
+        Some(s) => s,
+        None => {
+            return PlatformCapability {
+                network_subresource_blocking: false,
+                cosmetic_filtering: true,
+                notes: vec!["PrivacyRuntimeState not managed".into()],
+            };
+        }
+    };
+    let cap = attach_subresource_filter(
+        app,
+        label,
+        runtime.compiled.clone(),
+        runtime.events.clone(),
+        private,
+    );
+    runtime.capabilities.record(super::runtime::CapabilityRecord {
+        label: label.to_string(),
+        network_subresource_blocking: cap.network_subresource_blocking,
+        cosmetic_filtering: cap.cosmetic_filtering,
+        notes: cap.notes.clone(),
+    });
+    cap
+}
+
 #[cfg(target_os = "windows")]
 mod win {
     use super::*;
@@ -353,6 +404,36 @@ mod win {
         static REG: std::sync::OnceLock<std::sync::Mutex<std::collections::HashMap<String, i64>>> =
             std::sync::OnceLock::new();
         REG.get_or_init(|| std::sync::Mutex::new(std::collections::HashMap::new()))
+    }
+
+    /// Revoke the WebResourceRequested handler for `label`. Returns true if a
+    /// handler was actually removed, false if the label was unknown.
+    pub fn detach<R: Runtime>(app: &AppHandle<R>, label: &str) -> bool {
+        let token = match registration_tokens().lock() {
+            Ok(mut map) => match map.remove(label) {
+                Some(t) => t,
+                None => return false,
+            },
+            Err(_) => return false,
+        };
+        let Some(view) = app.get_webview(label) else {
+            return false;
+        };
+        let result = view.with_webview(move |platform| {
+            if let Ok(core) = unsafe { platform.controller().CoreWebView2() } {
+                if let Ok(core2) = core.cast::<ICoreWebView2_2>() {
+                    let _ = unsafe { core2.remove_WebResourceRequested(token) };
+                }
+            }
+        });
+        if result.is_err() {
+            return false;
+        }
+        super::remove_tab(label);
+        if let Some(caps) = app.try_state::<super::super::runtime::PrivacyRuntimeState>() {
+            caps.capabilities.remove(label);
+        }
+        true
     }
 
     pub fn dispatch(

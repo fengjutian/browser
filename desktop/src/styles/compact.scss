@@ -186,9 +186,12 @@
   }
 }
 
-// Keep the navigation rail visually connected to the soft page canvas.
+// Keep the navigation rail visually connected to the soft page canvas, but still
+// mark its right edge: the rail and the page-level sub-navigation (settings
+// categories, library sections…) are two separate modules, not one column.
 .app-sider.ant-layout-sider {
   color: #31483a;
+  border-right: 1px solid var(--accent-border, #d7e0d9);
 }
 
 .privacy-status {

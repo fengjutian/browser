@@ -163,6 +163,10 @@ mod win {
         let mut uri = PWSTR::null();
         unsafe { args.Uri(&mut uri) }?;
         let url = unsafe { uri.to_string() }.unwrap_or_default();
+        // Keep the per-tab top-level URL fresh so sub-resource decisions in
+        // `WebResourceRequested` have the right origin to compute first/third
+        // party against. Updates happen on every navigation start.
+        super::super::platform::set_tab_origin(label, &url);
         let blocked = super::is_blocked_host(&url);
         if !blocked {
             if let Some(reg) = app.try_state::<super::NavBlockRegistry>() {
