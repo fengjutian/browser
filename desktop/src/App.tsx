@@ -3,6 +3,7 @@ import { UIProvider } from './components/ui'
 import { AppRouter } from './app/AppRouter'
 import { readThemePreference, THEME_CHANGE_EVENT, type ThemePreference } from './features/settings/theme'
 import { readAdvancedSettings } from './features/settings/advanced'
+import { useTaskWorker } from './features/tasks/useTaskWorker'
 
 const PALETTES = {
   green: { primary: '#347851', sider: '#edf2ee', item: '#68766e', hover: '#e3ebe5', hoverText: '#275f3f', selected: '#d9e8dd', selectedText: '#275f3f' },
@@ -14,6 +15,8 @@ const PALETTES = {
 
 export default function App() {
   const [preference, setPreference] = useState<ThemePreference>(readThemePreference)
+
+  useTaskWorker()
 
   useEffect(() => {
     const handlePreference = (event: Event) => {

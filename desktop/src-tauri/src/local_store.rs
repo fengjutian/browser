@@ -1,5 +1,6 @@
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use std::fs;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tauri::Manager;
@@ -349,6 +350,21 @@ const MIGRATIONS: &[(i64, &str)] = &[
         );
         CREATE INDEX idx_plugins_enabled ON plugins(enabled, status);
         CREATE INDEX idx_plugin_audit_created ON plugin_audit_log(created_at DESC);",
+    ),
+    (
+        22,
+        "CREATE TABLE embedding_index_state (
+            document_id TEXT NOT NULL,
+            model TEXT NOT NULL,
+            chunk_count INTEGER NOT NULL DEFAULT 0,
+            content_hash TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'PENDING',
+            last_error TEXT,
+            updated_at INTEGER NOT NULL,
+            PRIMARY KEY(document_id, model),
+            FOREIGN KEY(document_id) REFERENCES local_documents(id) ON DELETE CASCADE
+        );
+        CREATE INDEX idx_embedding_index_state_status ON embedding_index_state(status);",
     ),
 ];
 
@@ -846,6 +862,207 @@ pub struct EmbeddingMatch {
     pub similarity: f32,
 }
 
+/// Target chunk size in characters. Chunking happens in Rust so the production
+/// indexing path and the unit tests agree on chunk boundaries.
+pub const EMBEDDING_CHUNK_SIZE: usize = 1200;
+/// Characters of context shared between neighbouring chunks.
+pub const EMBEDDING_CHUNK_OVERLAP: usize = 120;
+/// Maximum characters retained per chunk as a citation excerpt.
+pub const EXCERPT_LIMIT: usize = 400;
+/// Documents longer than this are refused rather than silently truncated.
+pub const MAX_INDEXABLE_MARKDOWN: usize = 2 * 1024 * 1024;
+
+/// Stable fingerprint of the embeddable body, used to decide whether a
+/// document is already indexed for a given model.
+fn content_hash(markdown: &str) -> String {
+    format!("{:x}", Sha256::digest(markdown.as_bytes()))
+}
+
+/// Split a document body into embeddable chunks.
+///
+/// Returns `None` when the body is absent or too large to index, which callers
+/// treat as "nothing to do" rather than an error.
+pub(crate) fn document_chunks(markdown: Option<&str>) -> Option<Vec<(usize, String)>> {
+    let body = markdown?;
+    if body.trim().is_empty() || body.len() > MAX_INDEXABLE_MARKDOWN {
+        return None;
+    }
+    let chunks = chunk_markdown(body, EMBEDDING_CHUNK_SIZE, EMBEDDING_CHUNK_OVERLAP);
+    if chunks.is_empty() {
+        None
+    } else {
+        Some(chunks)
+    }
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DocumentChunkPlan {
+    pub document_id: String,
+    pub model: String,
+    pub content_hash: String,
+    pub already_indexed: bool,
+    pub chunks: Vec<PlannedChunk>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PlannedChunk {
+    pub chunk_index: i64,
+    pub offset: usize,
+    pub text: String,
+    pub excerpt: String,
+}
+
+/// Build the chunk plan for indexing one document under one embedding model.
+///
+/// This is the production entry point for chunking: it is idempotent and reports
+/// `already_indexed` when the stored hash matches, so the worker can skip work
+/// instead of re-embedding the whole corpus on every pass.
+#[tauri::command]
+pub fn local_plan_document_chunks(
+    app: tauri::AppHandle,
+    document_id: String,
+    model: String,
+) -> Result<DocumentChunkPlan, String> {
+    let database = connection(&app)?;
+    plan_document_chunks(&database, &document_id, &model)
+}
+
+pub(crate) fn plan_document_chunks(
+    database: &Connection,
+    document_id: &str,
+    model: &str,
+) -> Result<DocumentChunkPlan, String> {
+    let markdown: Option<String> = database
+        .query_row(
+            "SELECT markdown FROM local_documents WHERE id=?1",
+            params![document_id],
+            |row| row.get(0),
+        )
+        .map_err(|error| error.to_string())?;
+    let body = markdown.as_deref().unwrap_or("");
+    let hash = content_hash(body);
+    let already_indexed: i64 = database
+        .query_row(
+            "SELECT COUNT(*) FROM embedding_index_state WHERE document_id=?1 AND model=?2 AND content_hash=?3 AND status='READY'",
+            params![document_id, model, hash],
+            |row| row.get(0),
+        )
+        .map_err(|error| error.to_string())?;
+    let chunks = document_chunks(markdown.as_deref())
+        .unwrap_or_default()
+        .into_iter()
+        .enumerate()
+        .map(|(index, (offset, text))| PlannedChunk {
+            chunk_index: index as i64,
+            offset,
+            excerpt: text.chars().take(EXCERPT_LIMIT).collect(),
+            text,
+        })
+        .collect();
+    Ok(DocumentChunkPlan {
+        document_id: document_id.to_string(),
+        model: model.to_string(),
+        content_hash: hash,
+        already_indexed: already_indexed > 0,
+        chunks,
+    })
+}
+
+/// Mark a document as indexed (or failed) for a model, replacing any prior
+/// vectors for that document+model so stale chunks cannot survive a re-index.
+#[tauri::command]
+pub fn local_mark_document_indexed(
+    app: tauri::AppHandle,
+    document_id: String,
+    model: String,
+    content_hash: String,
+    chunk_count: i64,
+    status: String,
+    last_error: Option<String>,
+) -> Result<(), String> {
+    let database = connection(&app)?;
+    mark_document_indexed(
+        &database,
+        &document_id,
+        &model,
+        &content_hash,
+        chunk_count,
+        &status,
+        last_error.as_deref(),
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn mark_document_indexed(
+    database: &Connection,
+    document_id: &str,
+    model: &str,
+    content_hash: &str,
+    chunk_count: i64,
+    status: &str,
+    last_error: Option<&str>,
+) -> Result<(), String> {
+    if !matches!(status, "READY" | "FAILED" | "PENDING") {
+        return Err("unsupported index status".into());
+    }
+    let transaction = database
+        .unchecked_transaction()
+        .map_err(|e| e.to_string())?;
+    if status == "READY" {
+        // Drop vectors for chunks that no longer exist in the new plan.
+        transaction
+            .execute(
+                "DELETE FROM document_embeddings WHERE document_id=?1 AND model=?2 AND chunk_index>=?3",
+                params![document_id, model, chunk_count.max(0)],
+            )
+            .map_err(|e| e.to_string())?;
+    }
+    transaction
+        .execute(
+            "INSERT INTO embedding_index_state(document_id,model,chunk_count,content_hash,status,last_error,updated_at) \
+             VALUES(?,?,?,?,?,?,?) \
+             ON CONFLICT(document_id,model) DO UPDATE SET chunk_count=excluded.chunk_count, content_hash=excluded.content_hash, status=excluded.status, last_error=excluded.last_error, updated_at=excluded.updated_at",
+            params![
+                document_id,
+                model,
+                chunk_count.max(0),
+                content_hash,
+                status,
+                last_error.map(|e| e.chars().take(500).collect::<String>()),
+                unix_seconds()
+            ],
+        )
+        .map_err(|e| e.to_string())?;
+    transaction.commit().map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+/// List documents that still need embedding for `model`, oldest first.
+#[tauri::command]
+pub fn local_list_pending_embeddings(
+    app: tauri::AppHandle,
+    model: String,
+    limit: i64,
+) -> Result<Vec<String>, String> {
+    let database = connection(&app)?;
+    let mut statement = database
+        .prepare(
+            "SELECT d.id FROM local_documents d \
+             LEFT JOIN embedding_index_state s ON s.document_id=d.id AND s.model=?1 AND s.status='READY' \
+             WHERE COALESCE(d.markdown,'') <> '' AND s.document_id IS NULL \
+             ORDER BY d.created_at ASC LIMIT ?2",
+        )
+        .map_err(|error| error.to_string())?;
+    let rows = statement
+        .query_map(params![model, limit.clamp(1, 500)], |row| row.get(0))
+        .map_err(|error| error.to_string())?
+        .collect::<Result<Vec<String>, _>>()
+        .map_err(|error| error.to_string())?;
+    Ok(rows)
+}
+
 #[tauri::command]
 pub fn local_search_similar(
     app: tauri::AppHandle,
@@ -1234,9 +1451,7 @@ pub fn local_save_document(
     document: LocalDocument,
 ) -> Result<LocalDocument, String> {
     let document = save_document_inner(&app, document)?;
-    if let Ok(payload) = serde_json::to_string(&document) {
-        crate::plugins::installer::dispatch_subscribed(&app, "document.saved", &payload);
-    }
+    crate::plugins::installer::notify_document_saved(&app, &document);
     Ok(document)
 }
 
@@ -1245,11 +1460,21 @@ pub(crate) fn save_document_inner(
     document: LocalDocument,
 ) -> Result<LocalDocument, String> {
     let database = connection(&app)?;
+    write_document(&database, &document)?;
+    Ok(document)
+}
+
+/// Persist a document row. Split from [`save_document_inner`] so the write path
+/// can be exercised against an explicit connection in tests.
+pub(crate) fn write_document(
+    database: &Connection,
+    document: &LocalDocument,
+) -> Result<(), String> {
     let tags = serde_json::to_string(&document.tags).map_err(|error| error.to_string())?;
     let auto_tags = serde_json::to_string(&document.auto_tags).unwrap_or_else(|_| "[]".to_string());
     database.execute("INSERT OR REPLACE INTO local_documents(id,title,url,source,author,summary,markdown,word_count,status,tags,auto_tags,created_at,starred) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)", params![document.id, document.title, document.url, document.source, document.author, document.summary, document.markdown, document.word_count, document.status, tags, auto_tags, document.created_at, document.starred as i64])
         .map_err(|error| error.to_string())?;
-    Ok(document)
+    Ok(())
 }
 
 #[tauri::command]
@@ -1325,9 +1550,7 @@ pub fn local_update_document(
         .map_err(|error| error.to_string())?;
     drop(statement);
     drop(database);
-    if let Ok(payload) = serde_json::to_string(&document) {
-        crate::plugins::installer::dispatch_subscribed(&app, "document.updated", &payload);
-    }
+    crate::plugins::installer::notify_document_updated(&app, &document);
     Ok(document)
 }
 
@@ -2634,6 +2857,14 @@ mod tests {
         Connection::open_in_memory().expect("open in-memory db")
     }
 
+    /// Every migration version in declaration order. Deriving the expectation from
+    /// `MIGRATIONS` keeps these assertions correct as versions are appended.
+    fn expected_versions() -> Vec<i64> {
+        let mut versions: Vec<i64> = MIGRATIONS.iter().map(|(version, _)| *version).collect();
+        versions.sort_unstable();
+        versions
+    }
+
     #[test]
     fn document_deserialization_defaults_missing_auto_tags() {
         let document: LocalDocument = serde_json::from_value(serde_json::json!({
@@ -2671,7 +2902,7 @@ mod tests {
             .unwrap()
             .collect::<Result<Vec<_>, _>>()
             .unwrap();
-        assert_eq!(versions, (1..=20).collect::<Vec<_>>());
+        assert_eq!(versions, expected_versions());
     }
 
     #[test]
@@ -2703,7 +2934,7 @@ mod tests {
             .unwrap()
             .collect::<Result<Vec<_>, _>>()
             .unwrap();
-        assert_eq!(versions, (1..=20).collect::<Vec<_>>());
+        assert_eq!(versions, expected_versions());
     }
 
     #[test]
@@ -2719,7 +2950,7 @@ mod tests {
             .unwrap()
             .collect::<Result<Vec<_>, _>>()
             .unwrap();
-        assert_eq!(versions, (1..=20).collect::<Vec<_>>());
+        assert_eq!(versions, expected_versions());
     }
 
     #[test]
@@ -3507,5 +3738,192 @@ mod tests {
         let blob = vector_to_blob(&original);
         let restored = blob_to_vector(&blob);
         assert_eq!(original, restored);
+    }
+
+    // ---- migration 22: embedding index state --------------------------------
+
+    #[test]
+    fn migration_22_creates_embedding_index_state() {
+        let mut database = fresh();
+        run_migrations(&mut database).unwrap();
+        assert!(versions_of(&database).contains(&22));
+        let count: i64 = database
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='embedding_index_state'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(count, 1, "migration 22 must create the index-state table");
+    }
+
+    fn versions_of(database: &Connection) -> Vec<i64> {
+        database
+            .prepare("SELECT version FROM schema_version ORDER BY version")
+            .unwrap()
+            .query_map([], |row| row.get(0))
+            .unwrap()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap()
+    }
+
+    #[test]
+    fn migration_chain_is_idempotent_after_22() {
+        let mut database = fresh();
+        for _ in 0..3 {
+            run_migrations(&mut database).unwrap();
+        }
+        assert_eq!(versions_of(&database), expected_versions());
+        // Re-running must not duplicate the one-time state rows either.
+        database
+            .execute(
+                "INSERT INTO local_documents(id,title,url,status,created_at) VALUES('doc-idem','T','https://example.com','READY','2026-01-01')",
+                [],
+            )
+            .unwrap();
+        for _ in 0..3 {
+            run_migrations(&mut database).unwrap();
+        }
+        assert_eq!(versions_of(&database), expected_versions());
+    }
+
+    fn seed_document(database: &Connection, id: &str, markdown: &str) {
+        // Mirrors the production write path (`INSERT OR REPLACE`) so re-seeding an
+        // id behaves like re-saving a document.
+        database
+            .execute(
+                "INSERT OR REPLACE INTO local_documents(id,title,url,markdown,word_count,status,tags,created_at) \
+                 VALUES(?,?,?,?,?,'READY','[]','2026-01-01T00:00:00Z')",
+                params![id, "Chunked doc", "https://example.com/chunked", markdown, 10],
+            )
+            .unwrap();
+    }
+
+    #[test]
+    fn chunk_plan_is_driven_by_the_real_write_path() {
+        let mut database = fresh();
+        run_migrations(&mut database).unwrap();
+        let mut body = String::new();
+        for index in 0..40 {
+            body.push_str(&format!(
+                "Section {index} discusses retrieval chunking in detail.\n\n"
+            ));
+        }
+        seed_document(&database, "doc-chunks", &body);
+
+        let plan = plan_document_chunks(&database, "doc-chunks", "test-model").unwrap();
+        assert!(
+            plan.chunks.len() >= 2,
+            "a long document must plan multiple chunks, got {}",
+            plan.chunks.len()
+        );
+        assert!(!plan.already_indexed);
+
+        // Persist vectors for every planned chunk the way the worker does.
+        for chunk in &plan.chunks {
+            database
+                .execute(
+                    "INSERT INTO document_embeddings(document_id,chunk_index,model,dims,vector,excerpt,created_at) \
+                     VALUES(?,?,?,?,?,?,?)",
+                    params![
+                        "doc-chunks",
+                        chunk.chunk_index,
+                        "test-model",
+                        3,
+                        vector_to_blob(&[0.1, 0.2, 0.3]),
+                        chunk.excerpt,
+                        1
+                    ],
+                )
+                .unwrap();
+        }
+        let rows: i64 = database
+            .query_row(
+                "SELECT COUNT(*) FROM document_embeddings WHERE document_id='doc-chunks'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            rows as usize,
+            plan.chunks.len(),
+            "every planned chunk must be stored with its own chunk_index"
+        );
+
+        mark_document_indexed(
+            &database,
+            "doc-chunks",
+            "test-model",
+            &plan.content_hash,
+            plan.chunks.len() as i64,
+            "READY",
+            None,
+        )
+        .unwrap();
+
+        let replan = plan_document_chunks(&database, "doc-chunks", "test-model").unwrap();
+        assert!(
+            replan.already_indexed,
+            "an unchanged document must not be re-indexed"
+        );
+    }
+
+    #[test]
+    fn editing_a_document_invalidates_its_index_state() {
+        let mut database = fresh();
+        run_migrations(&mut database).unwrap();
+        seed_document(&database, "doc-edit", "original body text");
+        let first = plan_document_chunks(&database, "doc-edit", "m").unwrap();
+        mark_document_indexed(
+            &database,
+            "doc-edit",
+            "m",
+            &first.content_hash,
+            1,
+            "READY",
+            None,
+        )
+        .unwrap();
+
+        // A real edit through the write path changes the body.
+        seed_document(&database, "doc-edit", "a completely different body");
+        let second = plan_document_chunks(&database, "doc-edit", "m").unwrap();
+        assert_ne!(first.content_hash, second.content_hash);
+        assert!(
+            !second.already_indexed,
+            "changed content must require re-indexing"
+        );
+    }
+
+    #[test]
+    fn reindexing_drops_vectors_beyond_the_new_chunk_count() {
+        let mut database = fresh();
+        run_migrations(&mut database).unwrap();
+        seed_document(&database, "doc-shrink", "long body");
+        for index in 0..5 {
+            database
+                .execute(
+                    "INSERT INTO document_embeddings(document_id,chunk_index,model,dims,vector,excerpt,created_at) \
+                     VALUES('doc-shrink',?,'m',3,?,'e',1)",
+                    params![index, vector_to_blob(&[1.0, 0.0, 0.0])],
+                )
+                .unwrap();
+        }
+        mark_document_indexed(&database, "doc-shrink", "m", "hash", 2, "READY", None).unwrap();
+        let remaining: i64 = database
+            .query_row(
+                "SELECT COUNT(*) FROM document_embeddings WHERE document_id='doc-shrink'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(remaining, 2, "stale chunk vectors must be removed");
+    }
+
+    #[test]
+    fn empty_bodies_are_not_indexable() {
+        assert!(document_chunks(None).is_none());
+        assert!(document_chunks(Some("   ")).is_none());
+        assert!(document_chunks(Some("real text")).is_some());
     }
 }

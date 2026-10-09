@@ -48,7 +48,27 @@ export async function searchDocuments(query: string): Promise<DocumentSearchHit[
 
 export async function saveDocument(input: { title: string; url: string; markdown: string; tags: string[] }): Promise<Document> {
   const localDocument = createDocument(input)
-  return localSave(localDocument)
+  const saved = await localSave(localDocument)
+  await queueBackgroundWork(saved).catch(() => undefined)
+  return saved
+}
+
+/**
+ * Queue the post-save background work for a document.
+ *
+ * Both tasks are best-effort: a failure to enqueue must never fail the save the
+ * user just performed, so errors are swallowed here. The worker applies its own
+ * retry/backoff policy from the `tasks` table.
+ */
+async function queueBackgroundWork(document: Document): Promise<void> {
+  if (!isTauri()) return
+  const providers = await listAIProviders()
+  const provider = providers[0]
+  if (!provider) return
+  await enqueueTask({ kind: 'autotag.generate', documentId: document.id })
+  if (provider.embeddingModel) {
+    await enqueueTask({ kind: 'embedding.index', documentId: document.id })
+  }
 }
 
 export async function getDocument(id: string): Promise<Document> {
@@ -252,6 +272,47 @@ export async function searchSimilarEmbeddings(
   return invoke<EmbeddingMatch[]>('local_search_similar', { model, vector, topK })
 }
 
+export interface PlannedChunk {
+  chunkIndex: number
+  offset: number
+  text: string
+  excerpt: string
+}
+
+export interface DocumentChunkPlan {
+  documentId: string
+  model: string
+  contentHash: string
+  alreadyIndexed: boolean
+  chunks: PlannedChunk[]
+}
+
+/**
+ * Ask the backend to split a document into embeddable chunks. Chunking lives in
+ * Rust so the indexer and its tests agree on boundaries.
+ */
+export async function planDocumentChunks(documentId: string, model: string): Promise<DocumentChunkPlan> {
+  if (!isTauri()) return { documentId, model, contentHash: '', alreadyIndexed: false, chunks: [] }
+  return invoke<DocumentChunkPlan>('local_plan_document_chunks', { documentId, model })
+}
+
+export async function markDocumentIndexed(input: {
+  documentId: string
+  model: string
+  contentHash: string
+  chunkCount: number
+  status: 'PENDING' | 'READY' | 'FAILED'
+  lastError?: string
+}): Promise<void> {
+  if (!isTauri()) return
+  await invoke('local_mark_document_indexed', { ...input, lastError: input.lastError ?? null })
+}
+
+export async function listPendingEmbeddingDocuments(model: string, limit = 20): Promise<string[]> {
+  if (!isTauri()) return []
+  return invoke<string[]>('local_list_pending_embeddings', { model, limit })
+}
+
 export async function aiChatStream(providerId: string, request: ChatRequest): Promise<string> {
   if (!isTauri()) throw new Error('Document unavailable')
   return invoke<string>('ai_chat_stream', { providerId, request })
@@ -316,6 +377,45 @@ export async function listMcpResources(serverId: string): Promise<unknown> {
 export async function callMcpTool(serverId: string, name: string, args: Record<string, unknown>, approved: boolean): Promise<unknown> {
   if (!isTauri()) throw new Error('MCP requires the desktop app')
   return invoke('mcp_call_tool', { serverId, name, arguments: args, approved })
+}
+
+export type AgentRunStatus = 'pending' | 'running' | 'awaiting_approval' | 'completed' | 'failed' | 'cancelled'
+export interface AgentRun {
+  id: string
+  title: string
+  status: AgentRunStatus
+  stepsJson: string
+  finalAnswer?: string
+  lastError?: string
+  startedAt: string
+  finishedAt?: string
+}
+
+export async function recordAgentRun(title: string): Promise<AgentRun> {
+  if (!isTauri()) throw new Error('Agent runs require the desktop app')
+  return invoke<AgentRun>('local_record_agent_run', { input: { title } })
+}
+
+export async function listAgentRuns(limit = 20): Promise<AgentRun[]> {
+  if (!isTauri()) return []
+  return invoke<AgentRun[]>('local_list_agent_runs', { limit })
+}
+
+export async function updateAgentRunStatus(input: {
+  id: string
+  status: AgentRunStatus
+  stepsJson?: string
+  finalAnswer?: string
+  lastError?: string
+}): Promise<void> {
+  if (!isTauri()) return
+  await invoke('local_update_agent_run_status', {
+    id: input.id,
+    status: input.status,
+    stepsJson: input.stepsJson ?? null,
+    finalAnswer: input.finalAnswer ?? null,
+    lastError: input.lastError ?? null,
+  })
 }
 
 export type PluginPermission = 'page_read'|'page_write'|'tab_read'|'tab_create'|'tab_close'|'history_read'|'bookmark_read'|'bookmark_write'|'knowledge_read'|'knowledge_write'|'ai_chat'|'ai_embedding'|'network_request'|'filesystem_read'|'filesystem_write'
@@ -439,6 +539,19 @@ export async function replaceSitePermissions(rules: SitePermissionRule[]): Promi
   if (!isTauri()) return
   const permissions = rules.flatMap(rule => (['camera', 'microphone', 'location', 'notifications', 'clipboard'] as const).map(permissionKind => ({ origin: rule.origin, permissionKind, decision: rule[permissionKind] })))
   await invoke('local_replace_site_permissions', { permissions })
+}
+
+export interface MigrationStatus { version: number; pending: number }
+
+/** Current knowledge-base schema version, so the UI can surface DB health. */
+export async function getMigrationStatus(): Promise<MigrationStatus | null> {
+  if (!isTauri()) return null
+  return invoke<MigrationStatus>('local_migration_status')
+}
+
+/** Site permission rules as stored in the database (the source of truth). */
+export async function listStoredSitePermissions(): Promise<SitePermissionRule[]> {
+  return listSitePermissions()
 }
 
 export const BROWSER_SHORTCUTS_STORAGE_KEY = 'arcadia-browser-shortcuts-enabled'

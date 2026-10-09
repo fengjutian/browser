@@ -5,6 +5,7 @@ import { PageHeader } from '../../shared/components/PageHeader'
 import { callMcpTool, clearBrowserHistory, clearClosedTabs as clearClosedTabsInDb, clearReadingSnapshots, deleteAIProvider, deleteMcpServer, discoverMcpServer, dispatchPluginEvent, exportBackup, getAIProvider, getBrowserShortcutsEnabled, getReadingSnapshotStats, importBackup, installPlugin, listAIProviders, listBrowserHistory, listMcpResources, listMcpServers, listMcpTools, listPluginAudit, listPlugins, purgeReadingSnapshots, replaceSitePermissions, saveAIProvider, saveMcpServer, aiTestProvider, setBrowserShortcutsEnabled, setPluginEnabled, setPluginPermission, uninstallPlugin, type AIProviderInput, type InstalledPlugin, type McpServer, type McpTransport, type PluginAuditEntry, type PluginPermission, type ReadingSnapshotStats } from '../../api'
 import type { AIProvider, AIProviderType } from '../../types'
 import { normalizeOrigin, readSitePermissions, writeSitePermissions, type SitePermissionKind, type SitePermissionRule } from '../../features/browser/sitePermissions'
+import { KnowledgeBaseStatusPanel } from '../../features/settings/KnowledgeBaseStatusPanel'
 import { readThemePreference, writeThemePreference, type ThemePreference } from '../../features/settings/theme'
 import { readSearchEngineConfig, resolveActiveSearchTemplate, SEARCH_ENGINE_PRESETS, writeSearchEngineConfig } from '../../features/browser/searchEngine'
 import { isSearchTemplateValid } from '../../features/browser/navigation'
@@ -808,6 +809,7 @@ function PrivacySettings() {
     { key: 'adblock', label: `广告拦截 ${adStats.totalBlocked}`, children: adBlockContent },
     { key: 'statistics', label: '访问统计', children: statisticsContent },
     { key: 'cleanup', label: '数据清理', children: cleanupContent },
+    { key: 'knowledge-base', label: '知识库', children: <KnowledgeBaseStatusPanel /> },
     { key: 'snapshots', label: `阅读快照 ${snapshotStats.count}`, children: snapshotContent },
     { key: 'export', label: '导入/导出', children: exportContent },
     { key: 'exit', label: '退出时', children: exitContent },

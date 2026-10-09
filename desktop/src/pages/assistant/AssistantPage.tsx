@@ -2,12 +2,16 @@ import { Alert, Avatar, Button, Card, Drawer, Empty, Input, List, message, Space
 import { ArrowRightOutlined, FileTextOutlined, RobotOutlined, SettingOutlined, UserOutlined } from '../../components/ui/icons'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { PageHeader } from '../../shared/components/PageHeader'
-import { aiChat, aiEmbed, getSession, listAIProviders, listDocuments, searchDocuments, searchSimilarEmbeddings, setSession, storeDocumentEmbedding } from '../../api'
+import { aiChat, aiEmbed, getSession, listAIProviders, listDocuments, searchDocuments, searchSimilarEmbeddings, setSession } from '../../api'
 import { DocumentDetailDrawer } from '../../features/documents/DocumentDetailDrawer'
 import { buildCrossAskPrompt, citationIdsInRequest, parseCrossAnswer } from '../../features/ai/crossAsk'
 import type { AIProvider, Document, View } from '../../types'
 import { compactChatHistory, parseStoredConversation } from '../../features/ai/conversation'
 import { reciprocalRankFusion, validateAnswerCitations } from '../../features/ai/rag'
+import { applyReranker, rrfReranker } from '../../features/ai/reranker'
+import { defaultAgentDeps, runResearchAgent } from '../../features/ai/agentLoop'
+import { listAgentRuns, type AgentRun } from '../../api'
+import { AgentRunHistory } from '../../features/ai/AgentRunHistory'
 
 const CONVERSATION_KEY = 'ai.conversation.v1'
 
@@ -44,6 +48,9 @@ export function AssistantPage({ onNavigate }: { onNavigate?: (view: View) => voi
   const [conversationHydrated, setConversationHydrated] = useState(false)
   const [selectedDoc, setSelectedDoc] = useState<Document | null>(null)
   const [sourcesOpen, setSourcesOpen] = useState(false)
+  const [agentOpen, setAgentOpen] = useState(false)
+  const [agentBusy, setAgentBusy] = useState(false)
+  const [agentRuns, setAgentRuns] = useState<AgentRun[]>([])
   const listRef = useRef<HTMLDivElement | null>(null)
 
   useEffect(() => {
@@ -129,16 +136,17 @@ export function AssistantPage({ onNavigate }: { onNavigate?: (view: View) => voi
       const provider = providers.find(item=>item.id===providerId)
       let rankedDocumentIds: string[] | undefined
       if (provider?.embeddingModel) {
-        const candidates = documents.slice(0,64).map(doc=>({doc,text:(doc.markdown||doc.summary||doc.title).slice(0,1800)})).filter(item=>item.text.trim())
-        const vectors = await aiEmbed(providerId,candidates.map(item=>item.text))
-        await Promise.all(candidates.map((item,index)=>storeDocumentEmbedding(item.doc.id,0,provider.embeddingModel!,item.text,vectors[index])))
+        // Retrieval is read-only: vectors are built by the background task
+        // worker, so asking a question never embeds (or re-writes) the corpus.
+        // Only the query itself is embedded here.
         const [queryVector] = await aiEmbed(providerId,[trimmed])
         const [keyword, vector] = await Promise.all([searchDocuments(trimmed),searchSimilarEmbeddings(provider.embeddingModel,queryVector,16)])
-        rankedDocumentIds = reciprocalRankFusion(
+        const fused = await applyReranker(rrfReranker, trimmed, reciprocalRankFusion(
           keyword.map((item,index)=>({documentId:item.id,chunkIndex:0,excerpt:item.markdownSnippet??item.summary??'',score:1/(index+1)})),
           vector.map(item=>({documentId:item.documentId,chunkIndex:item.chunkIndex,excerpt:item.excerpt,score:item.similarity})),
-          {limit:8,maxChunksPerDocument:1},
-        ).map(item=>item.documentId)
+          {limit:8,maxChunksPerDocument:3},
+        ), 8)
+        rankedDocumentIds = fused.map(item=>item.documentId)
       }
       const request = buildCrossAskPrompt(documents, trimmed, history.map(entry => ({ role: entry.role as 'user' | 'assistant', content: entry.content })), { topK: 8, rankedDocumentIds })
       const response = await aiChat(providerId, request)
@@ -160,6 +168,41 @@ export function AssistantPage({ onNavigate }: { onNavigate?: (view: View) => voi
       messageApi.error(message_)
     } finally {
       setBusy(false)
+    }
+  }
+
+  async function openAgent() {
+    setAgentOpen(true)
+    await listAgentRuns(20).then(setAgentRuns).catch(() => setAgentRuns([]))
+  }
+
+  /** Run the bounded research agent and surface its answer as a normal turn. */
+  async function runAgent() {
+    const trimmed = question.trim()
+    if (!providerId || !trimmed || agentBusy) return
+    setAgentBusy(true)
+    const userTurn: UserTurn = { id: `u-${Date.now()}`, role: 'user', content: trimmed }
+    const pendingTurn: AssistantTurn = { id: `a-${Date.now()}`, role: 'assistant', content: '', docIds: [], notFound: false, pending: true }
+    setTurns(current => [...current, userTurn, pendingTurn])
+    setQuestion('')
+    try {
+      const result = await runResearchAgent(defaultAgentDeps, trimmed, { providerId })
+      const content = result.stopped && !result.answer
+        ? `研究未完成：${result.stopped.message}`
+        : result.stopped
+          ? `${result.answer}\n\n（已中止：${result.stopped.message}）`
+          : result.answer
+      setTurns(current => current.map(turn => (
+        turn.id === pendingTurn.id ? { ...turn, content, pending: false } : turn
+      )))
+      await listAgentRuns(20).then(setAgentRuns).catch(() => undefined)
+    } catch (caught) {
+      const text = caught instanceof Error ? caught.message : '研究失败'
+      setTurns(current => current.map(turn => (
+        turn.id === pendingTurn.id ? { ...turn, content: text, pending: false, error: text } : turn
+      )))
+    } finally {
+      setAgentBusy(false)
     }
   }
 
@@ -214,6 +257,9 @@ export function AssistantPage({ onNavigate }: { onNavigate?: (view: View) => voi
             }
             extra={
               <Space>
+                <Button size="small" icon={<RobotOutlined />} onClick={() => void openAgent()}>
+                  Agent 运行历史
+                </Button>
                 <Button size="small" icon={<FileTextOutlined />} onClick={() => setSourcesOpen(true)}>
                   引用来源 {sourceItems.length}
                 </Button>
@@ -300,7 +346,10 @@ export function AssistantPage({ onNavigate }: { onNavigate?: (view: View) => voi
                 onChange={event => setQuestion(event.target.value)}
                 onPressEnter={() => void ask()}
                 placeholder={placeholder}
-                suffix={<Button type="primary" shape="circle" icon={<ArrowRightOutlined />} disabled={!canAsk} loading={busy} onClick={() => void ask()} />}
+                suffix={<Space>
+                  <Button icon={<RobotOutlined />} disabled={!canAsk || agentBusy} loading={agentBusy} onClick={() => void runAgent()} title="用受控 Agent 循环研究这个问题" />
+                  <Button type="primary" shape="circle" icon={<ArrowRightOutlined />} disabled={!canAsk} loading={busy} onClick={() => void ask()} />
+                </Space>}
               />
             </div>
           </Card>
@@ -335,6 +384,15 @@ export function AssistantPage({ onNavigate }: { onNavigate?: (view: View) => voi
           onClose={() => setSelectedDoc(null)}
           onDeleted={() => setSelectedDoc(null)}
         />
+        <Drawer
+          title="Agent 运行历史"
+          placement="right"
+          width={460}
+          open={agentOpen}
+          onClose={() => setAgentOpen(false)}
+        >
+          <AgentRunHistory runs={agentRuns} />
+        </Drawer>
       </section>
     </>
   )

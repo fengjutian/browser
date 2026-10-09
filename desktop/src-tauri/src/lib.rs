@@ -576,11 +576,6 @@ struct PageSnapshot {
     html: String,
 }
 
-#[tauri::command]
-fn validate_navigation(url: String) -> Result<String, String> {
-    browser::normalize_navigation(&url).map_err(|error| error.to_string())
-}
-
 fn external_url(input: &str) -> Result<url::Url, String> {
     let parsed = if let Ok(explicit) = url::Url::parse(input.trim()) {
         explicit
@@ -696,6 +691,8 @@ async fn browser_create(
     let download_app = app.clone();
     let download_label = label.clone();
     let private_mode = private.unwrap_or(false);
+    let page_app = app.clone();
+    let page_label = label.clone();
     let builder = tauri::webview::WebviewBuilder::new(&label, tauri::WebviewUrl::External(url))
         .incognito(private_mode)
         .initialization_script(permission_guard_script(
@@ -705,6 +702,31 @@ async fn browser_create(
         .initialization_script(audio_monitor_script(&label))
         .initialization_script(password_manager_script(&label, private_mode))
         .initialization_script(ad_blocker_script(&label, ad_block_enabled.unwrap_or(true)))
+        .on_page_load(move |webview, payload| {
+            // `on_page_load` takes an `Fn`, so clone per call rather than moving
+            // the captures out of the closure.
+            if payload.event() == tauri::webview::PageLoadEvent::Finished {
+                let app = page_app.clone();
+                let label = page_label.clone();
+                let url = payload.url().to_string();
+                tauri::async_runtime::spawn(async move {
+                    // Best-effort title; a page that blocks script execution just
+                    // yields an empty title rather than dropping the event.
+                    let title = eval_json::<String>(webview, "document.title")
+                        .await
+                        .unwrap_or_default();
+                    crate::plugins::installer::dispatch_subscribed(
+                        &app,
+                        "page.loaded",
+                        &crate::plugins::installer::event_payload(serde_json::json!({
+                            "label": label,
+                            "url": url,
+                            "title": title,
+                        })),
+                    );
+                });
+            }
+        })
         .on_new_window(move |url, _features| {
             if matches!(url.scheme(), "http" | "https") {
                 let _ = event_app.emit_to(
@@ -2002,7 +2024,6 @@ pub fn run() {
             }
         })
         .invoke_handler(tauri::generate_handler![
-            validate_navigation,
             browser_create,
             browser_set_ad_blocking,
             browser_set_muted,
@@ -2028,6 +2049,7 @@ pub fn run() {
             browser_permission_respond,
             browser_password_autofill,
             browser_password_candidate,
+            browser_close_tab,
             local_store::browser_password_save,
             local_store::browser_password_list,
             local_store::browser_password_delete,
@@ -2070,6 +2092,9 @@ pub fn run() {
             local_store::local_delete_ai_provider,
             local_store::local_store_embedding,
             local_store::local_clear_document_embeddings,
+            local_store::local_plan_document_chunks,
+            local_store::local_mark_document_indexed,
+            local_store::local_list_pending_embeddings,
             local_store::local_search_similar,
             local_store::local_save_mcp_server,
             local_store::local_list_mcp_servers,
@@ -2239,6 +2264,41 @@ fn browser_password_candidate(
         },
     )
     .map_err(|error| error.to_string())
+}
+
+/// Close a browser tab WebView and publish the `tab.closed` lifecycle event.
+///
+/// The WebView is closed first and the event is dispatched afterwards, so a
+/// plugin cannot observe or interfere with the teardown. `dispatch_subscribed`
+/// swallows plugin failures by design; an unknown label is reported as an error
+/// because the caller asked to close something that is not there.
+#[tauri::command]
+async fn browser_close_tab(app: tauri::AppHandle, label: String) -> Result<(), String> {
+    validate_browser_label(&label)?;
+    let webview = app
+        .get_webview(&label)
+        .ok_or_else(|| "browser tab webview not found".to_string())?;
+    let url = eval_json::<String>(webview.clone(), "location.href")
+        .await
+        .unwrap_or_default();
+    let title = eval_json::<String>(webview.clone(), "document.title")
+        .await
+        .unwrap_or_default();
+    webview.close().map_err(|error| error.to_string())?;
+    let navs = app.state::<NavStacks>();
+    if let Ok(mut guard) = navs.stacks.lock() {
+        guard.remove(&label);
+    }
+    crate::plugins::installer::dispatch_subscribed(
+        &app,
+        "tab.closed",
+        &crate::plugins::installer::event_payload(serde_json::json!({
+            "label": label,
+            "url": url,
+            "title": title,
+        })),
+    );
+    Ok(())
 }
 
 #[cfg(test)]
