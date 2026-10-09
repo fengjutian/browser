@@ -1,6 +1,6 @@
 ---
 import BaseLayout from '../layouts/BaseLayout.astro';
-import { capabilities } from '../data/site';
+import { capabilities } from '../lib/site';
 import { getCollection } from 'astro:content';
 const products = await getCollection('products', ({data}) => data.featured);
 ---

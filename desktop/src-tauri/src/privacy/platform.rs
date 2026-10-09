@@ -63,10 +63,12 @@ mod win {
     use crate::privacy::listener::{
         classify_resource_type, decide, persist_block_event as persist_block_event_marker, DecideOutcome,
     };
+    use std::sync::Arc;
     use tauri::Manager;
     use webview2_com::Microsoft::Web::WebView2::Win32::{
-        ICoreWebView2_22, ICoreWebView2_2, ICoreWebView2WebResourceRequest,
-        ICoreWebView2WebResourceRequestedEventArgs, COREWEBVIEW2_WEB_RESOURCE_CONTEXT_ALL,
+        ICoreWebView2_22, ICoreWebView2_2, ICoreWebView2Environment,
+        ICoreWebView2WebResourceRequest, ICoreWebView2WebResourceRequestedEventArgs,
+        COREWEBVIEW2_WEB_RESOURCE_CONTEXT_ALL,
     };
     use windows::core::{Interface, PWSTR};
 
@@ -101,6 +103,10 @@ mod win {
                     return;
                 }
             };
+            // Cache the ICoreWebView2Environment up front so the dispatcher
+            // can build a 204 response on a `Block` decision (the response
+            // builder is the only API that needs the env).
+            let env = unsafe { platform.controller().Environment() }.ok();
             // Try the ICoreWebView2_22 path first; fall back to v2.
             let filter_uri = windows::core::HSTRING::from("*");
             if let Ok(core22) = core.cast::<ICoreWebView2_22>() {
@@ -129,6 +135,7 @@ mod win {
             let event_app = event_app.clone();
             let set_for_handler = set_for_closure.clone();
             let label_for_handler = label_for_closure.clone();
+            let env_for_handler = env.clone().map(Arc::new);
             let handler = webview2_com::WebResourceRequestedEventHandler::create(Box::new(
                 move |_sender, args| {
                     dispatch(
@@ -136,6 +143,7 @@ mod win {
                         &label_for_handler,
                         args.as_ref(),
                         &set_for_handler,
+                        env_for_handler.as_deref(),
                     )
                 },
             ));
