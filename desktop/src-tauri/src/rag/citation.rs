@@ -48,7 +48,6 @@ pub struct RagAnswer {
 }
 
 const SOURCE_OPEN: &str = "[SOURCE id=\"";
-const SOURCE_CLOSE: &str = "\"]";
 const SOURCE_END: &str = "[/SOURCE]";
 
 /// Extract `[SOURCE id="..."]...[/SOURCE]` blocks from a model-produced answer.

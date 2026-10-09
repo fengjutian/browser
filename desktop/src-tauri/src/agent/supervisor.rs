@@ -33,15 +33,17 @@ use serde_json::json;
 use tokio::sync::{Mutex, Notify};
 use tokio_util::sync::CancellationToken;
 
-use super::budget::{evaluate as evaluate_budget, BudgetCounters, BudgetLimits};
-use super::runtime::{apply_counters, create_run, leased_by, transition};
+use super::budget::{
+    evaluate as evaluate_budget, BudgetCounters, BudgetLimits, BudgetVerdict,
+};
+use super::runtime::{apply_counters, leased_by, transition};
+#[cfg(test)]
+use super::runtime::create_run;
 use super::tools::{ToolContext, ToolError, ToolRegistry};
 use super::types::AgentStatus;
 
 const LEASE_OWNER: &str = "agent-supervisor";
 const LEASE_TTL_SECONDS: i64 = 60;
-const STEP_LEASE_RENEW_SECONDS: i64 = 20;
-const DEFAULT_RERANK: bool = false;
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -265,12 +267,12 @@ pub fn advance_one_run(database: &Connection, _registry: &ToolRegistry) -> Resul
         deadline_unix_seconds: deadline_at,
     };
     let verdict = evaluate_budget(now, &limits, &counters);
-    if let super::budget::BudgetExhausted { reason, .. } = verdict {
+    if verdict.verdict == BudgetVerdict::Exhausted {
         transition(database, &run_id, AgentStatus::Running, AgentStatus::Paused)?;
         database
             .execute(
                 "UPDATE agent_runs SET last_error=?1, updated_at=?2 WHERE id=?3",
-                rusqlite::params![format!("budget exhausted: {reason}"), now, run_id],
+                rusqlite::params![format!("budget exhausted: {}", verdict.reason), now, run_id],
             )
             .map_err(|e| e.to_string())?;
         return Ok(true);

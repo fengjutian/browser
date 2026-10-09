@@ -185,7 +185,6 @@ fn host_matches_pattern(host: &str, pattern: &str) -> bool {
 }
 
 fn pattern_matches(pattern: &CompiledPattern, url: &str) -> bool {
-    let bytes = url.as_bytes();
     if pattern.anchor_start && pattern.parts.first().map_or(true, |p| !url.starts_with(p)) {
         return false;
     }

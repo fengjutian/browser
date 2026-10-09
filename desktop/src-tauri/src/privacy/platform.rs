@@ -349,13 +349,6 @@ mod win {
         }
     }
 
-    pub fn take_registration_token(label: &str) -> Option<i64> {
-        registration_tokens()
-            .lock()
-            .ok()
-            .and_then(|mut m| m.remove(label))
-    }
-
     fn registration_tokens() -> &'static std::sync::Mutex<std::collections::HashMap<String, i64>> {
         static REG: std::sync::OnceLock<std::sync::Mutex<std::collections::HashMap<String, i64>>> =
             std::sync::OnceLock::new();

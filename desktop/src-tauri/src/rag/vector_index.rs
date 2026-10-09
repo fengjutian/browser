@@ -81,7 +81,7 @@ impl std::error::Error for RagError {}
 pub const BRUTE_FORCE_THRESHOLD: usize = 10_000;
 
 /// Decorator: pick the right engine given current `len()` and `dimensions()`.
-pub fn pick_engine(len: usize, dims: usize) -> IndexKind {
+pub fn pick_engine(len: usize, _dims: usize) -> IndexKind {
     if len < BRUTE_FORCE_THRESHOLD {
         IndexKind::BruteForce
     } else {
@@ -116,7 +116,6 @@ pub struct IndexMetadata {
 pub struct BruteForceVectorIndex {
     dimensions: usize,
     items: Vec<VectorItem>,
-    checksum: String,
 }
 
 impl BruteForceVectorIndex {
@@ -124,7 +123,6 @@ impl BruteForceVectorIndex {
         Self {
             dimensions,
             items: Vec::new(),
-            checksum: String::new(),
         }
     }
 
@@ -132,7 +130,6 @@ impl BruteForceVectorIndex {
         Self {
             dimensions,
             items,
-            checksum: String::new(),
         }
     }
 }
