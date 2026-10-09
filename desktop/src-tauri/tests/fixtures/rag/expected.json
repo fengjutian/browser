@@ -1,0 +1,17 @@
+{
+  "$schema": "https://example.com/schemas/rag-expected.json",
+  "version": "v1",
+  "notes": "Minimum thresholds the harness asserts against. These match the spec A10 recommended starting line; tune via `RagEvalThresholds` if a corpus needs different numbers.",
+  "thresholds": {
+    "recallAt10": 0.85,
+    "mrrAt10": 0.65,
+    "citationPrecision": 0.95,
+    "citationCoverage": 0.90,
+    "refusalRate": 0.90,
+    "p95RetrievalMs": 500
+  },
+  "scenarios": {
+    "zero_corpus_returns_empty": true,
+    "refusal_case_must_set_status_not_required": true
+  }
+}

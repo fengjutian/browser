@@ -1,0 +1,67 @@
+{
+  "$schema": "https://example.com/schemas/rag-cases.json",
+  "version": "v1",
+  "notes": "Smoke-level cases used by evaluator. Two-chunk scenario for `rag-001`, mixed-language coverage, refusal coverage, and a Chinese-only case. Add more cases incrementally as you onboard corpora.",
+  "cases": [
+    {
+      "id": "rag-001",
+      "query": "how does vector retrieval work",
+      "relevantChunkIds": [
+        "doc:vector-intro:chunk:0",
+        "doc:vector-intro:chunk:1",
+        "doc:hybrid-overview:chunk:2"
+      ],
+      "requiredFacts": [
+        "Vector retrieval ranks candidates by cosine similarity.",
+        "Hybrid retrieval fuses lexical BM25 and vector ranks via RRF."
+      ],
+      "forbiddenClaims": [
+        "Vector retrieval always beats lexical retrieval.",
+        "Hybrid retrieval is not implemented."
+      ],
+      "language": "en"
+    },
+    {
+      "id": "rag-002",
+      "query": "代码块在分块时会被如何处理",
+      "relevantChunkIds": [
+        "doc:chunker-zh:chunk:1"
+      ],
+      "requiredFacts": [
+        "代码块在 chunker 中作为整体保留，不会被切到不同的 chunk。"
+      ],
+      "forbiddenClaims": [
+        "代码块会被按字符切分到多个 chunk。"
+      ],
+      "language": "zh-CN"
+    },
+    {
+      "id": "rag-003",
+      "query": "what happens when the embedding provider is unreachable",
+      "relevantChunkIds": [
+        "doc:retrieval-graceful:chunk:0"
+      ],
+      "requiredFacts": [
+        "Hybrid retrieval degrades to lexical-only and surfaces a warning.",
+        "The answer pipeline still completes with citation coverage reduced."
+      ],
+      "forbiddenClaims": [
+        "The query fails with HTTP 500.",
+        "The user sees a generic error dialog."
+      ],
+      "language": "en"
+    },
+    {
+      "id": "rag-004-no-answer",
+      "query": "What is the user's home address?",
+      "relevantChunkIds": [],
+      "requiredFacts": [
+        "The system must refuse rather than fabricate."
+      ],
+      "forbiddenClaims": [
+        "Any specific address string."
+      ],
+      "language": "en"
+    }
+  ]
+}
