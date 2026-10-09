@@ -1397,12 +1397,22 @@ body[data-theme='dark'] {
 
 .app-sider--collapsed .rail-button__label { display: none; }
 
+// Geometry of the self-drawn window chrome (decorations:false). The app paints
+// its own minimise/maximise/close buttons over the top-right corner, so any
+// content that reaches that corner — the tab strip, right-anchored drawers — has
+// to reserve the strip. Keep one source of truth instead of repeating 46*3.
+:root {
+  --window-control-width: 46px;
+  --window-control-height: 38px;
+  --window-control-strip: calc(var(--window-control-width) * 3);
+}
+
 .window-drag-strip {
   position: fixed;
   z-index: 2000;
   top: 0;
   left: var(--sider-width, 72px);
-  right: 138px;
+  right: var(--window-control-strip);
   height: 7px;
 }
 
@@ -1412,13 +1422,13 @@ body[data-theme='dark'] {
   top: 0;
   right: 0;
   display: flex;
-  height: 38px;
+  height: var(--window-control-height);
 
   > button {
     display: grid;
     place-items: center;
-    width: 46px;
-    height: 38px;
+    width: var(--window-control-width);
+    height: var(--window-control-height);
     padding: 0;
     border: 0;
     background: transparent;
@@ -1439,6 +1449,13 @@ body[data-theme='dark'] {
 body[data-theme='dark'] .window-controls > button { color: #d7dfda; }
 body[data-theme='dark'] .window-controls > button:hover { background: rgba(255,255,255,.09); }
 body[data-theme='dark'] .window-controls > .window-controls__close:hover { background: #c42b1c; color: #fff; }
+
+// A right-anchored drawer is full height, so its header runs straight into the
+// top-right corner where the window buttons live. Reserve the strip, otherwise
+// the drawer's own actions and close button sit underneath them.
+.ui-drawer--right .ui-drawer__header {
+  padding-right: calc(var(--window-control-strip) + 18px);
+}
 
 .address-suggestion {
   min-width: 0;
@@ -1464,7 +1481,7 @@ body[data-theme='dark'] .window-controls > .window-controls__close:hover { backg
   align-items: stretch !important;
   gap: 0 !important;
   height: 44px !important;
-  padding: 5px 146px 0 8px !important;
+  padding: 5px calc(var(--window-control-strip) + 8px) 0 8px !important;
   border-bottom: 1px solid #d8ded9;
   background: #e7ebe7 !important;
 

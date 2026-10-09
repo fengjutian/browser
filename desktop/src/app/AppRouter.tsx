@@ -11,18 +11,31 @@ const SettingsPage=lazy(()=>import('../pages/settings/SettingsPage').then(module
 
 export function AppRouter() {
   const [view, setView] = useState<View>('browser')
+  const [mountedViews, setMountedViews] = useState<Set<View>>(() => new Set(['browser']))
   const [knowledgeQuery, setKnowledgeQuery] = useState('')
+  const changeView = (next: View) => {
+    setMountedViews(current => {
+      if (current.has(next)) return current
+      const updated = new Set(current)
+      updated.add(next)
+      return updated
+    })
+    setView(next)
+  }
   const pages = {
     library: <LibraryPage />,
     search: <SearchPage initialQuery={knowledgeQuery} onOpenUrl={url => {
       window.dispatchEvent(new CustomEvent('arcadia-browser-open-url', { detail: { url } }))
-      setView('browser')
+      changeView('browser')
     }} />,
-    ai: <AssistantPage onNavigate={setView} />,
+    ai: <AssistantPage onNavigate={changeView} />,
     settings: <SettingsPage />,
   }
-  return <AppLayout view={view} onViewChange={setView}><Suspense fallback={<div className="route-loading"><Spin size="large"/></div>}>
-    <div className={`route-view${view === 'browser' ? '' : ' is-hidden'}`} data-view="browser"><BrowserPage visible={view === 'browser'} onSearchKnowledge={query => { setKnowledgeQuery(query); setView('search') }}/></div>
-    {view !== 'browser' && <div key={view} className="route-view" data-view={view}>{pages[view]}</div>}
+  const secondaryViews: Exclude<View, 'browser'>[] = ['library', 'search', 'ai', 'settings']
+  return <AppLayout view={view} onViewChange={changeView}><Suspense fallback={<div className="route-loading"><Spin size="large"/></div>}>
+    <div className={`route-view${view === 'browser' ? '' : ' is-hidden'}`} data-view="browser"><BrowserPage visible={view === 'browser'} onSearchKnowledge={query => { setKnowledgeQuery(query); changeView('search') }}/></div>
+    {secondaryViews.map(pageView => mountedViews.has(pageView) && (
+      <div key={pageView} className={`route-view${view === pageView ? '' : ' is-hidden'}`} data-view={pageView}>{pages[pageView]}</div>
+    ))}
   </Suspense></AppLayout>
 }
