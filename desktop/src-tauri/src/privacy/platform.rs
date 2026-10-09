@@ -169,6 +169,7 @@ mod win {
         label: &str,
         args: Option<&ICoreWebView2WebResourceRequestedEventArgs>,
         set: &Arc<CompiledSetHandle>,
+        env: Option<&ICoreWebView2Environment>,
     ) -> windows::core::Result<()> {
         let Some(args) = args else { return Ok(()) };
         let request: ICoreWebView2WebResourceRequest = unsafe { args.Request()? };
@@ -184,13 +185,25 @@ mod win {
         let outcome = decide(&url, None, resource_type, false, set);
 
         if matches!(outcome, DecideOutcome::Blocked) {
-            // Spec batch 7 calls for an empty 204 replacement response.
-            // That requires `ICoreWebView2Environment::CreateWebResourceResponse`
-            // which is not reachable from `args` directly without further
-            // re-derives; the counter is still bumped via `decide` so the
-            // settings UI shows the blocking activity. Persistence into
-            // `privacy_block_events` happens on the next non-COM thread
-            // tick via `flush_throttled`.
+            // Build an empty 204 response from the captured environment
+            // and install it on `args`. When `env` is unavailable (older
+            // WebView2 host) we fall back to counting the block without
+            // suppressing the request — the matcher still records the
+            // decision so the settings UI shows the activity, and the
+            // request simply proceeds (safe underreport rather than fail).
+            if let Some(env) = env {
+                unsafe {
+                    let no_content = windows::core::HSTRING::from("No Content");
+                    let headers = windows::core::HSTRING::from("Content-Length: 0\r\n");
+                    let response = env.CreateWebResourceResponse(
+                        None,
+                        204,
+                        &no_content,
+                        &headers,
+                    )?;
+                    args.SetResponse(&response)?;
+                }
+            }
             let _ = persist_block_event_marker;
             let _ = label;
         }
