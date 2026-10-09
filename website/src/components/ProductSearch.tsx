@@ -13,7 +13,7 @@ export default function ProductSearch({ products }:{ products:Product[] }) {
       <div className="flex gap-2 overflow-x-auto">{['全部','Windows','macOS','Linux'].map(p=><button key={p} onClick={()=>setPlatform(p)} className={`min-h-12 border px-4 text-sm ${platform===p?'border-[var(--acid)] text-[var(--acid)]':'border-[var(--line)]'}`}>{p}</button>)}</div>
     </div>
     <div className="grid gap-4 md:grid-cols-2">{list.map(p=><a href={`/products/${p.id}/`} className="group border border-[var(--line)] bg-[var(--panel)] p-7 transition hover:border-[var(--acid)]" key={p.id}>
-      <div className="mb-12 flex items-start justify-between"><span className="flex size-12 items-center justify-center bg-[var(--acid)] text-xl font-bold text-[#11150f]">{p.title[0]}</span><span className="flex items-center gap-2 text-xs text-[var(--acid)]"><Clock3 size={14}/>{statusLabel[p.status]}</span></div>
+      <div className="mb-12 flex items-start justify-between"><span className="flex size-12 items-center justify-center bg-[var(--acid)] text-xl font-bold text-[var(--acid-ink)]">{p.title[0]}</span><span className="flex items-center gap-2 text-xs text-[var(--acid)]"><Clock3 size={14}/>{statusLabel[p.status]}</span></div>
       <p className="text-xs uppercase tracking-[.16em] text-[var(--muted)]">{p.category} · v{p.version}</p><h2 className="mt-2 text-3xl font-semibold tracking-tight">{p.title}</h2><p className="mt-3 text-[var(--muted)]">{p.description}</p>
       <div className="mt-6 flex items-center gap-2 text-sm"><Monitor size={16}/>{p.platforms.join(' · ')}</div>
     </a>)}</div>
