@@ -5,11 +5,10 @@
 //! the previous session crashed (or the user killed the process) and the
 //! frontend should surface the recovery panel.
 
-use crate::local_store;
 use rusqlite::params;
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SessionLockState {
     pub started_at: i64,
@@ -19,6 +18,39 @@ pub struct SessionLockState {
     pub clean_exit_at: Option<i64>,
     /// True when a lock row from a *previous* run was found at startup.
     pub crashed: bool,
+}
+
+/// Snapshot of the previous session captured before the current run writes
+/// its lock. This avoids confusing the current run's timestamp with evidence
+/// that the previous run crashed.
+#[derive(Default)]
+pub struct SessionBootState {
+    previous: std::sync::Mutex<Option<SessionLockState>>,
+}
+
+impl SessionBootState {
+    pub fn begin(&self, database: &rusqlite::Connection, now: i64) -> Result<(), String> {
+        let previous = detect(database)?;
+        write_lock(database, now)?;
+        *self.previous.lock().map_err(|error| error.to_string())? = Some(previous);
+        Ok(())
+    }
+
+    fn previous(&self) -> Result<SessionLockState, String> {
+        self.previous
+            .lock()
+            .map_err(|error| error.to_string())?
+            .clone()
+            .ok_or_else(|| "session boot state is not initialized".to_string())
+    }
+
+    fn dismiss(&self) -> Result<(), String> {
+        self.previous
+            .lock()
+            .map_err(|error| error.to_string())?
+            .take();
+        Ok(())
+    }
 }
 
 pub fn write_lock(database: &rusqlite::Connection, now: i64) -> Result<(), String> {
@@ -93,16 +125,15 @@ pub fn detect(database: &rusqlite::Connection) -> Result<SessionLockState, Strin
 }
 
 #[tauri::command]
-pub fn browser_session_status(app: tauri::AppHandle) -> Result<SessionLockState, String> {
-    let database = local_store::connection(&app)?;
-    detect(&database)
+pub fn browser_session_status(
+    state: tauri::State<'_, SessionBootState>,
+) -> Result<SessionLockState, String> {
+    state.previous()
 }
 
 #[tauri::command]
-pub fn browser_session_drop(app: tauri::AppHandle) -> Result<(), String> {
-    let database = local_store::connection(&app)?;
-    let now = chrono::Utc::now().timestamp();
-    clear_lock(&database, now)
+pub fn browser_session_drop(state: tauri::State<'_, SessionBootState>) -> Result<(), String> {
+    state.dismiss()
 }
 
 #[cfg(test)]
@@ -140,7 +171,6 @@ mod tests {
         // simulate the boot after a clean shutdown — write_lock again with the
         // current timestamp so the row looks "alive" in detect().
         write_lock(&conn, 3_000).unwrap();
-        let state = detect(&conn).unwrap();
         // clean_exit_at (2000) >= updated_at (3000) is false → crashed=false only
         // when clean_exit_at == updated_at or > updated_at. The semantics are:
         // crashed iff clean_exit_at < updated_at. So set them equal:
@@ -160,6 +190,19 @@ mod tests {
             state.crashed,
             "the second write after clear means we are still alive"
         );
+    }
+
+    #[test]
+    fn begin_preserves_clean_previous_state_before_arming_current_lock() {
+        let conn = fresh_db();
+        write_lock(&conn, 1_000).unwrap();
+        clear_lock(&conn, 1_500).unwrap();
+        let boot = SessionBootState::default();
+
+        boot.begin(&conn, 2_000).unwrap();
+
+        assert!(!boot.previous().unwrap().crashed);
+        assert!(detect(&conn).unwrap().crashed);
     }
 
     #[test]

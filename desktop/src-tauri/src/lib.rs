@@ -1926,6 +1926,7 @@ pub fn run() {
         .manage(AiStreamRegistry::default())
         .manage(plugins::WasmRuntime::default())
         .manage(PermissionWaiters::default())
+        .manage(session_lock::SessionBootState::default())
         .setup(|app| {
             // Set the runtime window icon explicitly as well as the bundled executable
             // icon. This keeps `tauri dev` and packaged Windows builds consistent.
@@ -1933,11 +1934,12 @@ pub fn run() {
             if let Some(window) = app.get_webview_window("main") {
                 window.set_icon(icon)?;
             }
-            // Write the session lock so the next boot can detect a crash.
+            // Capture the previous session before writing the current lock.
             if let Ok(database) = local_store::connection(app.handle()) {
                 let now = chrono::Utc::now().timestamp();
-                if let Err(error) = session_lock::write_lock(&database, now) {
-                    eprintln!("session_lock: write_lock failed: {error}");
+                let boot_state = app.state::<session_lock::SessionBootState>();
+                if let Err(error) = boot_state.begin(&database, now) {
+                    eprintln!("session_lock: begin failed: {error}");
                 }
             }
             plugins::installer::restore_enabled_plugins(app.handle());
