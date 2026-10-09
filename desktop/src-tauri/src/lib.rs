@@ -1,3 +1,4 @@
+pub mod agent;
 pub mod bookmarks;
 pub mod browser;
 pub mod capabilities;
@@ -10,6 +11,7 @@ pub mod plugins;
 pub mod privacy;
 pub mod process_memory;
 pub mod providers;
+pub mod rag;
 pub mod session_lock;
 pub mod webview_compat;
 
@@ -2113,6 +2115,20 @@ pub fn run() {
             local_store::local_record_agent_run,
             local_store::local_list_agent_runs,
             local_store::local_update_agent_run_status,
+            rag::commands::rag_enqueue_document,
+            rag::commands::rag_enqueue_all,
+            rag::commands::rag_cancel_job,
+            rag::commands::rag_retry_job,
+            rag::commands::rag_list_jobs,
+            rag::commands::rag_index_status,
+            rag::commands::rag_rebuild_index,
+            rag::commands::rag_retrieve,
+            privacy::commands::privacy_list_blocklists,
+            privacy::commands::privacy_set_blocklist_enabled,
+            privacy::commands::privacy_get_site_setting,
+            privacy::commands::privacy_set_site_setting,
+            privacy::commands::privacy_list_block_events,
+            privacy::commands::privacy_capability_report,
             ai_chat,
             ai_embed,
             ai_chat_stream,

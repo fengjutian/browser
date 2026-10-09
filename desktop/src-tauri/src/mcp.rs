@@ -1,5 +1,5 @@
-use reqwest::header::{HeaderMap, HeaderName, HeaderValue, ACCEPT, CONTENT_TYPE};
 use futures_util::StreamExt;
+use reqwest::header::{HeaderMap, HeaderName, HeaderValue, ACCEPT, CONTENT_TYPE};
 use rusqlite::params;
 use serde_json::{json, Value};
 use std::io::{BufRead, BufReader, Write};
@@ -69,7 +69,29 @@ fn load_server(app: &tauri::AppHandle, id: &str) -> Result<McpServer, String> {
 
 fn parse_response(text: &str) -> Result<Value, String> {
     let trimmed = text.trim();
-    let value:Value=if trimmed.lines().any(|line|line.starts_with("data:")) {let normalized=trimmed.replace("\r\n","\n");let mut found=None;for event in normalized.split("\n\n"){let payload=event.lines().filter_map(|line|line.strip_prefix("data:").map(str::trim_start)).collect::<Vec<_>>().join("\n");if payload.trim().is_empty()||payload.trim()=="[DONE]"{continue}if let Ok(value)=serde_json::from_str::<Value>(&payload){if value.get("result").is_some()||value.get("error").is_some(){found=Some(value);break}}}found.ok_or("empty MCP SSE response")?}else{serde_json::from_str(trimmed).map_err(|e|format!("invalid MCP response: {e}"))?};
+    let value: Value = if trimmed.lines().any(|line| line.starts_with("data:")) {
+        let normalized = trimmed.replace("\r\n", "\n");
+        let mut found = None;
+        for event in normalized.split("\n\n") {
+            let payload = event
+                .lines()
+                .filter_map(|line| line.strip_prefix("data:").map(str::trim_start))
+                .collect::<Vec<_>>()
+                .join("\n");
+            if payload.trim().is_empty() || payload.trim() == "[DONE]" {
+                continue;
+            }
+            if let Ok(value) = serde_json::from_str::<Value>(&payload) {
+                if value.get("result").is_some() || value.get("error").is_some() {
+                    found = Some(value);
+                    break;
+                }
+            }
+        }
+        found.ok_or("empty MCP SSE response")?
+    } else {
+        serde_json::from_str(trimmed).map_err(|e| format!("invalid MCP response: {e}"))?
+    };
     if let Some(error) = value.get("error") {
         return Err(format!("MCP error: {error}"));
     }
@@ -111,8 +133,22 @@ async fn request(
         .await
         .map_err(|e| format!("MCP connection failed: {e}"))?;
     let status = response.status();
-    if response.content_length().is_some_and(|length|length>8*1024*1024){return Err("MCP response exceeds 8 MiB".into())}
-    let mut stream=response.bytes_stream();let mut body=Vec::new();while let Some(chunk)=stream.next().await{let chunk=chunk.map_err(|e|e.to_string())?;if body.len().saturating_add(chunk.len())>8*1024*1024{return Err("MCP response exceeds 8 MiB".into())}body.extend_from_slice(&chunk)}let text=String::from_utf8(body).map_err(|_|"MCP response is not UTF-8")?;
+    if response
+        .content_length()
+        .is_some_and(|length| length > 8 * 1024 * 1024)
+    {
+        return Err("MCP response exceeds 8 MiB".into());
+    }
+    let mut stream = response.bytes_stream();
+    let mut body = Vec::new();
+    while let Some(chunk) = stream.next().await {
+        let chunk = chunk.map_err(|e| e.to_string())?;
+        if body.len().saturating_add(chunk.len()) > 8 * 1024 * 1024 {
+            return Err("MCP response exceeds 8 MiB".into());
+        }
+        body.extend_from_slice(&chunk)
+    }
+    let text = String::from_utf8(body).map_err(|_| "MCP response is not UTF-8")?;
     if !status.is_success() {
         return Err(format!(
             "MCP HTTP {}: {}",
@@ -145,7 +181,14 @@ async fn request_stdio(
             .map_err(|e| format!("MCP stdio launch failed: {e}"))?;
         let mut stdin = child.stdin.take().ok_or("MCP stdio stdin unavailable")?;
         let stdout = child.stdout.take().ok_or("MCP stdio stdout unavailable")?;
-        let stderr=child.stderr.take().ok_or("MCP stdio stderr unavailable")?;std::thread::spawn(move||{for line in BufReader::new(stderr).lines(){if line.is_err(){break}}});
+        let stderr = child.stderr.take().ok_or("MCP stdio stderr unavailable")?;
+        std::thread::spawn(move || {
+            for line in BufReader::new(stderr).lines() {
+                if line.is_err() {
+                    break;
+                }
+            }
+        });
         let id = uuid::Uuid::new_v4().to_string();
         let body = serde_json::to_string(
             &json!({"jsonrpc":"2.0","id":id,"method":method,"params":params_value}),
@@ -153,8 +196,43 @@ async fn request_stdio(
         .map_err(|e| e.to_string())?;
         writeln!(stdin, "{body}").map_err(|e| e.to_string())?;
         stdin.flush().map_err(|e| e.to_string())?;
-        drop(stdin);let (tx,rx)=std::sync::mpsc::channel();let expected=id.clone();std::thread::spawn(move||{for line in BufReader::new(stdout).lines(){let line=match line{Ok(value)=>value,Err(error)=>{let _=tx.send(Err(error.to_string()));return}};let Ok(value)=serde_json::from_str::<Value>(&line) else{continue};if value.get("id").and_then(Value::as_str)!=Some(expected.as_str()){continue}let result=if let Some(error)=value.get("error"){Err(format!("MCP error: {error}"))}else{value.get("result").cloned().ok_or_else(||"MCP response has no result".into())};let _=tx.send(result);return}let _=tx.send(Err("MCP stdio server closed without a response".into()));});
-        let result=rx.recv_timeout(Duration::from_secs(45)).map_err(|_|"MCP stdio request timed out".to_string());let _=child.kill();let _=child.wait();result?
+        drop(stdin);
+        let (tx, rx) = std::sync::mpsc::channel();
+        let expected = id.clone();
+        std::thread::spawn(move || {
+            for line in BufReader::new(stdout).lines() {
+                let line = match line {
+                    Ok(value) => value,
+                    Err(error) => {
+                        let _ = tx.send(Err(error.to_string()));
+                        return;
+                    }
+                };
+                let Ok(value) = serde_json::from_str::<Value>(&line) else {
+                    continue;
+                };
+                if value.get("id").and_then(Value::as_str) != Some(expected.as_str()) {
+                    continue;
+                }
+                let result = if let Some(error) = value.get("error") {
+                    Err(format!("MCP error: {error}"))
+                } else {
+                    value
+                        .get("result")
+                        .cloned()
+                        .ok_or_else(|| "MCP response has no result".into())
+                };
+                let _ = tx.send(result);
+                return;
+            }
+            let _ = tx.send(Err("MCP stdio server closed without a response".into()));
+        });
+        let result = rx
+            .recv_timeout(Duration::from_secs(45))
+            .map_err(|_| "MCP stdio request timed out".to_string());
+        let _ = child.kill();
+        let _ = child.wait();
+        result?
     })
     .await
     .map_err(|e| e.to_string())?
@@ -224,6 +302,10 @@ mod tests {
             parse_response("event: message\ndata: {\"result\":{\"ok\":true}}\n").unwrap()["ok"],
             true
         );
-        assert_eq!(parse_response("event: message\ndata: {\"result\":\ndata: {\"ok\":true}}\n\n").unwrap()["ok"],true);
+        assert_eq!(
+            parse_response("event: message\ndata: {\"result\":\ndata: {\"ok\":true}}\n\n").unwrap()
+                ["ok"],
+            true
+        );
     }
 }

@@ -1,10 +1,6 @@
-//! Real WebView2 navigation-level filtering. The DOM-based injection script in
-//! `lib.rs` still handles cosmetic ad cleanup; this module subscribes to
-//! `NavigationStarting` so we can cancel top-level frame requests that match a
-//! known tracking host BEFORE the WebView dispatches the request.
-//!
-//! Sub-resource blocking (`WebResourceRequested`) requires custom session
-//! management and is not addressed here — out of scope for this commit.
+//! Legacy WebView2 navigation-level filtering. Preserved verbatim from the
+//! pre-batch-6 single-file privacy module — its top-level cancellation path
+//! still runs alongside the new rule engine compiled from `privacy::compiler`.
 
 use serde::Serialize;
 use std::collections::HashSet;
@@ -106,9 +102,7 @@ pub fn is_blocked_host(url: &str) -> bool {
 }
 
 /// Subscribe to `NavigationStarting` so we can cancel requests to baseline
-/// blocked hosts. On non-Windows targets this is a no-op (the platform's
-/// WKWebView / WebKitGTK do not expose an equivalent callback without private
-/// APIs).
+/// blocked hosts. On non-Windows targets this is a no-op.
 pub fn attach_navigation_guard<R: Runtime>(app: &AppHandle<R>, label: &str) {
     #[cfg(target_os = "windows")]
     {

@@ -1,0 +1,8 @@
+---
+import BaseLayout from '../../layouts/BaseLayout.astro';
+import ProductSearch from '../../components/ProductSearch';
+import { getCollection } from 'astro:content';
+const entries = await getCollection('products');
+const products = entries.map(({id,data}) => ({ id, title:data.title, description:data.description, category:data.category, platforms:data.platforms, status:data.status, version:data.version }));
+---
+<BaseLayout title="产品中心" description="探索 Arcadia 软件产品、平台支持与开发状态。"><section class="shell py-20 md:py-28"><p class="eyebrow">Product directory</p><div class="mt-6 grid gap-8 md:grid-cols-[1fr_.6fr] md:items-end"><h1 class="section-title">为深度工作<br/>而设计的软件。</h1><p class="muted">从阅读到研究，每个产品都围绕一个原则构建：让工具减少信息摩擦，而不是制造更多噪音。</p></div><div class="mt-14"><ProductSearch products={products} client:load/></div></section></BaseLayout>

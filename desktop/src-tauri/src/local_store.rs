@@ -366,6 +366,257 @@ const MIGRATIONS: &[(i64, &str)] = &[
         );
         CREATE INDEX idx_embedding_index_state_status ON embedding_index_state(status);",
     ),
+    (
+        23,
+        "CREATE TABLE document_chunks (
+            id TEXT PRIMARY KEY,
+            document_id TEXT NOT NULL,
+            chunk_index INTEGER NOT NULL,
+            title TEXT NOT NULL DEFAULT '',
+            heading_path TEXT NOT NULL DEFAULT '[]',
+            content TEXT NOT NULL,
+            tags TEXT NOT NULL DEFAULT '[]',
+            content_hash TEXT NOT NULL,
+            token_count INTEGER NOT NULL DEFAULT 0,
+            start_offset INTEGER NOT NULL DEFAULT 0,
+            end_offset INTEGER NOT NULL DEFAULT 0,
+            chunker_version TEXT NOT NULL DEFAULT 'markdown-structure-v1',
+            created_at INTEGER NOT NULL,
+            updated_at INTEGER NOT NULL,
+            UNIQUE(document_id, chunk_index),
+            FOREIGN KEY(document_id) REFERENCES local_documents(id) ON DELETE CASCADE
+        );
+        CREATE INDEX idx_document_chunks_document ON document_chunks(document_id, chunk_index);
+        CREATE INDEX idx_document_chunks_hash ON document_chunks(content_hash);
+        -- Chunk-level FTS5 mirror. Columns denormalized into document_chunks
+        -- itself (title/tags/heading_path/content), so the external-content
+        -- approach used by local_documents_fts stays correct: triggers below
+        -- keep the FTS in sync with rowid-changes on document_chunks.
+        CREATE VIRTUAL TABLE document_chunks_fts USING fts5(
+            title,
+            heading_path,
+            content,
+            tags,
+            content='document_chunks',
+            content_rowid='rowid',
+            tokenize='unicode61'
+        );
+        CREATE TRIGGER document_chunks_ai AFTER INSERT ON document_chunks BEGIN
+            INSERT INTO document_chunks_fts(rowid, title, heading_path, content, tags)
+                VALUES (new.rowid, new.title, new.heading_path, new.content, new.tags);
+        END;
+        CREATE TRIGGER document_chunks_ad AFTER DELETE ON document_chunks BEGIN
+            INSERT INTO document_chunks_fts(document_chunks_fts, rowid, title, heading_path, content, tags)
+                VALUES('delete', old.rowid, old.title, old.heading_path, old.content, old.tags);
+        END;
+        CREATE TRIGGER document_chunks_au AFTER UPDATE ON document_chunks BEGIN
+            INSERT INTO document_chunks_fts(document_chunks_fts, rowid, title, heading_path, content, tags)
+                VALUES('delete', old.rowid, old.title, old.heading_path, old.content, old.tags);
+            INSERT INTO document_chunks_fts(rowid, title, heading_path, content, tags)
+                VALUES (new.rowid, new.title, new.heading_path, new.content, new.tags);
+        END;
+        ALTER TABLE document_embeddings ADD COLUMN chunk_id TEXT;
+        ALTER TABLE document_embeddings ADD COLUMN dimensions INTEGER NOT NULL DEFAULT 0;
+        ALTER TABLE document_embeddings ADD COLUMN provider_id TEXT NOT NULL DEFAULT '';
+        ALTER TABLE document_embeddings ADD COLUMN embedding_version TEXT NOT NULL DEFAULT 'v1';
+        ALTER TABLE document_embeddings ADD COLUMN content_hash TEXT NOT NULL DEFAULT '';
+        ALTER TABLE document_embeddings ADD COLUMN updated_at INTEGER NOT NULL DEFAULT 0;
+        -- Backfill dimensions from the legacy `dims` column so the new column
+        -- is meaningful for any embeddings indexed before this migration.
+        UPDATE document_embeddings SET dimensions = dims WHERE dimensions = 0 AND dims > 0;
+        CREATE TABLE rag_index_jobs (
+            id TEXT PRIMARY KEY,
+            document_id TEXT NOT NULL,
+            provider_id TEXT NOT NULL,
+            model TEXT NOT NULL,
+            status TEXT NOT NULL CHECK(status IN ('PENDING','CHUNKING','EMBEDDING','INDEXING','COMPLETED','FAILED','CANCELLED','STALE')),
+            chunker_version TEXT NOT NULL DEFAULT 'markdown-structure-v1',
+            total_chunks INTEGER NOT NULL DEFAULT 0,
+            completed_chunks INTEGER NOT NULL DEFAULT 0,
+            attempts INTEGER NOT NULL DEFAULT 0,
+            max_attempts INTEGER NOT NULL DEFAULT 5,
+            available_at INTEGER NOT NULL,
+            started_at INTEGER,
+            finished_at INTEGER,
+            last_error TEXT,
+            created_at INTEGER NOT NULL,
+            updated_at INTEGER NOT NULL,
+            FOREIGN KEY(document_id) REFERENCES local_documents(id) ON DELETE CASCADE
+        );
+        CREATE INDEX idx_rag_index_jobs_status ON rag_index_jobs(status, available_at);
+        CREATE INDEX idx_rag_index_jobs_document ON rag_index_jobs(document_id);",
+    ),
+    (
+        24,
+        "-- Widen agent_runs.status CHECK to include the new statuses introduced by
+        -- the Agent Rust Runtime (planning / paused / retry_wait / interrupted).
+        -- SQLite cannot ALTER a CHECK constraint in place, so we rebuild the
+        -- table in a transaction. Existing rows are migrated verbatim and the
+        -- new columns are added with backfill defaults to satisfy NOT NULL.
+        CREATE TABLE agent_runs_new (
+            id TEXT PRIMARY KEY,
+            title TEXT NOT NULL,
+            status TEXT NOT NULL CHECK(status IN ('pending','planning','running','awaiting_approval','paused','retry_wait','completed','failed','cancelled','interrupted')),
+            steps_json TEXT NOT NULL DEFAULT '[]',
+            final_answer TEXT,
+            last_error TEXT,
+            started_at INTEGER NOT NULL,
+            finished_at INTEGER,
+            objective TEXT,
+            provider_id TEXT,
+            model TEXT,
+            created_at INTEGER NOT NULL DEFAULT 0,
+            updated_at INTEGER NOT NULL DEFAULT 0,
+            lease_owner TEXT,
+            lease_expires_at INTEGER,
+            current_step INTEGER NOT NULL DEFAULT 0,
+            max_steps INTEGER NOT NULL DEFAULT 0,
+            max_tool_calls INTEGER NOT NULL DEFAULT 0,
+            max_prompt_tokens INTEGER NOT NULL DEFAULT 0,
+            max_completion_tokens INTEGER NOT NULL DEFAULT 0,
+            max_cost_micros INTEGER NOT NULL DEFAULT 0,
+            deadline_at INTEGER,
+            checkpoint_version INTEGER NOT NULL DEFAULT 0
+        );
+        INSERT INTO agent_runs_new (id, title, status, steps_json, final_answer, last_error, started_at, finished_at)
+            SELECT id, title, status, steps_json, final_answer, last_error, started_at, finished_at FROM agent_runs;
+        DROP TABLE agent_runs;
+        ALTER TABLE agent_runs_new RENAME TO agent_runs;
+        CREATE INDEX idx_agent_runs_status ON agent_runs(status);
+        CREATE INDEX idx_agent_runs_status_updated ON agent_runs(status, updated_at);
+        CREATE TABLE agent_steps (
+            id TEXT PRIMARY KEY,
+            run_id TEXT NOT NULL,
+            step_index INTEGER NOT NULL,
+            kind TEXT NOT NULL,
+            status TEXT NOT NULL,
+            title TEXT NOT NULL DEFAULT '',
+            input_json TEXT NOT NULL DEFAULT '{}',
+            output_json TEXT NOT NULL DEFAULT '{}',
+            error TEXT,
+            started_at INTEGER,
+            finished_at INTEGER,
+            prompt_tokens INTEGER NOT NULL DEFAULT 0,
+            completion_tokens INTEGER NOT NULL DEFAULT 0,
+            cost_micros INTEGER NOT NULL DEFAULT 0,
+            UNIQUE(run_id, step_index),
+            FOREIGN KEY(run_id) REFERENCES agent_runs(id) ON DELETE CASCADE
+        );
+        CREATE INDEX idx_agent_steps_run ON agent_steps(run_id, step_index);
+        CREATE TABLE agent_tool_calls (
+            id TEXT PRIMARY KEY,
+            run_id TEXT NOT NULL,
+            step_id TEXT,
+            tool_name TEXT NOT NULL,
+            tool_version TEXT NOT NULL DEFAULT '',
+            arguments_json TEXT NOT NULL DEFAULT '{}',
+            arguments_hash TEXT NOT NULL,
+            risk_level TEXT NOT NULL,
+            requires_approval INTEGER NOT NULL DEFAULT 0,
+            -- approval_id is a soft reference. The foreign key direction is
+            -- agent_approvals.tool_call_id -> agent_tool_calls.id; a reverse FK
+            -- would create a cycle, which SQLite cannot enforce with
+            -- ALTER TABLE deferred FKs. Integrity is maintained by application.
+            approval_id TEXT,
+            status TEXT NOT NULL,
+            result_json TEXT,
+            result_summary TEXT,
+            error TEXT,
+            idempotency_key TEXT,
+            started_at INTEGER,
+            finished_at INTEGER,
+            FOREIGN KEY(run_id) REFERENCES agent_runs(id) ON DELETE CASCADE,
+            FOREIGN KEY(step_id) REFERENCES agent_steps(id) ON DELETE SET NULL
+        );
+        CREATE INDEX idx_agent_tool_calls_run ON agent_tool_calls(run_id, started_at);
+        CREATE INDEX idx_agent_tool_calls_step ON agent_tool_calls(step_id);
+        CREATE TABLE agent_approvals (
+            id TEXT PRIMARY KEY,
+            run_id TEXT NOT NULL,
+            tool_call_id TEXT NOT NULL,
+            status TEXT NOT NULL CHECK(status IN ('PENDING','APPROVED','DENIED','EXPIRED','CANCELLED')),
+            requested_at INTEGER NOT NULL,
+            expires_at INTEGER,
+            decided_at INTEGER,
+            decision_source TEXT,
+            display_summary TEXT NOT NULL DEFAULT '',
+            approved_arguments_hash TEXT,
+            FOREIGN KEY(run_id) REFERENCES agent_runs(id) ON DELETE CASCADE,
+            FOREIGN KEY(tool_call_id) REFERENCES agent_tool_calls(id) ON DELETE CASCADE
+        );
+        CREATE INDEX idx_agent_approvals_run ON agent_approvals(run_id, status);
+        CREATE TABLE agent_checkpoints (
+            id TEXT PRIMARY KEY,
+            run_id TEXT NOT NULL,
+            step_index INTEGER NOT NULL,
+            state_json TEXT NOT NULL,
+            created_at INTEGER NOT NULL,
+            FOREIGN KEY(run_id) REFERENCES agent_runs(id) ON DELETE CASCADE
+        );
+        CREATE INDEX idx_agent_checkpoints_run ON agent_checkpoints(run_id, step_index);
+        CREATE TABLE agent_artifacts (
+            id TEXT PRIMARY KEY,
+            run_id TEXT NOT NULL,
+            kind TEXT NOT NULL,
+            title TEXT NOT NULL DEFAULT '',
+            payload_json TEXT NOT NULL DEFAULT '{}',
+            file_path TEXT,
+            document_id TEXT,
+            created_at INTEGER NOT NULL,
+            FOREIGN KEY(run_id) REFERENCES agent_runs(id) ON DELETE CASCADE
+        );
+        CREATE INDEX idx_agent_artifacts_run ON agent_artifacts(run_id, created_at);",
+    ),
+    (
+        25,
+        "CREATE TABLE privacy_filter_lists (
+            id TEXT PRIMARY KEY,
+            name TEXT NOT NULL,
+            url TEXT NOT NULL,
+            enabled INTEGER NOT NULL DEFAULT 1,
+            etag TEXT,
+            last_modified TEXT,
+            checksum TEXT NOT NULL DEFAULT '',
+            format_version TEXT NOT NULL DEFAULT '',
+            last_checked_at INTEGER,
+            last_updated_at INTEGER,
+            last_error TEXT,
+            rule_count INTEGER NOT NULL DEFAULT 0,
+            unsupported_rule_count INTEGER NOT NULL DEFAULT 0,
+            created_at INTEGER NOT NULL,
+            updated_at INTEGER NOT NULL
+        );
+        CREATE INDEX idx_privacy_filter_lists_enabled ON privacy_filter_lists(enabled);
+        CREATE TABLE privacy_site_settings (
+            origin TEXT PRIMARY KEY,
+            protection_enabled INTEGER NOT NULL DEFAULT 1,
+            allow_ads INTEGER NOT NULL DEFAULT 0,
+            allow_trackers INTEGER NOT NULL DEFAULT 0,
+            allow_cosmetic INTEGER NOT NULL DEFAULT 0,
+            updated_at INTEGER NOT NULL
+        );
+        CREATE TABLE privacy_block_events (
+            id TEXT PRIMARY KEY,
+            tab_label TEXT,
+            top_level_origin TEXT NOT NULL,
+            request_host TEXT NOT NULL,
+            resource_type TEXT NOT NULL,
+            rule_id INTEGER,
+            rule_category TEXT,
+            blocked_at INTEGER NOT NULL
+        );
+        CREATE INDEX idx_privacy_block_events_blocked ON privacy_block_events(blocked_at DESC);
+        CREATE INDEX idx_privacy_block_events_origin ON privacy_block_events(top_level_origin, blocked_at DESC);
+        CREATE TABLE privacy_daily_stats (
+            stat_date TEXT NOT NULL,
+            origin TEXT NOT NULL,
+            category TEXT NOT NULL,
+            resource_type TEXT NOT NULL,
+            blocked_count INTEGER NOT NULL DEFAULT 0,
+            PRIMARY KEY(stat_date, origin, category, resource_type)
+        );
+        CREATE INDEX idx_privacy_daily_stats_date ON privacy_daily_stats(stat_date DESC);",
+    ),
 ];
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -3925,5 +4176,346 @@ mod tests {
         assert!(document_chunks(None).is_none());
         assert!(document_chunks(Some("   ")).is_none());
         assert!(document_chunks(Some("real text")).is_some());
+    }
+
+    // ---- migration 23/24/25: batch-1 schema contracts -----------------------
+
+    fn assert_table_exists(database: &Connection, name: &str) {
+        let count: i64 = database
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type IN ('table') AND name=?1",
+                params![name],
+                |row| row.get(0),
+            )
+            .expect("count sqlite_master");
+        assert!(count > 0, "expected table `{name}` to exist");
+    }
+
+    fn assert_index_exists(database: &Connection, name: &str) {
+        let count: i64 = database
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type='index' AND name=?1",
+                params![name],
+                |row| row.get(0),
+            )
+            .expect("count sqlite_master");
+        assert!(count > 0, "expected index `{name}` to exist");
+    }
+
+    /// After running the full chain on a fresh in-memory database every batch-1
+    /// table and its supporting indexes must be present.
+    #[test]
+    fn batch1_tables_and_indexes_are_created_on_a_fresh_database() {
+        let mut database = fresh();
+        run_migrations(&mut database).unwrap();
+
+        // RAG
+        for table in ["document_chunks", "document_chunks_fts", "rag_index_jobs"] {
+            assert_table_exists(&database, table);
+        }
+        for index in [
+            "idx_document_chunks_document",
+            "idx_document_chunks_hash",
+            "idx_rag_index_jobs_status",
+            "idx_rag_index_jobs_document",
+        ] {
+            assert_index_exists(&database, index);
+        }
+        // Agent
+        for table in [
+            "agent_steps",
+            "agent_tool_calls",
+            "agent_approvals",
+            "agent_checkpoints",
+            "agent_artifacts",
+        ] {
+            assert_table_exists(&database, table);
+        }
+        for index in [
+            "idx_agent_steps_run",
+            "idx_agent_tool_calls_run",
+            "idx_agent_approvals_run",
+            "idx_agent_checkpoints_run",
+            "idx_agent_artifacts_run",
+        ] {
+            assert_index_exists(&database, index);
+        }
+        // Privacy
+        for table in [
+            "privacy_filter_lists",
+            "privacy_site_settings",
+            "privacy_block_events",
+            "privacy_daily_stats",
+        ] {
+            assert_table_exists(&database, table);
+        }
+        for index in [
+            "idx_privacy_filter_lists_enabled",
+            "idx_privacy_block_events_blocked",
+            "idx_privacy_block_events_origin",
+            "idx_privacy_daily_stats_date",
+        ] {
+            assert_index_exists(&database, index);
+        }
+    }
+
+    /// Simulates a user upgrading from v22 to current. The old tables and
+    /// data must remain intact while the new tables appear and the
+    /// `agent_runs` table-rebuild carries over any pre-existing rows.
+    #[test]
+    fn upgrading_from_v22_preserves_existing_data_and_creates_batch1_tables() {
+        let mut database = fresh();
+
+        // Bootstrap an older DB by manually applying migrations 1..=22 only
+        // (mirrors an install that has been updated through migration 22 but
+        // never received 23+).
+        database
+            .execute_batch(
+                "CREATE TABLE schema_version(version INTEGER PRIMARY KEY, applied_at INTEGER NOT NULL)",
+            )
+            .unwrap();
+        for (version, sql) in MIGRATIONS.iter().filter(|(v, _)| *v <= 22) {
+            database.execute_batch(sql).unwrap_or_else(|error| {
+                panic!("applying pre-batch1 migration {version} failed: {error}")
+            });
+        }
+        database
+            .execute(
+                "INSERT INTO schema_version(version, applied_at) \
+                 SELECT version, ?1 FROM (SELECT 1 AS version UNION ALL SELECT 2 UNION ALL SELECT 3 \
+                  UNION ALL SELECT 4 UNION ALL SELECT 5 UNION ALL SELECT 6 UNION ALL SELECT 7 \
+                  UNION ALL SELECT 8 UNION ALL SELECT 9 UNION ALL SELECT 10 UNION ALL SELECT 11 \
+                  UNION ALL SELECT 12 UNION ALL SELECT 13 UNION ALL SELECT 14 UNION ALL SELECT 15 \
+                  UNION ALL SELECT 16 UNION ALL SELECT 17 UNION ALL SELECT 18 UNION ALL SELECT 19 \
+                  UNION ALL SELECT 20 UNION ALL SELECT 21 UNION ALL SELECT 22)",
+                params![unix_seconds()],
+            )
+            .ok();
+
+        // Seed data that pre-dates batch 1: a document with an embedding and
+        // an agent_run in 'running' state.
+        database
+            .execute(
+                "INSERT INTO local_documents(id, title, url, status, created_at) \
+                 VALUES('legacy-doc', 'Legacy', 'https://example.com', 'READY', '2026-01-01')",
+                [],
+            )
+            .unwrap();
+        database
+            .execute(
+                "INSERT INTO document_embeddings(document_id, chunk_index, model, dims, vector, excerpt, created_at) \
+                 VALUES('legacy-doc', 0, 'legacy-model', 4, ?1, 'excerpt', 1)",
+                params![vector_to_blob(&[0.1, 0.2, 0.3, 0.4])],
+            )
+            .unwrap();
+        database
+            .execute(
+                "INSERT INTO agent_runs(id, title, status, started_at) \
+                 VALUES('legacy-run', 'Legacy run', 'running', 1)",
+                [],
+            )
+            .unwrap();
+
+        // Now apply the full chain; this must include the table-rebuild that
+        // migration 24 performs and the new columns added to
+        // `document_embeddings`.
+        run_migrations(&mut database).expect("batch 1 migrations must apply on top of v22");
+
+        // Old data preserved.
+        let doc_title: String = database
+            .query_row(
+                "SELECT title FROM local_documents WHERE id='legacy-doc'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(doc_title, "Legacy");
+
+        let run_title: String = database
+            .query_row(
+                "SELECT title FROM agent_runs WHERE id='legacy-run'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(run_title, "Legacy run");
+
+        // Embedding survived the migration and the new `dimensions` column
+        // was backfilled from the legacy `dims` column.
+        let (dims, dimensions): (i64, i64) = database
+            .query_row(
+                "SELECT dims, dimensions FROM document_embeddings \
+                 WHERE document_id='legacy-doc' AND chunk_index=0 AND model='legacy-model'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(dims, 4);
+        assert_eq!(
+            dimensions, 4,
+            "migration must backfill `dimensions` from the legacy `dims`"
+        );
+
+        // New tables are wired in.
+        for table in [
+            "document_chunks",
+            "rag_index_jobs",
+            "agent_steps",
+            "agent_tool_calls",
+            "agent_approvals",
+            "privacy_filter_lists",
+        ] {
+            assert_table_exists(&database, table);
+        }
+
+        // The widened CHECK on agent_runs.status must accept the new
+        // statuses introduced in the spec.
+        for new_status in ["planning", "paused", "retry_wait", "interrupted"] {
+            database
+                .execute(
+                    "INSERT INTO agent_runs(id,title,status,started_at,updated_at) \
+                     VALUES(?,?,?,?,?)",
+                    params![format!("run-{new_status}"), "new", new_status, 1_i64, 1_i64,],
+                )
+                .unwrap_or_else(|error| {
+                    panic!("agent_runs.status CHECK was not widened for {new_status}: {error}")
+                });
+        }
+    }
+
+    /// The new table triggers on document_chunks must keep document_chunks_fts
+    /// in sync with INSERT / UPDATE / DELETE. This is the regression guard for
+    /// the FTS5 denormalization pattern used in migration 23.
+    #[test]
+    fn chunk_fts_triggers_keep_document_chunks_fts_in_sync() {
+        let mut database = fresh();
+        run_migrations(&mut database).unwrap();
+        database
+            .execute(
+                "INSERT INTO local_documents(id, title, url, status, created_at) \
+                 VALUES('fts-doc', 'Doc', 'https://example.com', 'READY', '2026-01-01')",
+                [],
+            )
+            .unwrap();
+
+        database
+            .execute(
+                "INSERT INTO document_chunks(id, document_id, chunk_index, title, heading_path, content, tags, content_hash, chunker_version, created_at, updated_at) \
+                 VALUES('chunk-1','fts-doc',0,'Doc','[\"h1\"]','gamma and epsilon','[\"alpha\"]','h','markdown-structure-v1',1,1)",
+                [],
+            )
+            .unwrap();
+
+        let hit: i64 = database
+            .query_row(
+                "SELECT COUNT(*) FROM document_chunks_fts WHERE document_chunks_fts MATCH 'gamma'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(hit, 1, "FTS index must mirror document_chunks inserts");
+
+        database
+            .execute(
+                "UPDATE document_chunks SET content='only epsilon now' WHERE id='chunk-1'",
+                [],
+            )
+            .unwrap();
+        let stale: i64 = database
+            .query_row(
+                "SELECT COUNT(*) FROM document_chunks_fts WHERE document_chunks_fts MATCH 'gamma'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            stale, 0,
+            "FTS triggers must apply the delete-then-insert on UPDATE"
+        );
+        let fresh: i64 = database
+            .query_row(
+                "SELECT COUNT(*) FROM document_chunks_fts WHERE document_chunks_fts MATCH 'epsilon'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(fresh, 1, "FTS triggers must apply the insert on UPDATE");
+
+        database
+            .execute("DELETE FROM document_chunks WHERE id='chunk-1'", [])
+            .unwrap();
+        let after_delete: i64 = database
+            .query_row(
+                "SELECT COUNT(*) FROM document_chunks_fts WHERE document_chunks_fts MATCH 'epsilon'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            after_delete, 0,
+            "FTS triggers must apply the delete on DELETE"
+        );
+    }
+
+    /// rag_index_jobs state machine must accept the full set of statuses the
+    /// supervisor uses; otherwise retried/cancelled runs would corrupt their
+    /// own row.
+    #[test]
+    fn rag_index_jobs_status_check_matches_supervisor_lifecycle() {
+        let mut database = fresh();
+        run_migrations(&mut database).unwrap();
+        database
+            .execute(
+                "INSERT INTO local_documents(id, title, url, status, created_at) \
+                 VALUES('jobs-doc', 'Doc', 'https://example.com', 'READY', '2026-01-01')",
+                [],
+            )
+            .unwrap();
+
+        for (index, status) in [
+            "PENDING",
+            "CHUNKING",
+            "EMBEDDING",
+            "INDEXING",
+            "COMPLETED",
+            "FAILED",
+            "CANCELLED",
+            "STALE",
+        ]
+        .iter()
+        .enumerate()
+        {
+            database
+                .execute(
+                    "INSERT INTO rag_index_jobs(id, document_id, provider_id, model, status, available_at, created_at, updated_at) \
+                     VALUES(?, 'jobs-doc', 'p1', 'm1', ?, 1, 1, 1)",
+                    params![format!("job-{index}"), status],
+                )
+                .unwrap_or_else(|error| {
+                    panic!("rag_index_jobs must accept status {status}: {error}")
+                });
+        }
+        let count: i64 = database
+            .query_row("SELECT COUNT(*) FROM rag_index_jobs", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(count, 8);
+    }
+
+    /// Re-running migrations must be a no-op once everything is applied. This
+    /// catches accidentally-duplicated DDL or partial transactional commits.
+    #[test]
+    fn rerunning_migrations_after_batch1_is_idempotent() {
+        let mut database = fresh();
+        run_migrations(&mut database).unwrap();
+        let first = versions_of(&database);
+        for _ in 0..3 {
+            run_migrations(&mut database).unwrap();
+        }
+        assert_eq!(versions_of(&database), first);
+        // Re-running the FTS trigger creation must not error either.
+        for _ in 0..2 {
+            run_migrations(&mut database).unwrap();
+        }
+        assert_eq!(versions_of(&database), first);
     }
 }

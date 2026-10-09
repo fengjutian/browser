@@ -1,0 +1,7 @@
+---
+import BaseLayout from '../../layouts/BaseLayout.astro';
+import { getCollection } from 'astro:content';
+const [product] = await getCollection('products');
+const platforms = [{name:'Windows',note:'Windows 10/11 · x64'},{name:'macOS',note:'Apple Silicon / Intel'},{name:'Linux',note:'AppImage · x64'}];
+---
+<BaseLayout title="下载" description="查看 Arcadia 的平台支持、版本状态与发布信息。"><section class="shell py-20 md:py-28"><p class="eyebrow">Download center</p><h1 class="section-title mt-6">准备好时，<br/>我们会把它交给你。</h1><p class="muted mt-7 max-w-2xl text-lg">Arcadia v{product.data.version} 仍在开发验证中。为避免分发未经签名或未完成安全检查的安装包，公开下载暂未开放。</p><div class="mt-14 grid gap-4 md:grid-cols-3">{platforms.map(p=><article class="border border-[var(--line)] bg-[var(--panel)] p-7"><div class="mb-16 text-xs text-[var(--acid)]">PLANNED</div><h2 class="text-2xl font-semibold">{p.name}</h2><p class="muted mt-2 text-sm">{p.note}</p><button class="btn mt-7 w-full cursor-not-allowed opacity-50" disabled>开发中</button></article>)}</div><div class="mt-12 border-l-2 border-[var(--acid)] bg-[var(--panel)] p-6"><h2 class="font-semibold">版本说明 · v{product.data.version}</h2><p class="muted mt-2">当前仓库已具备浏览、阅读器、知识库、搜索、AI Provider、隐私保护与插件权限框架。公开测试版将补充安装签名、自动更新和跨平台回归验证。</p></div></section></BaseLayout>

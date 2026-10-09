@@ -90,7 +90,12 @@ impl bindings::arcadia::plugin::host::Host for HostState {
         let value: AiRequest =
             serde_json::from_str(&request_json).map_err(|e| format!("invalid AI request: {e}"))?;
         let response = tauri::async_runtime::block_on(async move {
-            tokio::time::timeout(TIMEOUT,crate::ai_chat(app,value.provider_id,value.request)).await.map_err(|_|"AI host call timed out".to_string())?
+            tokio::time::timeout(
+                TIMEOUT,
+                crate::ai_chat(app, value.provider_id, value.request),
+            )
+            .await
+            .map_err(|_| "AI host call timed out".to_string())?
         })?;
         serde_json::to_string(&response).map_err(|e| e.to_string())
     }
@@ -140,14 +145,30 @@ impl bindings::arcadia::plugin::host::Host for HostState {
         if let Some(body) = value.body {
             request = request.body(body)
         }
-        let (status,headers,bytes)=tauri::async_runtime::block_on(async move {
-            let response=request.send().await.map_err(|e|e.to_string())?;
-            if response.content_length().is_some_and(|length|length>8*1024*1024){return Err("HTTP response exceeds 8 MiB".into())}
-            let status=response.status().as_u16();
-            let headers=response.headers().iter().map(|(k,v)|(k.to_string(),v.to_str().unwrap_or("").to_string())).collect::<HashMap<_,_>>();
-            let mut stream=response.bytes_stream();let mut bytes=Vec::new();
-            while let Some(chunk)=stream.next().await{let chunk=chunk.map_err(|e|e.to_string())?;if bytes.len().saturating_add(chunk.len())>8*1024*1024{return Err("HTTP response exceeds 8 MiB".into())}bytes.extend_from_slice(&chunk)}
-            Ok::<_,String>((status,headers,bytes))
+        let (status, headers, bytes) = tauri::async_runtime::block_on(async move {
+            let response = request.send().await.map_err(|e| e.to_string())?;
+            if response
+                .content_length()
+                .is_some_and(|length| length > 8 * 1024 * 1024)
+            {
+                return Err("HTTP response exceeds 8 MiB".into());
+            }
+            let status = response.status().as_u16();
+            let headers = response
+                .headers()
+                .iter()
+                .map(|(k, v)| (k.to_string(), v.to_str().unwrap_or("").to_string()))
+                .collect::<HashMap<_, _>>();
+            let mut stream = response.bytes_stream();
+            let mut bytes = Vec::new();
+            while let Some(chunk) = stream.next().await {
+                let chunk = chunk.map_err(|e| e.to_string())?;
+                if bytes.len().saturating_add(chunk.len()) > 8 * 1024 * 1024 {
+                    return Err("HTTP response exceeds 8 MiB".into());
+                }
+                bytes.extend_from_slice(&chunk)
+            }
+            Ok::<_, String>((status, headers, bytes))
         })?;
         Ok(serde_json::json!({"status":status,"headers":headers,"body":String::from_utf8_lossy(&bytes)}).to_string())
     }
@@ -202,10 +223,13 @@ impl WasmRuntime {
         Engine::new(&config).map_err(|e| e.to_string())
     }
     fn arm_timeout(engine: Engine) -> Arc<AtomicBool> {
-        let cancelled=Arc::new(AtomicBool::new(false));let timer_cancelled=cancelled.clone();
+        let cancelled = Arc::new(AtomicBool::new(false));
+        let timer_cancelled = cancelled.clone();
         std::thread::spawn(move || {
             std::thread::sleep(TIMEOUT);
-            if !timer_cancelled.load(Ordering::Acquire){engine.increment_epoch();}
+            if !timer_cancelled.load(Ordering::Acquire) {
+                engine.increment_epoch();
+            }
         });
         cancelled
     }
@@ -250,11 +274,19 @@ impl PluginRuntime for WasmRuntime {
             },
         );
         store.limiter(|state| &mut state.limits);
-        let timeout=Self::prepare(&mut store, &engine)?;
-        let initialized=(||{let guest = bindings::ArcadiaPlugin::instantiate(&mut store, &component, &linker)
-            .map_err(|e| format!("component instantiate failed: {e}"))?;
-        guest.arcadia_plugin_guest().call_initialize(&mut store, "{}").map_err(|e| format!("initialize trapped: {e}"))?.map_err(|e| format!("initialize failed: {e}"))?;Ok::<_,String>(guest)})();
-        timeout.store(true,Ordering::Release);let guest=initialized?;
+        let timeout = Self::prepare(&mut store, &engine)?;
+        let initialized = (|| {
+            let guest = bindings::ArcadiaPlugin::instantiate(&mut store, &component, &linker)
+                .map_err(|e| format!("component instantiate failed: {e}"))?;
+            guest
+                .arcadia_plugin_guest()
+                .call_initialize(&mut store, "{}")
+                .map_err(|e| format!("initialize trapped: {e}"))?
+                .map_err(|e| format!("initialize failed: {e}"))?;
+            Ok::<_, String>(guest)
+        })();
+        timeout.store(true, Ordering::Release);
+        let guest = initialized?;
         self.instances
             .lock()
             .map_err(|_| "plugin runtime lock poisoned")?
@@ -280,19 +312,27 @@ impl PluginRuntime for WasmRuntime {
         let instance = self
             .instances
             .lock()
-            .map_err(|_| "plugin runtime lock poisoned")?.get(plugin_id).cloned().ok_or("plugin is not running")?;
-        let mut instance=instance.lock().map_err(|_|"plugin instance lock poisoned")?;
-        let engine=instance.engine.clone();let timeout=Self::prepare(&mut instance.store, &engine)?;
+            .map_err(|_| "plugin runtime lock poisoned")?
+            .get(plugin_id)
+            .cloned()
+            .ok_or("plugin is not running")?;
+        let mut instance = instance
+            .lock()
+            .map_err(|_| "plugin instance lock poisoned")?;
+        let engine = instance.engine.clone();
+        let timeout = Self::prepare(&mut instance.store, &engine)?;
         let event = bindings::arcadia::plugin::host::Event {
             kind: kind.into(),
             payload_json: payload_json.into(),
         };
-        let RunningInstance{guest,store,..}=&mut *instance;
-        let result=guest
+        let RunningInstance { guest, store, .. } = &mut *instance;
+        let result = guest
             .arcadia_plugin_guest()
             .call_handle_event(store, &event)
             .map_err(|e| format!("event trapped: {e}"))
-            .and_then(|value|value.map_err(|e| format!("event failed: {e}")));timeout.store(true,Ordering::Release);result
+            .and_then(|value| value.map_err(|e| format!("event failed: {e}")));
+        timeout.store(true, Ordering::Release);
+        result
     }
     fn stop(&self, plugin_id: &str) -> Result<(), String> {
         if let Some(instance) = self
@@ -301,12 +341,18 @@ impl PluginRuntime for WasmRuntime {
             .map_err(|_| "plugin runtime lock poisoned")?
             .remove(plugin_id)
         {
-            let mut instance=instance.lock().map_err(|_|"plugin instance lock poisoned")?;let engine=instance.engine.clone();let timeout=Self::prepare(&mut instance.store, &engine)?;
-            let RunningInstance{guest,store,..}=&mut *instance;
-            let result=guest
+            let mut instance = instance
+                .lock()
+                .map_err(|_| "plugin instance lock poisoned")?;
+            let engine = instance.engine.clone();
+            let timeout = Self::prepare(&mut instance.store, &engine)?;
+            let RunningInstance { guest, store, .. } = &mut *instance;
+            let result = guest
                 .arcadia_plugin_guest()
                 .call_shutdown(store)
-                .map_err(|e| format!("shutdown trapped: {e}"));timeout.store(true,Ordering::Release);result?;
+                .map_err(|e| format!("shutdown trapped: {e}"));
+            timeout.store(true, Ordering::Release);
+            result?;
         }
         Ok(())
     }

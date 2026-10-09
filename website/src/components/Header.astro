@@ -1,0 +1,11 @@
+---
+const path = Astro.url.pathname;
+const nav = [['产品','/products/'],['下载','/download/'],['关于','/about/'],['联系','/contact/']];
+---
+<header class="sticky top-0 z-50 border-b border-[var(--line)] bg-[color:rgba(14,17,15,.9)] backdrop-blur-xl">
+  <div class="shell flex h-[72px] items-center justify-between">
+    <a href="/" class="flex items-center gap-3 font-bold tracking-[-.02em]" aria-label="Arcadia 首页"><span class="flex size-9 items-center justify-center bg-[var(--acid)] text-[#11150f]">A</span><span>ARCADIA</span></a>
+    <nav class="hidden items-center gap-8 md:flex" aria-label="主导航">{nav.map(([label,href]) => <a class:list={["text-sm transition hover:text-[var(--acid)]", path.startsWith(href) && "text-[var(--acid)]"]} href={href}>{label}</a>)}</nav>
+    <a href="/download/" class="btn btn-primary !min-h-10 !px-4 text-sm">获取 Arcadia</a>
+  </div>
+</header>
