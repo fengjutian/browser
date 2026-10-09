@@ -134,7 +134,10 @@ pub fn metric_citation_precision(cited: &[String], valid_ids: &[String]) -> f64 
         return 1.0;
     }
     let valid: std::collections::HashSet<&str> = valid_ids.iter().map(|s| s.as_str()).collect();
-    let good = cited.iter().filter(|id| valid.contains(id.as_str())).count();
+    let good = cited
+        .iter()
+        .filter(|id| valid.contains(id.as_str()))
+        .count();
     good as f64 / cited.len() as f64
 }
 
@@ -142,9 +145,10 @@ pub fn metric_citation_coverage(answer_paragraphs: &[String], cited: &[String]) 
     if answer_paragraphs.is_empty() {
         return 1.0;
     }
-    let covered = answer_paragraphs.iter().filter(|p| {
-        cited.iter().any(|id| p.contains(id))
-    }).count();
+    let covered = answer_paragraphs
+        .iter()
+        .filter(|p| cited.iter().any(|id| p.contains(id)))
+        .count();
     covered as f64 / answer_paragraphs.len() as f64
 }
 
@@ -163,11 +167,12 @@ pub fn aggregate(measurements: &[CaseMeasurement], cases: &[RagEvalCase]) -> Rag
     let mut refusal_rate_acc: Vec<(bool, bool)> = Vec::new();
     let mut failures = Vec::new();
 
-    let per_case: HashMap<String, &RagEvalCase> =
-        cases.iter().map(|c| (c.id.clone(), c)).collect();
+    let per_case: HashMap<String, &RagEvalCase> = cases.iter().map(|c| (c.id.clone(), c)).collect();
 
     for m in measurements {
-        let Some(case) = per_case.get(&m.case_id) else { continue };
+        let Some(case) = per_case.get(&m.case_id) else {
+            continue;
+        };
         let r5 = metric_recall_at_k(&m.retrieved_ids, &case.relevant_chunk_ids, 5);
         let r10 = metric_recall_at_k(&m.retrieved_ids, &case.relevant_chunk_ids, 10);
         let m_v = metric_mrr(&m.retrieved_ids, &case.relevant_chunk_ids);
@@ -197,9 +202,21 @@ pub fn aggregate(measurements: &[CaseMeasurement], cases: &[RagEvalCase]) -> Rag
         }
     }
 
-    let avg = |v: &[f64]| if v.is_empty() { 0.0 } else { v.iter().sum::<f64>() / v.len() as f64 };
-    let refusal_count = refusal_rate_acc.iter().filter(|(needs_refuse, did_refuse)| *needs_refuse && *did_refuse).count();
-    let refusal_total = refusal_rate_acc.iter().filter(|(needs_refuse, _)| *needs_refuse).count();
+    let avg = |v: &[f64]| {
+        if v.is_empty() {
+            0.0
+        } else {
+            v.iter().sum::<f64>() / v.len() as f64
+        }
+    };
+    let refusal_count = refusal_rate_acc
+        .iter()
+        .filter(|(needs_refuse, did_refuse)| *needs_refuse && *did_refuse)
+        .count();
+    let refusal_total = refusal_rate_acc
+        .iter()
+        .filter(|(needs_refuse, _)| *needs_refuse)
+        .count();
     let refusal_rate = if refusal_total == 0 {
         1.0
     } else {
@@ -233,7 +250,10 @@ fn percentile(sorted: &[u128], p: f64) -> u128 {
 
 /// Helper for the runtime: drives one case through the full orchestrator and
 /// times it. Used by the integration entry point once we have a real DB.
-pub fn time_orchestrator_once<F: FnOnce() -> Vec<String>>(case_id: &str, run: F) -> CaseMeasurement {
+pub fn time_orchestrator_once<F: FnOnce() -> Vec<String>>(
+    case_id: &str,
+    run: F,
+) -> CaseMeasurement {
     let started = Instant::now();
     let retrieved = run();
     CaseMeasurement {

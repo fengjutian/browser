@@ -215,7 +215,9 @@ fn pattern_matches(pattern: &CompiledPattern, url: &str) -> bool {
 }
 
 fn url_host(url: &str) -> Option<String> {
-    url::Url::parse(url).ok().and_then(|u| u.host_str().map(|s| s.to_string()))
+    url::Url::parse(url)
+        .ok()
+        .and_then(|u| u.host_str().map(|s| s.to_string()))
 }
 
 #[cfg(test)]

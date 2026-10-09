@@ -74,7 +74,10 @@ impl RetrievalFilters {
             if !ids.is_empty() {
                 fts_where.push(format!(
                     "c.document_id IN ({})",
-                    std::iter::repeat("?").take(ids.len()).collect::<Vec<_>>().join(",")
+                    std::iter::repeat("?")
+                        .take(ids.len())
+                        .collect::<Vec<_>>()
+                        .join(",")
                 ));
                 for id in ids {
                     params_collector.push(id.clone());
@@ -87,7 +90,12 @@ impl RetrievalFilters {
         // touch code that will be replaced by the unified RAG layer. The hook
         // is here so retrieval.rs can pass them through to the SQL builder
         // without rewriting this method.
-        let _ = (self.collection_ids.as_ref(), self.tags.as_ref(), self.date_from, self.date_to);
+        let _ = (
+            self.collection_ids.as_ref(),
+            self.tags.as_ref(),
+            self.date_from,
+            self.date_to,
+        );
     }
 }
 
@@ -99,7 +107,9 @@ pub fn sanitize_fts_query(query: &str) -> String {
     let cleaned: Vec<String> = query
         .split_whitespace()
         .filter_map(|t| {
-            let t = t.trim_matches(|c: char| !c.is_alphanumeric() && c != '_' && c != '-' && c != '.' && (c as u32) > 127);
+            let t = t.trim_matches(|c: char| {
+                !c.is_alphanumeric() && c != '_' && c != '-' && c != '.' && (c as u32) > 127
+            });
             if t.is_empty() {
                 None
             } else {
@@ -152,25 +162,21 @@ pub fn retrieve(
     let mut stmt = database.prepare(&sql).map_err(|e| e.to_string())?;
     let k_string = candidate_k.to_string();
     let raw_rows = stmt
-        .query_map(
-            rusqlite::params_from_iter([&fts_query, &k_string]),
-            |row| {
-                let heading_json: String = row.get(3)?;
-                let heading_path: Vec<String> =
-                    serde_json::from_str(&heading_json).unwrap_or_default();
-                Ok(LexicalHit {
-                    chunk_id: row.get(0)?,
-                    document_id: row.get(1)?,
-                    chunk_index: row.get(2)?,
-                    title: row.get(5)?,
-                    url: row.get(6)?,
-                    heading_path,
-                    excerpt: String::new(),
-                    text: row.get(4)?,
-                    bm25_score: 0.0,
-                })
-            },
-        )
+        .query_map(rusqlite::params_from_iter([&fts_query, &k_string]), |row| {
+            let heading_json: String = row.get(3)?;
+            let heading_path: Vec<String> = serde_json::from_str(&heading_json).unwrap_or_default();
+            Ok(LexicalHit {
+                chunk_id: row.get(0)?,
+                document_id: row.get(1)?,
+                chunk_index: row.get(2)?,
+                title: row.get(5)?,
+                url: row.get(6)?,
+                heading_path,
+                excerpt: String::new(),
+                text: row.get(4)?,
+                bm25_score: 0.0,
+            })
+        })
         .map_err(|e| e.to_string())?;
 
     let mut hits = Vec::new();
@@ -279,8 +285,20 @@ mod tests {
     #[test]
     fn fts5_finds_matching_chunks() {
         let conn = empty_fts_db();
-        seed(&conn, "doc-a", "Alpha", "the quick brown fox jumps", &["english"]);
-        seed(&conn, "doc-b", "Beta", "lazy dogs and quantum physics", &["science"]);
+        seed(
+            &conn,
+            "doc-a",
+            "Alpha",
+            "the quick brown fox jumps",
+            &["english"],
+        );
+        seed(
+            &conn,
+            "doc-b",
+            "Beta",
+            "lazy dogs and quantum physics",
+            &["science"],
+        );
         let result = retrieve(&conn, "fox", &RetrievalFilters::default(), 10).unwrap();
         assert_eq!(result.hits.len(), 1);
         assert_eq!(result.hits[0].document_id, "doc-a");

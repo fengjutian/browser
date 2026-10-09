@@ -21,6 +21,7 @@ use std::sync::Arc;
 use tauri::{AppHandle, Runtime};
 
 use super::compiler::CompiledSetHandle;
+use super::events::PrivacyEventSender;
 
 /// Capability surface that the platform layer reports back. The UI calls
 /// `privacy_capability_report` which forwards this through.
@@ -33,24 +34,181 @@ pub struct PlatformCapability {
 
 pub const PLATFORM_PLACEHOLDER: &str = std::env::consts::OS;
 
+/// Per-tab runtime state: the top-level origin (so we can compute
+/// third-party accurately) and the privacy event sender used to record
+/// blocks. The state is owned by the platform module's static
+/// `TAB_STATE`; detach is a no-op when the label is unknown.
+#[derive(Clone, Default)]
+pub struct TabState {
+    pub top_level_origin: String,
+    pub top_level_url: String,
+    pub private: bool,
+}
+
+fn tab_state_map() -> &'static std::sync::RwLock<std::collections::HashMap<String, TabState>> {
+    static TAB_STATE: std::sync::OnceLock<
+        std::sync::RwLock<std::collections::HashMap<String, TabState>>,
+    > = std::sync::OnceLock::new();
+    TAB_STATE.get_or_init(|| std::sync::RwLock::new(std::collections::HashMap::new()))
+}
+
+/// Set the current top-level origin for `label`. Called from the React side
+/// on `NavigationStarting` / `NavigationCompleted` events.
+pub fn set_tab_origin(label: &str, url: &str) {
+    let origin = url_origin(url);
+    let mut guard = match tab_state_map().write() {
+        Ok(g) => g,
+        Err(_) => return,
+    };
+    let entry = guard.entry(label.to_string()).or_default();
+    entry.top_level_origin = origin;
+    entry.top_level_url = url.to_string();
+}
+
+pub fn set_tab_private(label: &str, private: bool) {
+    if let Ok(mut guard) = tab_state_map().write() {
+        guard.entry(label.to_string()).or_default().private = private;
+    }
+}
+
+pub fn remove_tab(label: &str) {
+    if let Ok(mut guard) = tab_state_map().write() {
+        guard.remove(label);
+    }
+}
+
+pub fn tab_origin(label: &str) -> Option<TabState> {
+    tab_state_map()
+        .read()
+        .ok()
+        .and_then(|g| g.get(label).cloned())
+}
+
+/// Extract the scheme://host[:port] from a URL string. Falls back to the
+/// empty string when the URL is not parseable.
+pub fn url_origin(url: &str) -> String {
+    let scheme_end = url.find("://").map(|i| i + 3).unwrap_or(0);
+    let rest = &url[scheme_end..];
+    let authority_end = rest
+        .find(|c: char| c == '/' || c == '?' || c == '#')
+        .unwrap_or(rest.len());
+    url[..scheme_end + authority_end].to_string()
+}
+
+/// Return whether `request_host` is third-party relative to
+/// `top_level_origin`. Uses registrable-domain matching when both are
+/// hostnames and falls back to byte-level equality when either is an IP.
+pub fn is_third_party(top_level_origin: &str, request_host: &str) -> bool {
+    let top_host = host_of_origin(top_level_origin);
+    let top_host = strip_port(&top_host);
+    let req_host = strip_port(request_host.trim());
+    if top_host.is_empty() || req_host.is_empty() {
+        return false;
+    }
+    let top_reg = registrable_domain(&top_host);
+    let req_reg = registrable_domain(&req_host);
+    match (top_reg, req_reg) {
+        (Some(a), Some(b)) => a != b,
+        _ => top_host != req_host,
+    }
+}
+
+fn strip_port(host: &str) -> String {
+    // IPv6 literal: `[::1]` — strip the brackets and any ":port" suffix.
+    if let Some(rest) = host.strip_prefix('[') {
+        if let Some(end) = rest.find(']') {
+            return rest[..end].to_string();
+        }
+    }
+    if let Some(idx) = host.rfind(':') {
+        return host[..idx].to_string();
+    }
+    host.to_string()
+}
+
+fn host_of_origin(origin: &str) -> String {
+    let scheme_end = origin.find("://").map(|i| i + 3).unwrap_or(0);
+    let rest = &origin[scheme_end..];
+    // IPv6: bracketed literal `[::1]:port`. Don't split on the first `:`.
+    if let Some(bracket_start) = rest.find('[') {
+        if let Some(bracket_end_rel) = rest[bracket_start..].find(']') {
+            let abs_end = bracket_start + bracket_end_rel;
+            return rest[bracket_start..=abs_end].to_string();
+        }
+    }
+    let host_end = rest
+        .find(|c: char| c == ':' || c == '/' || c == '?' || c == '#')
+        .unwrap_or(rest.len());
+    rest[..host_end].to_string()
+}
+
+/// Compute a registrable domain using a small static suffix list. Good
+/// enough for first-party checks against common trackers; private/local
+/// hosts short-circuit to the host itself.
+fn registrable_domain(host: &str) -> Option<String> {
+    if host.is_empty() {
+        return None;
+    }
+    if host.parse::<std::net::IpAddr>().is_ok() {
+        return Some(host.to_ascii_lowercase());
+    }
+    if host.eq_ignore_ascii_case("localhost")
+        || host.ends_with(".local")
+        || host.ends_with(".localhost")
+    {
+        return Some(host.to_ascii_lowercase());
+    }
+    // Punycode: lower-case and keep the xn-- labels intact.
+    let host = host.to_ascii_lowercase();
+    let parts: Vec<&str> = host.split('.').collect();
+    if parts.len() < 2 {
+        return Some(host);
+    }
+    const PUBLIC_SUFFIXES: &[&str] = &[
+        "co.uk", "co.jp", "co.kr", "co.nz", "co.za", "com.au", "com.br", "com.cn", "com.mx",
+        "com.tr", "com.tw", "com.sg", "com.hk", "com.ar", "com.pl", "com.ru", "com.ua",
+    ];
+    let last_two = format!("{}.{}", parts[parts.len() - 2], parts[parts.len() - 1]);
+    if PUBLIC_SUFFIXES.contains(&last_two.as_str()) && parts.len() >= 3 {
+        Some(format!(
+            "{}.{}.{}",
+            parts[parts.len() - 3],
+            parts[parts.len() - 2],
+            parts[parts.len() - 1]
+        ))
+    } else {
+        Some(format!(
+            "{}.{}",
+            parts[parts.len() - 2],
+            parts[parts.len() - 1]
+        ))
+    }
+}
+
 /// Wire up the WebView2 subresource blocker. No-op on non-Windows targets.
 pub fn attach_subresource_filter<R: Runtime>(
     app: &AppHandle<R>,
     label: &str,
     set: Arc<CompiledSetHandle>,
+    events: PrivacyEventSender,
+    private: bool,
 ) -> PlatformCapability {
+    set_tab_private(label, private);
     #[cfg(target_os = "windows")]
     {
-        win::attach(app, label, set)
+        win::attach(app, label, set, events)
     }
     #[cfg(not(target_os = "windows"))]
     {
-        let _ = (app, label, set);
+        let _ = (app, label, set, events);
         PlatformCapability {
             network_subresource_blocking: false,
             cosmetic_filtering: true,
             notes: vec![
-                format!("{} has no batch-7 WebResourceRequested hook", PLATFORM_PLACEHOLDER),
+                format!(
+                    "{} has no batch-7 WebResourceRequested hook",
+                    PLATFORM_PLACEHOLDER
+                ),
                 "Falling back to NavigationStarting + DOM cosmetic".into(),
             ],
         }
@@ -60,14 +218,12 @@ pub fn attach_subresource_filter<R: Runtime>(
 #[cfg(target_os = "windows")]
 mod win {
     use super::*;
-    use crate::privacy::listener::{
-        classify_resource_type, decide, persist_block_event as persist_block_event_marker, DecideOutcome,
-    };
+    use crate::privacy::listener::{classify_resource_type, decide, DecideOutcome};
     use std::sync::Arc;
     use tauri::Manager;
     use webview2_com::Microsoft::Web::WebView2::Win32::{
-        ICoreWebView2_22, ICoreWebView2_2, ICoreWebView2Environment,
-        ICoreWebView2WebResourceRequest, ICoreWebView2WebResourceRequestedEventArgs,
+        ICoreWebView2Environment, ICoreWebView2WebResourceRequest,
+        ICoreWebView2WebResourceRequestedEventArgs, ICoreWebView2_2, ICoreWebView2_22,
         COREWEBVIEW2_WEB_RESOURCE_CONTEXT_ALL,
     };
     use windows::core::{Interface, PWSTR};
@@ -76,6 +232,7 @@ mod win {
         app: &AppHandle<R>,
         label: &str,
         set: Arc<CompiledSetHandle>,
+        events: PrivacyEventSender,
     ) -> PlatformCapability {
         let cap = std::sync::Arc::new(std::sync::Mutex::new(PlatformCapability {
             network_subresource_blocking: false,
@@ -83,14 +240,17 @@ mod win {
             notes: Vec::new(),
         }));
         let Some(view) = app.get_webview(label) else {
-            cap.lock().unwrap().notes.push("no webview found for label".into());
+            cap.lock()
+                .unwrap()
+                .notes
+                .push("no webview found for label".into());
             return cap.lock().unwrap().clone();
         };
         let label_owned = label.to_string();
-        let event_app = app.clone();
         let set_for_closure = set.clone();
         let label_for_closure = label_owned.clone();
         let cap_for_closure = cap.clone();
+        let events_for_closure = events.clone();
         let attach_result = view.with_webview(move |platform| {
             let core = match unsafe { platform.controller().CoreWebView2() } {
                 Ok(c) => c,
@@ -103,61 +263,72 @@ mod win {
                     return;
                 }
             };
-            // Capture the ICoreWebView2Environment via ICoreWebView2_2.
-            // `Environment()` is the only API that gives us the env, and
-            // it's on the v2 interface (`ICoreWebView2_2`), not the
-            // controller's default surface. We try the v2 cast first; if
-            // a host blocks it (Windows <= 1709), we fall back to no env
-            // and the dispatcher falls back to counting without sending a
-            // 204 body — spec calls this out as the right behavior when
-            // response builders are unavailable.
             let env = core
                 .cast::<ICoreWebView2_2>()
                 .ok()
                 .and_then(|c2| unsafe { c2.Environment() }.ok());
-            // Try the ICoreWebView2_22 path first; fall back to v2.
             let filter_uri = windows::core::HSTRING::from("*");
-            if let Ok(core22) = core.cast::<ICoreWebView2_22>() {
+            let filter_ok = if let Ok(core22) = core.cast::<ICoreWebView2_22>() {
                 unsafe {
-                    let _ = core22.AddWebResourceRequestedFilterWithRequestSourceKinds(
+                    core22.AddWebResourceRequestedFilterWithRequestSourceKinds(
                         &filter_uri,
                         COREWEBVIEW2_WEB_RESOURCE_CONTEXT_ALL,
                         webview2_com::Microsoft::Web::WebView2::Win32::COREWEBVIEW2_WEB_RESOURCE_REQUEST_SOURCE_KINDS_ALL,
-                    );
+                    )
                 }
             } else if let Ok(core2) = core.cast::<ICoreWebView2_2>() {
                 unsafe {
-                    let _ = core2.AddWebResourceRequestedFilter(
+                    core2.AddWebResourceRequestedFilter(
                         &filter_uri,
                         COREWEBVIEW2_WEB_RESOURCE_CONTEXT_ALL,
-                    );
+                    )
                 }
             } else {
+                Err(windows::core::Error::from_win32())
+            };
+            if filter_ok.is_err() {
                 cap_for_closure
-                        .lock()
-                        .unwrap()
-                        .notes
-                        .push("WebView2 too old for subresource filter".into());
+                    .lock()
+                    .unwrap()
+                    .notes
+                    .push("AddWebResourceRequestedFilter failed".into());
                 return;
             }
-            let event_app = event_app.clone();
             let set_for_handler = set_for_closure.clone();
             let label_for_handler = label_for_closure.clone();
             let env_for_handler = env.clone().map(Arc::new);
+            let events_for_handler = events_for_closure.clone();
+            let label_for_token = label_for_closure.clone();
             let handler = webview2_com::WebResourceRequestedEventHandler::create(Box::new(
                 move |_sender, args| {
                     dispatch(
-                        &event_app,
                         &label_for_handler,
                         args.as_ref(),
                         &set_for_handler,
                         env_for_handler.as_deref(),
+                        &events_for_handler,
                     )
                 },
             ));
-            if let Ok(core2) = core.cast::<ICoreWebView2_2>() {
+            let token_registered = if let Ok(core2) = core.cast::<ICoreWebView2_2>() {
                 let mut token = 0;
-                let _ = unsafe { core2.add_WebResourceRequested(&handler, &mut token) };
+                unsafe { core2.add_WebResourceRequested(&handler, &mut token).map(|()| token) }
+            } else {
+                Err(windows::core::Error::from_win32())
+            };
+            match token_registered {
+                Ok(token) => {
+                    // Token stored per-label so detach can revoke the handler.
+                    store_registration_token(&label_for_token, token);
+                }
+                Err(_) => {
+                    cap_for_closure
+                        .lock()
+                        .unwrap()
+                        .notes
+                        .push("add_WebResourceRequested failed".into());
+                    return;
+                }
             }
             let mut guard = cap_for_closure.lock().unwrap();
             guard.network_subresource_blocking = true;
@@ -172,12 +343,31 @@ mod win {
         }
     }
 
-    pub fn dispatch<R: Runtime>(
-        _app: &AppHandle<R>,
+    fn store_registration_token(label: &str, token: i64) {
+        if let Ok(mut map) = registration_tokens().lock() {
+            map.insert(label.to_string(), token);
+        }
+    }
+
+    pub fn take_registration_token(label: &str) -> Option<i64> {
+        registration_tokens()
+            .lock()
+            .ok()
+            .and_then(|mut m| m.remove(label))
+    }
+
+    fn registration_tokens() -> &'static std::sync::Mutex<std::collections::HashMap<String, i64>> {
+        static REG: std::sync::OnceLock<std::sync::Mutex<std::collections::HashMap<String, i64>>> =
+            std::sync::OnceLock::new();
+        REG.get_or_init(|| std::sync::Mutex::new(std::collections::HashMap::new()))
+    }
+
+    pub fn dispatch(
         label: &str,
         args: Option<&ICoreWebView2WebResourceRequestedEventArgs>,
         set: &Arc<CompiledSetHandle>,
         env: Option<&ICoreWebView2Environment>,
+        events: &PrivacyEventSender,
     ) -> windows::core::Result<()> {
         let Some(args) = args else { return Ok(()) };
         let request: ICoreWebView2WebResourceRequest = unsafe { args.Request()? };
@@ -185,37 +375,68 @@ mod win {
         unsafe { request.Uri(&mut uri_pwstr) }?;
         let url = unsafe { uri_pwstr.to_string() }.unwrap_or_default();
         let mut context: u32 = 0;
-        let _ = unsafe {
-            args.ResourceContext(&mut context as *mut _ as *mut _)
-        };
+        let _ = unsafe { args.ResourceContext(&mut context as *mut _ as *mut _) };
         let resource_type = classify_resource_type(context);
 
-        let outcome = decide(&url, None, resource_type, false, set);
+        // Resolve the per-tab state so we can pass real origin / third_party.
+        let tab = super::tab_origin(label);
+        let top_level_origin = tab
+            .as_ref()
+            .map(|t| t.top_level_origin.clone())
+            .unwrap_or_default();
+        let private = tab.as_ref().map(|t| t.private).unwrap_or(false);
+        let request_host = host_of_url(&url);
+        let third_party = is_third_party(&top_level_origin, &request_host);
 
-        if matches!(outcome, DecideOutcome::Blocked) {
-            // Build an empty 204 response from the captured environment
-            // and install it on `args`. When `env` is unavailable (older
-            // WebView2 host) we fall back to counting the block without
-            // suppressing the request — the matcher still records the
-            // decision so the settings UI shows the activity, and the
-            // request simply proceeds (safe underreport rather than fail).
-            if let Some(env) = env {
-                unsafe {
+        let outcome = decide(
+            &url,
+            Some(&top_level_origin),
+            resource_type,
+            third_party,
+            set,
+        );
+
+        // Record the decision in the channel (non-blocking).
+        let blocked_at = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs() as i64)
+            .unwrap_or(0);
+        match outcome {
+            DecideOutcome::Blocked => {
+                events.record_block();
+                events.try_send(super::super::events::PrivacyBlockEvent {
+                    tab_label: label.to_string(),
+                    top_level_origin,
+                    request_host,
+                    resource_type,
+                    rule_id: None,
+                    category: None,
+                    private,
+                    blocked_at,
+                });
+                if let Some(env) = env {
                     let no_content = windows::core::HSTRING::from("No Content");
                     let headers = windows::core::HSTRING::from("Content-Length: 0\r\n");
-                    let response = env.CreateWebResourceResponse(
-                        None,
-                        204,
-                        &no_content,
-                        &headers,
-                    )?;
-                    args.SetResponse(&response)?;
+                    let response =
+                        unsafe { env.CreateWebResourceResponse(None, 204, &no_content, &headers)? };
+                    unsafe { args.SetResponse(&response)? };
                 }
             }
-            let _ = persist_block_event_marker;
-            let _ = label;
+            DecideOutcome::Allowed | DecideOutcome::PassThrough => {
+                events.record_allow();
+            }
+            DecideOutcome::Skipped => {}
         }
         Ok(())
+    }
+
+    fn host_of_url(url: &str) -> String {
+        let scheme_end = url.find("://").map(|i| i + 3).unwrap_or(0);
+        let rest = &url[scheme_end..];
+        let host_end = rest
+            .find(|c: char| c == ':' || c == '/' || c == '?' || c == '#')
+            .unwrap_or(rest.len());
+        rest[..host_end].to_string()
     }
 }
 
@@ -232,5 +453,45 @@ mod tests {
         };
         assert!(!cap.network_subresource_blocking);
         assert!(cap.cosmetic_filtering);
+    }
+
+    #[test]
+    fn url_origin_strips_path_query() {
+        assert_eq!(
+            url_origin("https://example.com/foo?bar=1"),
+            "https://example.com"
+        );
+        assert_eq!(
+            url_origin("https://example.com:8443"),
+            "https://example.com:8443"
+        );
+        assert_eq!(url_origin("https://example.com"), "https://example.com");
+        assert_eq!(url_origin("not-a-url"), "not-a-url");
+    }
+
+    #[test]
+    fn third_party_distinguishes_subdomain_from_origin() {
+        assert!(is_third_party(
+            "https://tracker.example.com",
+            "https://other.com"
+        ));
+        // Same registrable domain → first party.
+        assert!(!is_third_party(
+            "https://a.example.com",
+            "https://b.example.com"
+        ));
+        // Public suffix: a.b.example.co.uk vs example.co.uk.
+        assert!(is_third_party(
+            "https://a.b.example.co.uk",
+            "https://example.com"
+        ));
+    }
+
+    #[test]
+    fn third_party_treats_ip_literal_as_first_party() {
+        assert!(!is_third_party(
+            "http://127.0.0.1:8080",
+            "http://127.0.0.1:8080"
+        ));
     }
 }

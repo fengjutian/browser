@@ -48,7 +48,8 @@ pub fn privacy_list_blocklists(app: AppHandle) -> Result<Vec<PrivacyBlocklistRow
             })
         })
         .map_err(|e| e.to_string())?;
-    rows.collect::<Result<Vec<_>, _>>().map_err(|e| e.to_string())
+    rows.collect::<Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -181,7 +182,8 @@ pub fn privacy_list_block_events(
             },
         )
         .map_err(|e| e.to_string())?;
-    rows.collect::<Result<Vec<_>, _>>().map_err(|e| e.to_string())
+    rows.collect::<Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())
 }
 
 #[derive(serde::Serialize, serde::Deserialize, Debug, Clone)]
@@ -197,15 +199,14 @@ pub fn privacy_capability_report() -> PrivacyCapability {
     #[cfg(target_os = "windows")]
     let (network, notes) = (
         true,
-        vec![
-            "Windows WebResourceRequested wired in batch 7".into(),
-        ],
+        vec!["Windows WebResourceRequested wired in batch 7".into()],
     );
     #[cfg(target_os = "macos")]
     let (network, notes) = (
         false,
         vec![
-            "macOS uses WKContentRuleList for high-level rules and JS monkey-patches for fetch/XHR".into(),
+            "macOS uses WKContentRuleList for high-level rules and JS monkey-patches for fetch/XHR"
+                .into(),
             "Network subresource blocking is NOT available".into(),
         ],
     );

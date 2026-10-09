@@ -10,13 +10,15 @@
 //! Batch 6 is the first batch to populate the ABP-style path; sub-resource
 //! blocking lands in batch 7 (Windows `WebResourceRequested`).
 
-mod legacy_nav;
 pub mod commands;
 pub mod compiler;
+pub mod events;
+mod legacy_nav;
 pub mod listener;
 pub mod matcher;
 pub mod parser;
 pub mod platform;
+pub mod runtime;
 pub mod types;
 
 pub use legacy_nav::{

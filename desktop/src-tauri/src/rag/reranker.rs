@@ -126,19 +126,21 @@ pub fn rerank_candidates(
             text: h.chunk.text.clone(),
         })
         .collect();
-    let rerank_results = provider.rerank(query, &candidates, limit).unwrap_or_else(|_| {
-        // Spec: "失败后回退 RRF 顺序". We synthesise the equivalent scores
-        // so the orchestrator can keep the existing order with no
-        // `rerank_score`.
-        candidates
-            .iter()
-            .enumerate()
-            .map(|(idx, c)| RerankResult {
-                chunk_id: c.chunk_id.clone(),
-                score: -(idx as f64),
-            })
-            .collect()
-    });
+    let rerank_results = provider
+        .rerank(query, &candidates, limit)
+        .unwrap_or_else(|_| {
+            // Spec: "失败后回退 RRF 顺序". We synthesise the equivalent scores
+            // so the orchestrator can keep the existing order with no
+            // `rerank_score`.
+            candidates
+                .iter()
+                .enumerate()
+                .map(|(idx, c)| RerankResult {
+                    chunk_id: c.chunk_id.clone(),
+                    score: -(idx as f64),
+                })
+                .collect()
+        });
 
     let mut by_id: std::collections::HashMap<String, f64> = std::collections::HashMap::new();
     for r in rerank_results {
@@ -216,7 +218,9 @@ mod tests {
     fn async_rerank_noop_preserves_order() {
         let hits = vec![hit("a", 0.5), hit("b", 0.4)];
         let rt = tokio::runtime::Runtime::new().unwrap();
-        let out = rt.block_on(rerank("x", hits, RerankerLimits::default())).unwrap();
+        let out = rt
+            .block_on(rerank("x", hits, RerankerLimits::default()))
+            .unwrap();
         assert_eq!(out[0].chunk.chunk_id, "a");
         assert_eq!(out[1].chunk.chunk_id, "b");
     }

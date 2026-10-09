@@ -57,8 +57,12 @@ pub struct IndexOutcome {
 /// the existing `ai_embed` Tauri command does.
 #[async_trait::async_trait]
 pub trait EmbedClient: Send + Sync {
-    async fn embed(&self, provider_id: &str, model: &str, texts: &[String])
-        -> Result<Vec<Vec<f32>>, String>;
+    async fn embed(
+        &self,
+        provider_id: &str,
+        model: &str,
+        texts: &[String],
+    ) -> Result<Vec<Vec<f32>>, String>;
 }
 
 #[derive(Debug, Default)]
@@ -292,7 +296,8 @@ pub fn run_chunking_phase(
             chunk.chunk_index,
             &chunk.content_hash,
         );
-        let heading_json = serde_json::to_string(&chunk.heading_path).unwrap_or_else(|_| "[]".into());
+        let heading_json =
+            serde_json::to_string(&chunk.heading_path).unwrap_or_else(|_| "[]".into());
         transaction
             .execute(
                 "INSERT INTO document_chunks(id, document_id, chunk_index, title, heading_path, content, tags, content_hash, token_count, start_offset, end_offset, chunker_version, created_at, updated_at)
@@ -440,7 +445,13 @@ pub async fn tick(
     } else {
         STATUS_FAILED
     };
-    Ok(Some(outcome_for(&job, chunk_count, completed, final_status, last_error)))
+    Ok(Some(outcome_for(
+        &job,
+        chunk_count,
+        completed,
+        final_status,
+        last_error,
+    )))
 }
 
 #[derive(Debug, Clone)]
@@ -507,12 +518,7 @@ fn complete_job(
     Ok(())
 }
 
-fn bail_job(
-    database: &Connection,
-    job_id: &str,
-    error: &str,
-    attempts: i64,
-) -> Result<(), String> {
+fn bail_job(database: &Connection, job_id: &str, error: &str, attempts: i64) -> Result<(), String> {
     let attempt_count = attempts.max(1) as usize;
     if attempt_count >= RETRY_DELAYS_SECONDS.len() {
         database
@@ -798,13 +804,13 @@ impl EmbedClient for HttpEmbedClient {
         texts: &[String],
     ) -> Result<Vec<Vec<f32>>, String> {
         let conn = self.database.lock().await;
-        let response = crate::providers::embedding::embed_for_provider(
-            &conn,
-            provider_id,
-            texts.to_vec(),
-        )
-        .await
-        .map_err(|e| e.to_string())?;
+        let mut req = crate::providers::embedding::read_embedding_request(&conn, provider_id)
+            .map_err(|e| e.to_string())?;
+        req.inputs = texts.to_vec();
+        drop(conn);
+        let response = crate::providers::embedding::embed_with_request(req)
+            .await
+            .map_err(|e| e.to_string())?;
         Ok(response.vectors)
     }
 }
@@ -868,7 +874,9 @@ impl RagSupervisor {
                     _ = notify.notified() => { /* wake */ },
                     _ = tokio::time::sleep(std::time::Duration::from_secs(5)) => {}
                 }
-                let client = HttpEmbedClient { database: database.clone() };
+                let client = HttpEmbedClient {
+                    database: database.clone(),
+                };
                 let mut worked = false;
                 for provider_id in &provider_ids {
                     let outcome = {
@@ -884,10 +892,7 @@ impl RagSupervisor {
                     };
                     if let Some(outcome) = outcome {
                         worked = true;
-                        let _ = crate::event_bus::publish(
-                            "rag://index-progress",
-                            &outcome,
-                        );
+                        let _ = crate::event_bus::publish("rag://index-progress", &outcome);
                         if outcome.status == STATUS_COMPLETED || outcome.status == STATUS_FAILED {
                             let event = if outcome.status == STATUS_COMPLETED {
                                 "rag://index-completed"

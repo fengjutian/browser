@@ -94,7 +94,8 @@ fn host_from_pattern(pattern: &str) -> Option<&str> {
     // ABP `||domain^` style. We don't try to enumerate "host" via DNS; this
     // just lifts the literal host into the exact_hosts table.
     let trimmed = pattern.trim_start_matches("||").trim_end_matches('^');
-    if trimmed.is_empty() || trimmed.contains('/') || trimmed.contains('?') || trimmed.contains('*') {
+    if trimmed.is_empty() || trimmed.contains('/') || trimmed.contains('?') || trimmed.contains('*')
+    {
         return None;
     }
     Some(trimmed)
@@ -127,7 +128,10 @@ impl CompiledSetHandle {
     }
 
     pub fn snapshot(&self) -> Arc<CompiledRuleSet> {
-        self.inner.read().map(|r| r.clone()).unwrap_or_else(|_| Arc::new(CompiledRuleSet::default()))
+        self.inner
+            .read()
+            .map(|r| r.clone())
+            .unwrap_or_else(|_| Arc::new(CompiledRuleSet::default()))
     }
 
     pub fn replace(&self, new_set: CompiledRuleSet) {
@@ -146,7 +150,10 @@ mod tests {
     fn exact_hosts_are_indexed_by_lower_case() {
         let parsed = parse_rules("||doubleclick.net^", &ParserOptions::default());
         let compiled = compile(&parsed, &ParserOptions::default());
-        assert_eq!(compiled.exact_hosts.get("doubleclick.net").map(|v| v.len()), Some(1));
+        assert_eq!(
+            compiled.exact_hosts.get("doubleclick.net").map(|v| v.len()),
+            Some(1)
+        );
     }
 
     #[test]

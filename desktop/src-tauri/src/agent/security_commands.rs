@@ -25,10 +25,7 @@ pub fn agent_detect_injection(text: String, source: Option<String>) -> Detection
 }
 
 #[tauri::command]
-pub fn agent_validate_mcp_url(
-    url: String,
-    allow_local: Option<bool>,
-) -> Result<bool, String> {
+pub fn agent_validate_mcp_url(url: String, allow_local: Option<bool>) -> Result<bool, String> {
     let policy = McpUrlPolicy {
         allow_local: allow_local.unwrap_or(false),
         allow_private: false,

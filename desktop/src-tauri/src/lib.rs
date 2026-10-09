@@ -1583,7 +1583,11 @@ async fn ai_embed(
     inputs: Vec<String>,
 ) -> Result<Vec<Vec<f32>>, String> {
     let database = local_store::connection(&app)?;
-    let response = providers::embedding::embed_for_provider(&database, &provider_id, inputs)
+    let req = providers::embedding::read_embedding_request(&database, &provider_id)
+        .map_err(|e| format!("embedding: {e}"))?;
+    let mut req = req;
+    req.inputs = inputs;
+    let response = providers::embedding::embed_with_request(req)
         .await
         .map_err(|e| format!("embedding: {e}"))?;
     Ok(response.vectors)
@@ -1918,6 +1922,7 @@ pub fn run() {
         .manage(DownloadIndex::default())
         .manage(downloads::DownloadManager::default())
         .manage(privacy::NavBlockRegistry::default())
+        .manage(privacy::runtime::PrivacyRuntimeState::new())
         .manage(AiStreamRegistry::default())
         .manage(plugins::WasmRuntime::default())
         .manage(PermissionWaiters::default())
@@ -1936,6 +1941,52 @@ pub fn run() {
                 }
             }
             plugins::installer::restore_enabled_plugins(app.handle());
+
+            // Stash the AppHandle in the event bus so background workers can
+            // publish Tauri events. The default builder uses the `Wry`
+            // runtime so `set_app_handle` accepts the generic handle.
+            event_bus::set_app_handle(app.handle().clone());
+            // Start the privacy event writer so blocks land in SQLite without
+            // blocking the WebView2 request thread.
+            let privacy_state = app.state::<privacy::runtime::PrivacyRuntimeState>();
+            if let (Some(worker), Ok(database)) = (
+                privacy_state.take_worker(),
+                local_store::connection(app.handle()),
+            ) {
+                let database_arc = std::sync::Arc::new(tokio::sync::Mutex::new(database));
+                let cancel = privacy_state.update_cancel.clone();
+                tauri::async_runtime::spawn(async move {
+                    worker.run(database_arc, cancel).await;
+                });
+            }
+            // Spawn the RAG supervisor so newly-enqueued jobs run as soon as
+            // they arrive. We discover provider_ids by listing enabled ones.
+            if let Ok(database) = local_store::connection(app.handle()) {
+                let database_arc = std::sync::Arc::new(tokio::sync::Mutex::new(database));
+                let provider_ids: Vec<String> = {
+                    let conn = database_arc.blocking_lock();
+                    conn.prepare("SELECT id FROM ai_providers WHERE enabled=1")
+                        .ok()
+                        .map(|mut stmt| {
+                            stmt.query_map([], |row| row.get::<_, String>(0))
+                                .ok()
+                                .map(|rows| rows.filter_map(|r| r.ok()).collect::<Vec<_>>())
+                                .unwrap_or_default()
+                        })
+                        .unwrap_or_default()
+                };
+                let supervisor = std::sync::Arc::new(rag::indexer::RagSupervisor::new());
+                supervisor.spawn(database_arc.clone(), provider_ids);
+
+                // Agent supervisor — same shared connection; the supervisor
+                // runs `agent_runs` rows through the state machine and
+                // renews leases. The tool registry is a one-time build.
+                let registry = std::sync::Arc::new(agent::runtime::registry_with_basics());
+                let agent_supervisor = std::sync::Arc::new(
+                    agent::supervisor::AgentSupervisor::new(database_arc.clone(), registry),
+                );
+                agent_supervisor.spawn();
+            }
             Ok(())
         })
         .on_menu_event(|app, event| {

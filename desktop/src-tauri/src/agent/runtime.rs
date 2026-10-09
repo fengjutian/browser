@@ -12,9 +12,10 @@
 
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
+use std::sync::Arc;
 
 use super::budget::{evaluate as evaluate_budget, BudgetCounters, BudgetExhausted, BudgetLimits};
-use super::tools::{ToolRegistry, ToolResult, ToolError};
+use super::tools::{ToolContext, ToolDefinition, ToolError, ToolRegistry};
 use super::types::AgentStatus;
 use crate::rag::chunker::CHUNKER_VERSION;
 
@@ -214,7 +215,16 @@ pub fn apply_counters(
         )
         .optional()
         .map_err(|e| e.to_string())?;
-    let Some((max_steps, max_tool_calls, _max_model, max_prompt, max_completion, max_cost, deadline)) = row else {
+    let Some((
+        max_steps,
+        max_tool_calls,
+        _max_model,
+        max_prompt,
+        max_completion,
+        max_cost,
+        deadline,
+    )) = row
+    else {
         return Ok(());
     };
     let limits = BudgetLimits {
@@ -250,7 +260,12 @@ pub fn recover_interrupted(database: &Connection) -> Result<usize, String> {
     Ok(n as usize)
 }
 
-pub fn leased_by(database: &Connection, run_id: &str, owner: &str, ttl_seconds: i64) -> Result<(), String> {
+pub fn leased_by(
+    database: &Connection,
+    run_id: &str,
+    owner: &str,
+    ttl_seconds: i64,
+) -> Result<(), String> {
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs() as i64)
@@ -266,24 +281,30 @@ pub fn leased_by(database: &Connection, run_id: &str, owner: &str, ttl_seconds: 
 
 pub fn registry_with_basics() -> ToolRegistry {
     let _ = CHUNKER_VERSION;
-    ToolRegistry::new()
+    let mut registry = ToolRegistry::new();
+    registry.register(Arc::new(super::tools::RagSearchTool));
+    registry.register(Arc::new(super::tools::KnowledgeReadTool));
+    registry.register(Arc::new(super::tools::BrowserCurrentPageTool));
+    registry.register(Arc::new(super::tools::BrowserExtractTool));
+    registry.register(Arc::new(super::tools::KnowledgeSaveTool));
+    registry.register(Arc::new(super::tools::McpListToolsTool));
+    registry.register(Arc::new(super::tools::McpCallTool));
+    registry
 }
 
-pub fn execute_tool_safely(
+pub async fn execute_tool_safely(
     registry: &ToolRegistry,
     name: &str,
-    ctx: super::tools::ToolContext,
+    ctx: ToolContext,
     args: serde_json::Value,
-) -> Result<ToolResult, ToolError> {
+) -> Result<super::tools::ToolResult, ToolError> {
     let tool = registry.get(name).ok_or(ToolError::NotAllowed)?;
     tool.validate(&args)?;
-    // The execute side is async; in batch 8 we don't block on a real async
-    // runtime here — the worker that drives a step calls execute() in its
-    // own runtime and persists the outcome. This sync wrapper exists so
-    // tests + the tooling layer can mock.
-    Err(ToolError::Execution(
-        "execute_tool_safely runs in the async step driver".into(),
-    ))
+    tool.execute(ctx, args).await
+}
+
+pub fn tool_definitions(registry: &ToolRegistry) -> Vec<ToolDefinition> {
+    registry.definitions()
 }
 
 #[cfg(test)]
@@ -314,29 +335,50 @@ mod tests {
 
     #[test]
     fn legal_transition_pending_to_planning() {
-        assert!(is_legal_transition(AgentStatus::Pending, AgentStatus::Planning));
+        assert!(is_legal_transition(
+            AgentStatus::Pending,
+            AgentStatus::Planning
+        ));
     }
 
     #[test]
     fn illegal_running_to_pending_is_rejected() {
-        assert!(!is_legal_transition(AgentStatus::Running, AgentStatus::Pending));
+        assert!(!is_legal_transition(
+            AgentStatus::Running,
+            AgentStatus::Pending
+        ));
     }
 
     #[test]
     fn legal_running_to_completed_is_allowed() {
-        assert!(is_legal_transition(AgentStatus::Running, AgentStatus::Completed));
+        assert!(is_legal_transition(
+            AgentStatus::Running,
+            AgentStatus::Completed
+        ));
     }
 
     #[test]
     fn interrupted_can_resume_to_running() {
-        assert!(is_legal_transition(AgentStatus::Interrupted, AgentStatus::Running));
+        assert!(is_legal_transition(
+            AgentStatus::Interrupted,
+            AgentStatus::Running
+        ));
     }
 
     #[test]
     fn awaiting_approval_can_only_run_or_cancel() {
-        assert!(is_legal_transition(AgentStatus::AwaitingApproval, AgentStatus::Running));
-        assert!(is_legal_transition(AgentStatus::AwaitingApproval, AgentStatus::Cancelled));
-        assert!(!is_legal_transition(AgentStatus::AwaitingApproval, AgentStatus::Completed));
+        assert!(is_legal_transition(
+            AgentStatus::AwaitingApproval,
+            AgentStatus::Running
+        ));
+        assert!(is_legal_transition(
+            AgentStatus::AwaitingApproval,
+            AgentStatus::Cancelled
+        ));
+        assert!(!is_legal_transition(
+            AgentStatus::AwaitingApproval,
+            AgentStatus::Completed
+        ));
     }
 
     #[test]
@@ -348,11 +390,18 @@ mod tests {
             "objective",
             "provider",
             "model",
-            &BudgetLimits { max_steps: 5, ..Default::default() },
+            &BudgetLimits {
+                max_steps: 5,
+                ..Default::default()
+            },
         )
         .unwrap();
         let status: String = conn
-            .query_row("SELECT status FROM agent_runs WHERE id = ?1", params![id], |row| row.get(0))
+            .query_row(
+                "SELECT status FROM agent_runs WHERE id = ?1",
+                params![id],
+                |row| row.get(0),
+            )
             .unwrap();
         assert_eq!(status, "pending");
     }
@@ -365,7 +414,13 @@ mod tests {
         transition(&conn, &id, AgentStatus::Pending, AgentStatus::Planning).unwrap();
         transition(&conn, &id, AgentStatus::Planning, AgentStatus::Running).unwrap();
         transition(&conn, &id, AgentStatus::Running, AgentStatus::Completed).unwrap();
-        let status: String = conn.query_row("SELECT status FROM agent_runs WHERE id=?1", params![id], |row| row.get(0)).unwrap();
+        let status: String = conn
+            .query_row(
+                "SELECT status FROM agent_runs WHERE id=?1",
+                params![id],
+                |row| row.get(0),
+            )
+            .unwrap();
         assert_eq!(status, "completed");
     }
 
@@ -380,7 +435,13 @@ mod tests {
         .unwrap();
         let recovered = recover_interrupted(&conn).unwrap();
         assert_eq!(recovered, 1);
-        let status: String = conn.query_row("SELECT status FROM agent_runs WHERE id=?1", params![id], |row| row.get(0)).unwrap();
+        let status: String = conn
+            .query_row(
+                "SELECT status FROM agent_runs WHERE id=?1",
+                params![id],
+                |row| row.get(0),
+            )
+            .unwrap();
         assert_eq!(status, "interrupted");
     }
 }

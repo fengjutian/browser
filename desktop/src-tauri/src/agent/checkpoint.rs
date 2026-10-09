@@ -25,14 +25,24 @@ pub struct CheckpointState {
     pub created_at: i64,
 }
 
-pub fn save(database: &Connection, run_id: &str, state: &CheckpointState) -> Result<String, String> {
+pub fn save(
+    database: &Connection,
+    run_id: &str,
+    state: &CheckpointState,
+) -> Result<String, String> {
     let id = uuid::Uuid::new_v4().to_string();
     let json = serde_json::to_string(state).map_err(|e| e.to_string())?;
     database
         .execute(
             "INSERT INTO agent_checkpoints(id, run_id, step_index, state_json, created_at)
              VALUES(?1, ?2, ?3, ?4, ?5)",
-            params![id, run_id, state.current_step as i64, json, state.created_at],
+            params![
+                id,
+                run_id,
+                state.current_step as i64,
+                json,
+                state.created_at
+            ],
         )
         .map_err(|e| e.to_string())?;
     // Bump `checkpoint_version` on the run.
@@ -45,7 +55,10 @@ pub fn save(database: &Connection, run_id: &str, state: &CheckpointState) -> Res
     Ok(id)
 }
 
-pub fn latest_for_run(database: &Connection, run_id: &str) -> Result<Option<CheckpointState>, String> {
+pub fn latest_for_run(
+    database: &Connection,
+    run_id: &str,
+) -> Result<Option<CheckpointState>, String> {
     let row: Option<(String, i64)> = database
         .query_row(
             "SELECT state_json, created_at FROM agent_checkpoints
@@ -55,7 +68,9 @@ pub fn latest_for_run(database: &Connection, run_id: &str) -> Result<Option<Chec
         )
         .optional()
         .map_err(|e| e.to_string())?;
-    let Some((json, _created)) = row else { return Ok(None) };
+    let Some((json, _created)) = row else {
+        return Ok(None);
+    };
     let state: CheckpointState = serde_json::from_str(&json).map_err(|e| e.to_string())?;
     Ok(Some(state))
 }

@@ -614,3 +614,326 @@ function createDocument(input: { title: string; url: string; markdown: string; t
   try { source = new URL(input.url).hostname } catch { /* keep source empty */ }
   return { id: `local-${crypto.randomUUID()}`, ...input, source, wordCount: countTextUnits(input.markdown), status: 'READY', autoTags: [], createdAt: new Date().toISOString(), starred: false }
 }
+
+// ---------------------------------------------------------------------------
+// RAG API surface (desktop production path).
+// ---------------------------------------------------------------------------
+
+export interface RagQuery {
+  query: string
+  topK: number
+  candidateK: number
+  documentIds?: string[]
+  collectionIds?: string[]
+  tags?: string[]
+  dateFrom?: number
+  dateTo?: number
+  includeArchived?: boolean
+  retrievalMode: 'lexical' | 'vector' | 'hybrid'
+  rerank?: boolean
+  providerId?: string
+  embeddingModel?: string
+  embeddingVersion?: string
+  chunkerVersion?: string
+  dimensions?: number
+}
+
+export interface RagChunk {
+  chunkId: string
+  documentId: string
+  chunkIndex: number
+  title: string
+  url: string
+  headingPath: string[]
+  text: string
+  textHash: string
+  tokenCount: number
+  startOffset: number
+  endOffset: number
+}
+
+export interface RagCitation {
+  citationId: string
+  documentId: string
+  chunkId: string
+  title: string
+  url: string
+  excerpt: string
+}
+
+export interface RagRetrieveResponse {
+  hits: Array<{ chunk: RagChunk; score: Record<string, unknown>; reasons: string[] }>
+  degraded: boolean
+  warnings: string[]
+  timings: Record<string, number>
+  indexKey?: Record<string, unknown> | null
+}
+
+export interface RagAnswerResponse {
+  answer: string
+  citations: RagCitation[]
+  citationStatus: 'valid' | 'partial' | 'invalid' | 'notRequired'
+  unsupportedCitationIds: string[]
+  uncoveredParagraphs: number[]
+  retrieval: RagRetrieveResponse
+}
+
+export interface RagIndexStatus {
+  recovered: number
+  totalJobs: number
+  pending: number
+  failed: number
+  completed: number
+  indexedDocuments: number
+}
+
+export interface RagJobRow {
+  id: string
+  documentId: string
+  providerId: string
+  model: string
+  status: string
+  totalChunks: number
+  completedChunks: number
+  attempts: number
+  availableAt: number
+  startedAt?: number | null
+  finishedAt?: number | null
+  lastError?: string | null
+  createdAt: number
+  updatedAt: number
+}
+
+export async function ragEnqueueDocument(
+  documentId: string,
+  providerId: string,
+  model: string,
+): Promise<string> {
+  if (!isTauri()) return ''
+  return invoke<string>('rag_enqueue_document', { documentId, providerId, model })
+}
+
+export async function ragEnqueueAll(providerId: string, model: string): Promise<number> {
+  if (!isTauri()) return 0
+  return invoke<number>('rag_enqueue_all', { providerId, model })
+}
+
+export async function ragCancelJob(jobId: string): Promise<boolean> {
+  if (!isTauri()) return false
+  return invoke<boolean>('rag_cancel_job', { jobId })
+}
+
+export async function ragRetryJob(jobId: string): Promise<boolean> {
+  if (!isTauri()) return false
+  return invoke<boolean>('rag_retry_job', { jobId })
+}
+
+export async function ragListJobs(limit?: number): Promise<RagJobRow[]> {
+  if (!isTauri()) return []
+  return invoke<RagJobRow[]>('rag_list_jobs', { limit: limit ?? 100 })
+}
+
+export async function ragIndexStatus(): Promise<RagIndexStatus> {
+  if (!isTauri()) {
+    return { recovered: 0, totalJobs: 0, pending: 0, failed: 0, completed: 0, indexedDocuments: 0 }
+  }
+  return invoke<RagIndexStatus>('rag_index_status')
+}
+
+export async function ragRebuildIndex(providerId: string, model: string): Promise<number> {
+  if (!isTauri()) return 0
+  return invoke<number>('rag_rebuild_index', { providerId, model })
+}
+
+export async function ragRetrieve(providerId: string, query: RagQuery): Promise<RagRetrieveResponse> {
+  if (!isTauri()) return { hits: [], degraded: true, warnings: ['not running in Tauri'], timings: {}, indexKey: null }
+  return invoke<RagRetrieveResponse>('rag_retrieve', { providerId, query })
+}
+
+export async function ragAnswer(providerId: string, query: RagQuery): Promise<RagAnswerResponse | null> {
+  if (!isTauri()) return null
+  // rag_answer is currently exposed as `rag_retrieve`; the production
+  // Evidence Pack + chat call would land as a new command. We keep the
+  // shape here so the AssistantPage can swap implementations later.
+  const retrieval = await ragRetrieve(providerId, query)
+  return {
+    answer: '',
+    citations: [],
+    citationStatus: 'notRequired',
+    unsupportedCitationIds: [],
+    uncoveredParagraphs: [],
+    retrieval,
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Privacy API surface.
+// ---------------------------------------------------------------------------
+
+export interface PrivacyBlocklist {
+  id: string
+  name: string
+  enabled: boolean
+  ruleCount: number
+  lastUpdated: number | null
+  lastError: string | null
+}
+
+export interface PrivacyCapabilityReport {
+  networkSubresourceBlocking: boolean
+  cosmeticFiltering: boolean
+  notes: string[]
+  perLabel: Array<{ label: string; networkSubresourceBlocking: boolean }>
+}
+
+export interface PrivacyStats {
+  blocked: number
+  allowed: number
+  dropped: number
+}
+
+export interface PrivacyBlockEvent {
+  id: string
+  topLevelOrigin: string
+  requestHost: string
+  resourceType: string
+  ruleId?: number | null
+  blockedAt: number
+}
+
+export interface PrivacySiteSetting {
+  host: string
+  protectionEnabled: boolean
+  allowAds: boolean
+  allowTrackers: boolean
+}
+
+export async function privacyListBlocklists(): Promise<PrivacyBlocklist[]> {
+  if (!isTauri()) return []
+  return invoke<PrivacyBlocklist[]>('privacy_list_blocklists')
+}
+
+export async function privacySetBlocklistEnabled(id: string, enabled: boolean): Promise<void> {
+  if (!isTauri()) return
+  await invoke('privacy_set_blocklist_enabled', { id, enabled })
+}
+
+export async function privacyGetSiteSetting(host: string): Promise<PrivacySiteSetting | null> {
+  if (!isTauri()) return null
+  return invoke<PrivacySiteSetting | null>('privacy_get_site_setting', { host })
+}
+
+export async function privacySetSiteSetting(setting: PrivacySiteSetting): Promise<void> {
+  if (!isTauri()) return
+  await invoke('privacy_set_site_setting', { setting })
+}
+
+export async function privacyListBlockEvents(limit?: number): Promise<PrivacyBlockEvent[]> {
+  if (!isTauri()) return []
+  return invoke<PrivacyBlockEvent[]>('privacy_list_block_events', { limit: limit ?? 100 })
+}
+
+export async function privacyCapabilityReport(): Promise<PrivacyCapabilityReport> {
+  if (!isTauri()) {
+    return { networkSubresourceBlocking: false, cosmeticFiltering: false, notes: [], perLabel: [] }
+  }
+  return invoke<PrivacyCapabilityReport>('privacy_capability_report')
+}
+
+export async function privacyGetStats(): Promise<PrivacyStats> {
+  if (!isTauri()) return { blocked: 0, allowed: 0, dropped: 0 }
+  return invoke<PrivacyStats>('privacy_get_stats')
+}
+
+export async function privacyClearStats(): Promise<void> {
+  if (!isTauri()) return
+  await invoke('privacy_clear_stats')
+}
+
+// ---------------------------------------------------------------------------
+// Agent API surface.
+// ---------------------------------------------------------------------------
+
+export interface AgentRunMeta {
+  id: string
+  title: string
+  objective: string
+  providerId: string
+  model: string
+  status: string
+  currentStep: number
+  maxSteps: number
+  maxToolCalls: number
+  finalAnswer?: string | null
+  lastError?: string | null
+  createdAt: number
+  startedAt: number
+  finishedAt?: number | null
+}
+
+export interface AgentBudgetLimits {
+  maxSteps: number
+  maxToolCalls: number
+  maxModelCalls: number
+  maxPromptTokens: number
+  maxCompletionTokens: number
+  maxCostMicros: number
+  deadlineUnixSeconds?: number | null
+}
+
+export async function agentStart(
+  title: string,
+  objective: string,
+  providerId: string,
+  model: string,
+  limits: AgentBudgetLimits,
+): Promise<string> {
+  if (!isTauri()) return ''
+  return invoke<string>('agent_start', {
+    title,
+    objective,
+    providerId,
+    model,
+    limits,
+  })
+}
+
+export async function agentPause(runId: string): Promise<void> {
+  if (!isTauri()) return
+  await invoke('agent_pause', { runId })
+}
+
+export async function agentResume(runId: string): Promise<void> {
+  if (!isTauri()) return
+  await invoke('agent_resume', { runId })
+}
+
+export async function agentCancel(runId: string): Promise<void> {
+  if (!isTauri()) return
+  await invoke('agent_cancel', { runId })
+}
+
+export async function agentGetRun(runId: string): Promise<AgentRunMeta | null> {
+  if (!isTauri()) return null
+  return invoke<AgentRunMeta | null>('agent_get_run', { runId })
+}
+
+export async function agentListRuns(): Promise<AgentRunMeta[]> {
+  if (!isTauri()) return []
+  return invoke<AgentRunMeta[]>('agent_list_runs')
+}
+
+export async function agentApprove(approvalId: string): Promise<void> {
+  if (!isTauri()) return
+  await invoke('agent_approve', { approvalId })
+}
+
+export async function agentDeny(approvalId: string): Promise<void> {
+  if (!isTauri()) return
+  await invoke('agent_deny', { approvalId })
+}
+
+export async function agentRecoverInterrupted(): Promise<number> {
+  if (!isTauri()) return 0
+  return invoke<number>('agent_recover_interrupted')
+}

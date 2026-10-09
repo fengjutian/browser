@@ -63,7 +63,10 @@ impl std::fmt::Display for RagError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::DimensionMismatch { expected, actual } => {
-                write!(f, "embedding dimension mismatch: expected {expected} got {actual}")
+                write!(
+                    f,
+                    "embedding dimension mismatch: expected {expected} got {actual}"
+                )
             }
             Self::CorruptIndex(s) => write!(f, "corrupt index: {s}"),
             Self::IoError(s) => write!(f, "io error: {s}"),
@@ -174,7 +177,11 @@ impl VectorIndex for BruteForceVectorIndex {
             })
             .filter(|hit| hit.similarity > 0.0)
             .collect();
-        scored.sort_by(|a, b| b.similarity.partial_cmp(&a.similarity).unwrap_or(std::cmp::Ordering::Equal));
+        scored.sort_by(|a, b| {
+            b.similarity
+                .partial_cmp(&a.similarity)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
         scored.truncate(limit);
         Ok(scored)
     }
@@ -239,7 +246,10 @@ mod tests {
         }];
         assert!(matches!(
             idx.upsert(&bad),
-            Err(RagError::DimensionMismatch { expected: 3, actual: 2 })
+            Err(RagError::DimensionMismatch {
+                expected: 3,
+                actual: 2
+            })
         ));
     }
 
@@ -247,9 +257,21 @@ mod tests {
     fn brute_force_returns_top_k_by_similarity() {
         let mut idx = BruteForceVectorIndex::new(2);
         idx.upsert(&[
-            VectorItem { id: "a".into(), vector: vec![1.0, 0.0], payload: None },
-            VectorItem { id: "b".into(), vector: vec![0.0, 1.0], payload: None },
-            VectorItem { id: "c".into(), vector: vec![0.7, 0.7], payload: None },
+            VectorItem {
+                id: "a".into(),
+                vector: vec![1.0, 0.0],
+                payload: None,
+            },
+            VectorItem {
+                id: "b".into(),
+                vector: vec![0.0, 1.0],
+                payload: None,
+            },
+            VectorItem {
+                id: "c".into(),
+                vector: vec![0.7, 0.7],
+                payload: None,
+            },
         ])
         .unwrap();
         let hits = idx.search(&[1.0, 0.0], 2).unwrap();
@@ -261,8 +283,16 @@ mod tests {
     fn brute_force_delete_removes_ids() {
         let mut idx = BruteForceVectorIndex::new(2);
         idx.upsert(&[
-            VectorItem { id: "a".into(), vector: vec![1.0, 0.0], payload: None },
-            VectorItem { id: "b".into(), vector: vec![0.0, 1.0], payload: None },
+            VectorItem {
+                id: "a".into(),
+                vector: vec![1.0, 0.0],
+                payload: None,
+            },
+            VectorItem {
+                id: "b".into(),
+                vector: vec![0.0, 1.0],
+                payload: None,
+            },
         ])
         .unwrap();
         idx.delete(&["a".into()]).unwrap();
@@ -271,7 +301,13 @@ mod tests {
 
     #[test]
     fn rag_error_display_round_trip() {
-        let e = RagError::DimensionMismatch { expected: 4, actual: 2 };
-        assert_eq!(e.to_string(), "embedding dimension mismatch: expected 4 got 2");
+        let e = RagError::DimensionMismatch {
+            expected: 4,
+            actual: 2,
+        };
+        assert_eq!(
+            e.to_string(),
+            "embedding dimension mismatch: expected 4 got 2"
+        );
     }
 }

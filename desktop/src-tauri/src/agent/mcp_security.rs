@@ -110,7 +110,10 @@ mod tests {
 
     #[test]
     fn http_to_localhost_is_allowed_when_opted_in() {
-        let policy = McpUrlPolicy { allow_local: true, ..Default::default() };
+        let policy = McpUrlPolicy {
+            allow_local: true,
+            ..Default::default()
+        };
         assert!(validate_url("http://localhost:8080/mcp", &policy).is_ok());
     }
 
@@ -125,7 +128,10 @@ mod tests {
     #[test]
     fn aws_metadata_host_is_rejected() {
         assert!(matches!(
-            validate_url("https://169.254.169.254/latest/meta-data/", &McpUrlPolicy::default()),
+            validate_url(
+                "https://169.254.169.254/latest/meta-data/",
+                &McpUrlPolicy::default()
+            ),
             Err(McpUrlError::CloudMetadataBlocked)
         ));
     }
@@ -140,6 +146,9 @@ mod tests {
 
     #[test]
     fn empty_url_is_rejected() {
-        assert!(matches!(validate_url("", &McpUrlPolicy::default()), Err(McpUrlError::Empty)));
+        assert!(matches!(
+            validate_url("", &McpUrlPolicy::default()),
+            Err(McpUrlError::Empty)
+        ));
     }
 }

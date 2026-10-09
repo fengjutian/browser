@@ -2,9 +2,7 @@
 //! requires; unsupported rules are tracked in `unsupported` so a compile
 //! report can surface the count.
 
-use crate::privacy::types::{
-    CosmeticRule, NetworkRule, ParsedRule, ResourceType, RuleAction,
-};
+use crate::privacy::types::{CosmeticRule, NetworkRule, ParsedRule, ResourceType, RuleAction};
 
 #[derive(Debug, Default)]
 pub struct ParserOptions {
@@ -185,10 +183,7 @@ mod tests {
 
     #[test]
     fn parses_domain_and_excluded_domain() {
-        let rules = parse_rules(
-            "||foo.com^$domain=example.com|~sub.example.com",
-            &opt(),
-        );
+        let rules = parse_rules("||foo.com^$domain=example.com|~sub.example.com", &opt());
         let r = &rules.network[0];
         assert!(r.domains.iter().any(|d| d == "example.com"));
         assert!(r.excluded_domains.iter().any(|d| d == "sub.example.com"));

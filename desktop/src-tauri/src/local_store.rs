@@ -1712,7 +1712,41 @@ pub(crate) fn save_document_inner(
 ) -> Result<LocalDocument, String> {
     let database = connection(&app)?;
     write_document(&database, &document)?;
+    // Auto-enqueue indexing for the active provider/model so a fresh
+    // save picks up on the next supervisor tick. We pull the active
+    // provider row by `enabled=1 ORDER BY created_at DESC LIMIT 1` to
+    // avoid hard-coding any specific id. The supervisor's claim_one()
+    // filters by `provider_id`, so we need to keep these aligned.
+    enqueue_for_active_provider(&database, &document.id);
     Ok(document)
+}
+
+/// Enqueue a RAG job for `document_id` against every enabled embedding
+/// provider. Called from the document-save path so saving a document
+/// picks up indexing without the user having to visit the settings page.
+pub(crate) fn enqueue_for_active_provider(database: &Connection, document_id: &str) {
+    let providers = match database
+        .prepare("SELECT id, embedding_model FROM ai_providers WHERE enabled=1")
+        .and_then(|mut stmt| {
+            stmt.query_map([], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?))
+            })
+            .map(|rows| {
+                rows.filter_map(|r| r.ok())
+                    .filter(|(_, m)| m.is_some())
+                    .collect::<Vec<_>>()
+            })
+        }) {
+        Ok(p) => p,
+        Err(_) => return,
+    };
+    for (provider_id, model) in providers {
+        let model = match model {
+            Some(m) if !m.trim().is_empty() => m,
+            _ => continue,
+        };
+        let _ = crate::rag::indexer::enqueue_document(database, document_id, &provider_id, &model);
+    }
 }
 
 /// Persist a document row. Split from [`save_document_inner`] so the write path

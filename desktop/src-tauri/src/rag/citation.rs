@@ -86,7 +86,8 @@ pub fn validate_answer(
     retrieval: &RagRetrieveResponse,
     candidate_ids: &[String],
 ) -> RagAnswer {
-    let valid_ids: std::collections::HashSet<&str> = candidate_ids.iter().map(|s| s.as_str()).collect();
+    let valid_ids: std::collections::HashSet<&str> =
+        candidate_ids.iter().map(|s| s.as_str()).collect();
 
     let sources = extract_source_ids(answer);
     let mut citations: Vec<RagCitation> = Vec::new();
@@ -141,7 +142,11 @@ pub fn validate_answer(
         if !valid_ids.contains(source_id.as_str()) {
             continue;
         }
-        if let Some(hit) = retrieval.hits.iter().find(|h| h.chunk.chunk_id == *source_id) {
+        if let Some(hit) = retrieval
+            .hits
+            .iter()
+            .find(|h| h.chunk.chunk_id == *source_id)
+        {
             citations.push(RagCitation {
                 citation_id: source_id.clone(),
                 document_id: hit.chunk.document_id.clone(),
@@ -195,7 +200,10 @@ fn is_decorative_paragraph(text: &str) -> bool {
     }
     // Heading / divider only.
     let first = trimmed.chars().next().unwrap_or(' ');
-    first == '#' || trimmed.chars().all(|c| c == '-' || c == '=' || c == '*' || c.is_whitespace())
+    first == '#'
+        || trimmed
+            .chars()
+            .all(|c| c == '-' || c == '=' || c == '*' || c.is_whitespace())
 }
 
 fn pick_excerpt(source_body: &str, chunk_text: &str) -> String {
@@ -238,6 +246,7 @@ mod tests {
             }],
             degraded: false,
             warnings: vec![],
+            index_key: None,
             timings: RagTimings {
                 lexical_ms: 1,
                 embedding_ms: 1,
@@ -261,7 +270,11 @@ mod tests {
     #[test]
     fn empty_answer_is_not_required() {
         let r = retrieval_fixture();
-        let answer = validate_answer("I don't know — no chunk matches.", &r, &["doc:abc:chunk:0".into()]);
+        let answer = validate_answer(
+            "I don't know — no chunk matches.",
+            &r,
+            &["doc:abc:chunk:0".into()],
+        );
         assert_eq!(answer.citation_status, CitationStatus::NotRequired);
     }
 
@@ -271,7 +284,9 @@ mod tests {
         let answer = "[SOURCE id=\"doc:ghost:chunk:99\"]\nstuff\n[/SOURCE]";
         let result = validate_answer(answer, &r, &["doc:abc:chunk:0".into()]);
         assert_eq!(result.citation_status, CitationStatus::Partial);
-        assert!(result.unsupported_citation_ids.contains(&"doc:ghost:chunk:99".to_string()));
+        assert!(result
+            .unsupported_citation_ids
+            .contains(&"doc:ghost:chunk:99".to_string()));
     }
 
     #[test]
@@ -314,6 +329,11 @@ mod tests {
             include_archived: false,
             retrieval_mode: super::super::types::RetrievalMode::Lexical,
             rerank: false,
+            provider_id: None,
+            embedding_model: None,
+            embedding_version: None,
+            chunker_version: None,
+            dimensions: None,
         };
         // The test simply guards the surface — if RagQuery grew fields the
         // compile would already have caught them.

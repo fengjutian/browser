@@ -5,9 +5,13 @@ use tauri::AppHandle;
 
 use crate::local_store;
 
-use super::approval::{decide as approval_decide, hash_arguments, request_approval, verify, ApprovalDecision};
+use super::approval::{
+    decide as approval_decide, hash_arguments, request_approval, verify, ApprovalDecision,
+};
 use super::budget::BudgetLimits;
-use super::checkpoint::{latest_for_run, mark_unknown_runners, save as save_checkpoint, CheckpointState};
+use super::checkpoint::{
+    latest_for_run, mark_unknown_runners, save as save_checkpoint, CheckpointState,
+};
 use super::runtime::{
     create_run as runtime_create_run, leased_by, record_step, recover_interrupted, transition,
     AgentRunMeta,
@@ -39,13 +43,23 @@ pub fn agent_start(
 #[tauri::command]
 pub fn agent_pause(app: AppHandle, run_id: String) -> Result<(), String> {
     let database = local_store::connection(&app)?;
-    transition(&database, &run_id, AgentStatus::Running, AgentStatus::Paused)
+    transition(
+        &database,
+        &run_id,
+        AgentStatus::Running,
+        AgentStatus::Paused,
+    )
 }
 
 #[tauri::command]
 pub fn agent_resume(app: AppHandle, run_id: String) -> Result<(), String> {
     let database = local_store::connection(&app)?;
-    transition(&database, &run_id, AgentStatus::Paused, AgentStatus::Running)
+    transition(
+        &database,
+        &run_id,
+        AgentStatus::Paused,
+        AgentStatus::Running,
+    )
 }
 
 #[tauri::command]
@@ -80,12 +94,27 @@ pub fn agent_get_run(app: AppHandle, run_id: String) -> Result<Option<AgentRunMe
         .optional()
         .map_err(|e| e.to_string())?;
     Ok(row.map(|r| AgentRunMeta {
-        id: r.0, title: r.1, objective: r.2, provider_id: r.3, model: r.4,
-        status: r.5, current_step: r.6, max_steps: r.7, max_tool_calls: r.8,
-        max_prompt_tokens: r.9, max_completion_tokens: r.10, max_cost_micros: r.11,
-        deadline_at: r.12, final_answer: r.13, last_error: r.14,
-        lease_owner: r.15, lease_expires_at: r.16, checkpoint_version: r.17,
-        created_at: r.18, started_at: r.19, finished_at: r.20,
+        id: r.0,
+        title: r.1,
+        objective: r.2,
+        provider_id: r.3,
+        model: r.4,
+        status: r.5,
+        current_step: r.6,
+        max_steps: r.7,
+        max_tool_calls: r.8,
+        max_prompt_tokens: r.9,
+        max_completion_tokens: r.10,
+        max_cost_micros: r.11,
+        deadline_at: r.12,
+        final_answer: r.13,
+        last_error: r.14,
+        lease_owner: r.15,
+        lease_expires_at: r.16,
+        checkpoint_version: r.17,
+        created_at: r.18,
+        started_at: r.19,
+        finished_at: r.20,
     }))
 }
 
@@ -206,7 +235,9 @@ pub fn agent_verify_approval(
         )
         .optional()
         .map_err(|e| e.to_string())?;
-    let Some(decision) = row else { return Err(format!("approval {approval_id} not found")) };
+    let Some(decision) = row else {
+        return Err(format!("approval {approval_id} not found"));
+    };
     match verify(&arguments_json, &decision) {
         Ok(()) => Ok(true),
         Err(_) => Ok(false),

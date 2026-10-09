@@ -65,13 +65,14 @@ pub struct ProviderEmbedder {
 impl QueryEmbedder for ProviderEmbedder {
     async fn embed_query(&self, query: &str) -> Result<Vec<f32>, String> {
         let conn = self.database.lock().await;
-        let response = crate::providers::embedding::embed_for_provider(
-            &conn,
-            &self.provider_id,
-            vec![query.to_string()],
-        )
-        .await
-        .map_err(|e| e.to_string())?;
+        let mut req = crate::providers::embedding::read_embedding_request(&conn, &self.provider_id)
+            .map_err(|e| e.to_string())?;
+        req.inputs = vec![query.to_string()];
+        // Drop the lock before awaiting the HTTP call so the future is `Send`.
+        drop(conn);
+        let response = crate::providers::embedding::embed_with_request(req)
+            .await
+            .map_err(|e| e.to_string())?;
         response
             .vectors
             .into_iter()
@@ -142,8 +143,10 @@ pub async fn orchestrate_with_embedder(
     };
 
     // 3. Vector recall — only if requested and if the embed hook is healthy.
-    let wants_vector =
-        matches!(query.retrieval_mode, RetrievalMode::Vector | RetrievalMode::Hybrid);
+    let wants_vector = matches!(
+        query.retrieval_mode,
+        RetrievalMode::Vector | RetrievalMode::Hybrid
+    );
     let mut vector: Vec<VectorCandidate> = Vec::new();
     if wants_vector {
         if index_key.is_none() {
@@ -227,22 +230,31 @@ pub async fn orchestrate_with_embedder(
         .iter()
         .map(|h| (h.chunk_id.as_str(), h))
         .collect();
-    let vec_lookup: std::collections::HashMap<&str, &VectorCandidate> = vector
-        .iter()
-        .map(|h| (h.chunk_id.as_str(), h))
-        .collect();
+    let vec_lookup: std::collections::HashMap<&str, &VectorCandidate> =
+        vector.iter().map(|h| (h.chunk_id.as_str(), h)).collect();
 
     let mut hits: Vec<RetrievalHit> = Vec::with_capacity(capped.len());
     for c in capped.into_iter().take(query.top_k) {
         let conn = database.lock().await;
-        let (chunk, score, reasons) = materialize(&conn, &c, &lex_lookup, &vec_lookup, query.retrieval_mode);
-        hits.push(RetrievalHit { chunk, score, reasons });
+        let (chunk, score, reasons) =
+            materialize(&conn, &c, &lex_lookup, &vec_lookup, query.retrieval_mode);
+        hits.push(RetrievalHit {
+            chunk,
+            score,
+            reasons,
+        });
     }
 
     // 7. Optional rerank.
     if query.rerank && !hits.is_empty() {
         let rerank_started = Instant::now();
-        match super::reranker::rerank(&query.query, hits.clone(), super::reranker::RerankerLimits::default()).await {
+        match super::reranker::rerank(
+            &query.query,
+            hits.clone(),
+            super::reranker::RerankerLimits::default(),
+        )
+        .await
+        {
             Ok(reranked) => hits = reranked,
             Err(error) => {
                 warnings.push(format!("rerank failed: {error}"));
@@ -267,7 +279,10 @@ pub async fn orchestrate_with_embedder(
 /// `orchestrate_with_embedder`.** The sync wrapper is here so the existing
 /// tests and pure-function callers (event-bus, evaluation harness) keep
 /// working without changing every signature.
-pub fn orchestrate(query: &RagQuery, deps: RetrievalDeps<'_>) -> Result<RagRetrieveResponse, String> {
+pub fn orchestrate(
+    query: &RagQuery,
+    deps: RetrievalDeps<'_>,
+) -> Result<RagRetrieveResponse, String> {
     // Run the lexical / cap / materialize parts synchronously by faking
     // an empty embedder. The async pipeline is preferred for production;
     // this sync version deliberately degrades to lexical-only when an
@@ -311,7 +326,11 @@ pub fn orchestrate(query: &RagQuery, deps: RetrievalDeps<'_>) -> Result<RagRetri
             &std::collections::HashMap::new(),
             query.retrieval_mode,
         );
-        hits.push(RetrievalHit { chunk, score, reasons });
+        hits.push(RetrievalHit {
+            chunk,
+            score,
+            reasons,
+        });
     }
     let _ = deps.embed_query;
     timings.total_ms = started.elapsed().as_millis();
@@ -346,9 +365,7 @@ fn cap_per_document(
         .take(ids.len())
         .collect::<Vec<_>>()
         .join(",");
-    let sql = format!(
-        "SELECT id, document_id FROM document_chunks WHERE id IN ({placeholders})"
-    );
+    let sql = format!("SELECT id, document_id FROM document_chunks WHERE id IN ({placeholders})");
     let mut stmt = database.prepare(&sql).map_err(|e| e.to_string())?;
     let mut doc_for_chunk: std::collections::HashMap<String, String> =
         std::collections::HashMap::new();
@@ -389,7 +406,10 @@ fn materialize(
     vec: &std::collections::HashMap<&str, &VectorCandidate>,
     mode: RetrievalMode,
 ) -> (RagChunk, RetrievalScore, Vec<String>) {
-    let (lex_opt, vec_opt) = (lex.get(candidate.chunk_id.as_str()).copied(), vec.get(candidate.chunk_id.as_str()).copied());
+    let (lex_opt, vec_opt) = (
+        lex.get(candidate.chunk_id.as_str()).copied(),
+        vec.get(candidate.chunk_id.as_str()).copied(),
+    );
     let (document_id, chunk_index, title, url, heading_path, text) = match (lex_opt, vec_opt) {
         (Some(l), _) => (
             l.document_id.clone(),
@@ -407,7 +427,8 @@ fn materialize(
             v.heading_path.clone(),
             v.text.clone(),
         ),
-        (None, None) => resolve_chunk_meta(database, &candidate.chunk_id).unwrap_or_else(|_| default_meta(&candidate.chunk_id)),
+        (None, None) => resolve_chunk_meta(database, &candidate.chunk_id)
+            .unwrap_or_else(|_| default_meta(&candidate.chunk_id)),
     };
 
     let token_count = text.split_whitespace().count();
@@ -418,7 +439,10 @@ fn materialize(
     if candidate.vector_rank.is_some() {
         reasons.push("matched vector cosine".into());
     }
-    if matches!(mode, RetrievalMode::Hybrid) && candidate.lexical_rank.is_some() && candidate.vector_rank.is_some() {
+    if matches!(mode, RetrievalMode::Hybrid)
+        && candidate.lexical_rank.is_some()
+        && candidate.vector_rank.is_some()
+    {
         reasons.push("fused by reciprocal rank".into());
     }
 
@@ -510,6 +534,11 @@ mod tests {
             include_archived: false,
             retrieval_mode: RetrievalMode::Lexical,
             rerank: false,
+            provider_id: None,
+            embedding_model: None,
+            embedding_version: None,
+            chunker_version: None,
+            dimensions: None,
         };
         let result = orchestrate(
             &q,
@@ -537,6 +566,11 @@ mod tests {
             include_archived: false,
             retrieval_mode: RetrievalMode::Lexical,
             rerank: false,
+            provider_id: None,
+            embedding_model: None,
+            embedding_version: None,
+            chunker_version: None,
+            dimensions: None,
         };
         let result = orchestrate(
             &q,

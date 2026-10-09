@@ -21,11 +21,11 @@ pub mod mcp_security;
 pub mod runtime;
 pub mod security;
 pub mod security_commands;
+pub mod supervisor;
 pub mod tools;
 pub mod types;
 
-pub use types::{
-    AgentStatus, ApprovalStatus, StepStatus, ToolRisk,
-};
+pub use types::{AgentStatus, ApprovalStatus, StepStatus, ToolRisk};
 
 pub use runtime::{create_run, transition, AgentRunMeta};
+pub use supervisor::{recover_expired_runs, AgentSupervisor};

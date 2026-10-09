@@ -11,9 +11,9 @@
 
 use std::time::Instant;
 
-use rusqlite::{params_from_iter, Connection};
 #[cfg(test)]
 use rusqlite::params;
+use rusqlite::{params_from_iter, Connection};
 use serde::{Deserialize, Serialize};
 
 use super::fusion::VectorCandidate;
@@ -134,7 +134,11 @@ pub fn search(
             similarity,
         });
     }
-    scored.sort_by(|a, b| b.similarity.partial_cmp(&a.similarity).unwrap_or(std::cmp::Ordering::Equal));
+    scored.sort_by(|a, b| {
+        b.similarity
+            .partial_cmp(&a.similarity)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
     scored.truncate(candidate_k);
 
     Ok(VectorRetrieval {

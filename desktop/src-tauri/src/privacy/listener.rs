@@ -80,16 +80,22 @@ pub fn decide(
     };
     let outcome = match_request(&compiled, &meta);
     if !outcome.matched {
-        PRIVACY_EVENTS_TOTAL.total_allowed.fetch_add(1, Ordering::Relaxed);
+        PRIVACY_EVENTS_TOTAL
+            .total_allowed
+            .fetch_add(1, Ordering::Relaxed);
         return DecideOutcome::PassThrough;
     }
     match outcome.action {
         Some(super::types::RuleAction::Block) => {
-            PRIVACY_EVENTS_TOTAL.total_blocked.fetch_add(1, Ordering::Relaxed);
+            PRIVACY_EVENTS_TOTAL
+                .total_blocked
+                .fetch_add(1, Ordering::Relaxed);
             DecideOutcome::Blocked
         }
         Some(super::types::RuleAction::Allow) => {
-            PRIVACY_EVENTS_TOTAL.total_allowed.fetch_add(1, Ordering::Relaxed);
+            PRIVACY_EVENTS_TOTAL
+                .total_allowed
+                .fetch_add(1, Ordering::Relaxed);
             DecideOutcome::Allowed
         }
         _ => DecideOutcome::PassThrough,

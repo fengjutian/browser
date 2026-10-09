@@ -43,7 +43,10 @@ pub struct EmbeddingResponse {
 
 /// Read the embedding-model row for a provider. Returns `None` if the
 /// provider doesn't exist or has no embedding_model configured.
-pub fn read_provider_row(database: &Connection, provider_id: &str) -> Result<Option<EmbeddingRequest>, String> {
+pub fn read_provider_row(
+    database: &Connection,
+    provider_id: &str,
+) -> Result<Option<EmbeddingRequest>, String> {
     let row = database
         .query_row(
             "SELECT provider_type, base_url, embedding_model, timeout_seconds FROM ai_providers WHERE id=?1",
@@ -170,12 +173,13 @@ pub async fn embed_with_provider(
             .ok_or_else(|| ProviderError::InvalidResponse("missing data array".into()))?;
         let mut out = Vec::with_capacity(arr.len());
         for (idx, item) in arr.iter().enumerate() {
-            let vec: Vec<f32> = serde_json::from_value(
-                item.get("embedding")
-                    .cloned()
-                    .ok_or_else(|| ProviderError::InvalidResponse(format!("missing embedding[{idx}]")))?,
-            )
-            .map_err(|e| ProviderError::InvalidResponse(format!("embedding[{idx}] parse: {e}")))?;
+            let vec: Vec<f32> =
+                serde_json::from_value(item.get("embedding").cloned().ok_or_else(|| {
+                    ProviderError::InvalidResponse(format!("missing embedding[{idx}]"))
+                })?)
+                .map_err(|e| {
+                    ProviderError::InvalidResponse(format!("embedding[{idx}] parse: {e}"))
+                })?;
             out.push(vec);
         }
         out
@@ -220,20 +224,38 @@ pub async fn embed_with_provider(
 }
 
 /// Look up the provider row and call [`embed_with_provider`] in one step.
+/// Read the provider config (sync) and return a ready-to-use
+/// `EmbeddingRequest`. Errors are surfaced as `ProviderError::Http` so
+/// callers can use a single error type.
+pub fn read_embedding_request(
+    database: &Connection,
+    provider_id: &str,
+) -> Result<EmbeddingRequest, ProviderError> {
+    read_provider_row(database, provider_id)
+        .map_err(ProviderError::Http)?
+        .ok_or_else(|| {
+            ProviderError::InvalidResponse(format!(
+                "provider {provider_id} not found or no embedding model configured"
+            ))
+        })
+}
+
+/// Async entry point used by callers that already loaded the
+/// [`EmbeddingRequest`]. Use [`embed_for_provider`] for the
+/// read-and-embed one-step API.
+pub async fn embed_with_request(req: EmbeddingRequest) -> Result<EmbeddingResponse, ProviderError> {
+    embed_with_provider(req).await
+}
+
+/// Convenience: look up the provider row and call [`embed_with_provider`].
+/// Synchronously reads the row, then runs the embed; the database borrow
+/// is dropped before any `.await` so the future is `Send`.
 pub async fn embed_for_provider(
     database: &Connection,
     provider_id: &str,
     inputs: Vec<String>,
 ) -> Result<EmbeddingResponse, ProviderError> {
-    let mut req = match read_provider_row(database, provider_id) {
-        Ok(Some(value)) => value,
-        Ok(None) => {
-            return Err(ProviderError::InvalidResponse(format!(
-                "provider {provider_id} not found or no embedding model configured"
-            )));
-        }
-        Err(error) => return Err(ProviderError::Http(error)),
-    };
+    let mut req = read_embedding_request(database, provider_id)?;
     req.inputs = inputs;
     embed_with_provider(req).await
 }

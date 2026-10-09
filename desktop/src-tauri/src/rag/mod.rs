@@ -20,7 +20,5 @@ pub mod vector;
 pub mod vector_index;
 
 pub use chunker::{plan_chunks, Chunk, ChunkPlan, CHUNKER_VERSION};
-pub use indexer::{JobRow, IndexOutcome};
-pub use types::{
-    RagChunk, RagCitation, RagQuery, RetrievalHit, RetrievalMode, RetrievalScore,
-};
+pub use indexer::{IndexOutcome, JobRow};
+pub use types::{RagChunk, RagCitation, RagQuery, RetrievalHit, RetrievalMode, RetrievalScore};

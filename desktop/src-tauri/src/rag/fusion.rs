@@ -90,7 +90,10 @@ pub fn reciprocal_rank_fusion(
 /// Cap a single document's contribution to the candidate pool. Spec A6: "同一
 /// 文档默认最多进入 3 个 chunks，避免单篇垄断上下文". `per_doc_cap = 0` disables
 /// the cap (useful for eval / debugging).
-pub fn cap_per_document(candidates: Vec<FusedCandidate>, per_doc_cap: usize) -> Vec<FusedCandidate> {
+pub fn cap_per_document(
+    candidates: Vec<FusedCandidate>,
+    per_doc_cap: usize,
+) -> Vec<FusedCandidate> {
     if per_doc_cap == 0 {
         return candidates;
     }
