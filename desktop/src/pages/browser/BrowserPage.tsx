@@ -1628,7 +1628,7 @@ export function BrowserPage({ visible = true, onSearchKnowledge }: { visible?: b
           return {
             key: tab.id,
             label: <Dropdown menu={{ items: tabMenu(tab, index) }} trigger={['contextMenu']} onOpenChange={open => changeToolbarOverlay('tab-menu', open)}>
-              <Tooltip title={tab.url || (tab.private ? '新私密窗口' : '新标签页')} mouseEnterDelay={0.6}>
+              <Tooltip title={tab.title || tab.url || (tab.private ? '新私密窗口' : '新标签页')} mouseEnterDelay={0.6}>
               <span
                 draggable
                 onAuxClick={event => { if (event.button === 1 && !tab.pinned) closeTab(tab.id) }}
